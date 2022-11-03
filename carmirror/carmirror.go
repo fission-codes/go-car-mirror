@@ -1,154 +1,154 @@
 package carmirror
 
-import (
-	// "github.com/fission-codes/go-car-mirror/bloom"
-	gocid "github.com/ipfs/go-cid"
-)
+// import (
+// 	// "github.com/fission-codes/go-car-mirror/bloom"
+// 	gocid "github.com/ipfs/go-cid"
+// )
 
-// --- Interface implementations ---
+// // --- Interface implementations ---
 
-// BlockId
-var _ BlockId = (*gocid.Cid)(nil)
+// // BlockId
+// var _ BlockId = (*gocid.Cid)(nil)
 
-// Block
-type IpldBlock struct {
-	id       gocid.Cid
-	rawBytes []byte
-	children []gocid.Cid
-}
-
-func NewIpldBlock(id gocid.Cid, rawBytes []byte, children []gocid.Cid) *IpldBlock {
-	return &IpldBlock{
-		id:       id,
-		rawBytes: rawBytes,
-		children: children,
-	}
-}
-
-func (b *IpldBlock) Id() gocid.Cid {
-	return b.id
-}
-
-func (b *IpldBlock) RawBytes() []byte {
-	return b.rawBytes
-}
-
-func (b *IpldBlock) Children() []gocid.Cid {
-	return b.children
-}
-
-var _ Block[gocid.Cid] = (*IpldBlock)(nil)
-
-// // BlockStore
-// type MemoryIpldBlockStore struct {
-// 	// Mapping from Cid string to IpldBlock
-// 	blocks map[string]*Block
+// // Block
+// type IpldBlock struct {
+// 	id       gocid.Cid
+// 	rawBytes []byte
+// 	children []gocid.Cid
 // }
 
-// func NewMemoryIpldBlockStore() *MemoryIpldBlockStore {
-// 	return &MemoryIpldBlockStore{
-// 		blocks: make(map[string]*Block),
+// func NewIpldBlock(id gocid.Cid, rawBytes []byte, children []gocid.Cid) *IpldBlock {
+// 	return &IpldBlock{
+// 		id:       id,
+// 		rawBytes: rawBytes,
+// 		children: children,
 // 	}
 // }
 
-// func (bs *MemoryIpldBlockStore) Get(cid BlockId) Block {
-// 	return *bs.blocks[cid.String()]
+// func (b *IpldBlock) Id() gocid.Cid {
+// 	return b.id
 // }
 
-// func (bs *MemoryIpldBlockStore) Has(cid BlockId) bool {
-// 	_, ok := bs.blocks[cid.String()]
-// 	return ok
+// func (b *IpldBlock) RawBytes() []byte {
+// 	return b.rawBytes
 // }
 
-// func (bs *MemoryIpldBlockStore) Put(block Block) {
-// 	cid := block.Id().String()
-// 	bs.blocks[cid] = &block
+// func (b *IpldBlock) Children() []gocid.Cid {
+// 	return b.children
 // }
 
-// var _ BlockStore = (*MemoryIpldBlockStore)(nil)
+// var _ Block[gocid.Cid] = (*IpldBlock)(nil)
 
-// // MutablePointerResolver
+// // // BlockStore
+// // type MemoryIpldBlockStore struct {
+// // 	// Mapping from Cid string to IpldBlock
+// // 	blocks map[string]*Block
+// // }
 
-// // type IpfsMutablePointerResolver struct { ... }
-// // func (mpr *...) Resolve(ptr string) (id BlockId, err error) {}
+// // func NewMemoryIpldBlockStore() *MemoryIpldBlockStore {
+// // 	return &MemoryIpldBlockStore{
+// // 		blocks: make(map[string]*Block),
+// // 	}
+// // }
 
-// // var _ MutablePointerResolver = (...)(nil)
+// // func (bs *MemoryIpldBlockStore) Get(cid BlockId) Block {
+// // 	return *bs.blocks[cid.String()]
+// // }
 
-// // Filter
+// // func (bs *MemoryIpldBlockStore) Has(cid BlockId) bool {
+// // 	_, ok := bs.blocks[cid.String()]
+// // 	return ok
+// // }
 
-// type BloomFilter struct {
-// 	filter *bloom.Filter
-// }
+// // func (bs *MemoryIpldBlockStore) Put(block Block) {
+// // 	cid := block.Id().String()
+// // 	bs.blocks[cid] = &block
+// // }
 
-// // TODO: Add New* methods to mirror those in bloom.Filter
+// // var _ BlockStore = (*MemoryIpldBlockStore)(nil)
 
-// func (f *BloomFilter) Add(id BlockId) {
-// 	f.filter.Add(id.Bytes())
-// }
+// // // MutablePointerResolver
 
-// func (f *BloomFilter) Has(id BlockId) bool {
-// 	return f.filter.Test(id.Bytes())
-// }
+// // // type IpfsMutablePointerResolver struct { ... }
+// // // func (mpr *...) Resolve(ptr string) (id BlockId, err error) {}
 
-// func (f *BloomFilter) Merge(other BlockIdFilter) BloomFilter {
-// 	// TODO: Merge bloom filters together
-// 	return *f
-// }
+// // // var _ MutablePointerResolver = (...)(nil)
 
-// var _ BlockIdFilter = (*BloomFilter)(nil)
+// // // Filter
 
-// // BlockSender
+// // type BloomFilter struct {
+// // 	filter *bloom.Filter
+// // }
 
-// // BlockReceiver
+// // // TODO: Add New* methods to mirror those in bloom.Filter
 
-// // StatusAccumulator
+// // func (f *BloomFilter) Add(id BlockId) {
+// // 	f.filter.Add(id.Bytes())
+// // }
 
-// // StatusSender
+// // func (f *BloomFilter) Has(id BlockId) bool {
+// // 	return f.filter.Test(id.Bytes())
+// // }
 
-// // StatusReceiver
+// // func (f *BloomFilter) Merge(other BlockIdFilter) BloomFilter {
+// // 	// TODO: Merge bloom filters together
+// // 	return *f
+// // }
 
-// // Orchestrator
+// // var _ BlockIdFilter = (*BloomFilter)(nil)
 
-// // --- Structs and their methods not left up to implementors ---
+// // // BlockSender
 
-// // SenderSession
+// // // BlockReceiver
 
-// type SenderSession struct {
-// 	blockSender  BlockSender
-// 	orchestrator Orchestrator
-// 	filter       BlockIdFilter
-// 	sentCids     []BlockId // change to cid set if we don't need order
-// 	// is peer needed?  Or is this global, with peerId as a key for sentCids, like spec says
-// }
+// // // StatusAccumulator
 
-// func (ss *SenderSession) SendBlock(BlockId)                                {}
-// func (ss *SenderSession) HandleStatus(have *BlockIdFilter, wanted BlockId) {}
-// func (ss *SenderSession) Flush()                                           {}
+// // // StatusSender
 
-// // ReceiverSession
+// // // StatusReceiver
 
-// type ReceiverSession struct {
-// 	statusAccumulator StatusAccumulator
-// 	statusSender      StatusSender
-// 	orchestrator      Orchestrator
-// }
+// // // Orchestrator
 
-// func (rs *ReceiverSession) HandleBlock(Block)        {}
-// func (rs *ReceiverSession) AccumulateStatus(BlockId) {}
-// func (rs *ReceiverSession) Flush()                   {}
+// // // --- Structs and their methods not left up to implementors ---
 
-// // SimpleStatusAccumulator
+// // // SenderSession
 
-// // --- Round based implementations ---
+// // type SenderSession struct {
+// // 	blockSender  BlockSender
+// // 	orchestrator Orchestrator
+// // 	filter       BlockIdFilter
+// // 	sentCids     []BlockId // change to cid set if we don't need order
+// // 	// is peer needed?  Or is this global, with peerId as a key for sentCids, like spec says
+// // }
 
-// // ListSender
+// // func (ss *SenderSession) SendBlock(BlockId)                                {}
+// // func (ss *SenderSession) HandleStatus(have *BlockIdFilter, wanted BlockId) {}
+// // func (ss *SenderSession) Flush()                                           {}
 
-// // ListReceiver
+// // // ReceiverSession
 
-// // BatchSendOrchestrator
+// // type ReceiverSession struct {
+// // 	statusAccumulator StatusAccumulator
+// // 	statusSender      StatusSender
+// // 	orchestrator      Orchestrator
+// // }
 
-// // BatchBlockSender
+// // func (rs *ReceiverSession) HandleBlock(Block)        {}
+// // func (rs *ReceiverSession) AccumulateStatus(BlockId) {}
+// // func (rs *ReceiverSession) Flush()                   {}
 
-// // BatchReceiveOrchestrator
+// // // SimpleStatusAccumulator
 
-// // BatchBlockReceiver
+// // // --- Round based implementations ---
+
+// // // ListSender
+
+// // // ListReceiver
+
+// // // BatchSendOrchestrator
+
+// // // BatchBlockSender
+
+// // // BatchReceiveOrchestrator
+
+// // // BatchBlockReceiver
