@@ -5,14 +5,23 @@ import (
 	"github.com/fission-codes/go-car-mirror/iterator"
 )
 
+// This was needed in part to deal with lack of ability to implement comparable in Go 1.18.
+type BlockIdHashMap[I BlockId, IT iterator.Iterator[I]] interface {
+	Put(I) error
+	Has(I) (bool, error)
+	Keys() (IT, error)
+}
+
 // BlockId represents a unique identifier for a Block.
 // This interface only represents the identifier, not the Block.
 type BlockId interface {
-	comparable
+	// TODO: Can't implement comparable.  See https://github.com/golang/go/issues/56548#issuecomment-1304359937.
+	// comparable
+
 	// TODO: What is needed to ensure BlockId can be used as keys?
 
 	// String returns the BlockId as a string.
-	// This is useful when the BlockId must be represented as a string (e.g. when used as a key in a map).
+	// Currently this is what we use for hash map keys.
 	String() string
 }
 
@@ -23,7 +32,6 @@ type Block[I BlockId] interface {
 	// Id returns the BlockId for the Block.
 	Id() I
 
-	// TODO: iterator over I
 	// Links returns a list of `BlockId`s linked to from the Block.
 	Links() iterator.Iterator[I]
 }
@@ -85,6 +93,8 @@ type BlockSender[I BlockId, B Block[I]] interface {
 
 // BlockReceiver is responsible for receiving blocks.
 type BlockReceiver[I BlockId, B Block[I]] interface {
+	Flushable
+
 	// Receive is called on receipt of a new block.
 	Receive(B) error
 }
@@ -107,8 +117,8 @@ type StatusReceiver[F BlockIdFilter[I], I BlockId] interface {
 type StatusAccumulator[F BlockIdFilter[I], I BlockId, S StatusSender[F, I]] interface {
 	Have(I) error
 	Want(I) error
-	Receive(I) error
 	Send(S) error
+	Receive(I) error
 }
 
 // Orchestrator is responsible for managing the flow of blocks and/or status.
@@ -160,7 +170,7 @@ func (rs *ReceiverSession[ST, A, S, O, I, B, F]) AccumulateStatus(id I) error {
 	for {
 		link, err := links.Next()
 
-		if err == iterator.Done {
+		if err == iterator.ErrDone {
 			break
 		}
 
@@ -168,7 +178,7 @@ func (rs *ReceiverSession[ST, A, S, O, I, B, F]) AccumulateStatus(id I) error {
 			return err
 		}
 
-		if err := rs.AccumulateStatus(link); err != nil {
+		if err := rs.AccumulateStatus(*link); err != nil {
 			return err
 		}
 	}
@@ -210,7 +220,7 @@ func (rs *ReceiverSession[ST, A, S, O, I, B, F]) Receive(block B) error {
 	for {
 		link, err := links.Next()
 
-		if err == iterator.Done {
+		if err == iterator.ErrDone {
 			break
 		}
 
@@ -218,7 +228,7 @@ func (rs *ReceiverSession[ST, A, S, O, I, B, F]) Receive(block B) error {
 			return err
 		}
 
-		if err := rs.AccumulateStatus(link); err != nil {
+		if err := rs.AccumulateStatus(*link); err != nil {
 			return err
 		}
 	}
@@ -234,15 +244,17 @@ type SenderSession[
 	S BlockSender[I, B],
 	O Orchestrator,
 	K comparable,
+	IT iterator.Iterator[I],
+	H BlockIdHashMap[I, IT],
 ] struct {
 	store        ST
 	blockSender  S
 	orchestrator O
 	filter       F
-	sent         map[I]bool
+	sent         H
 }
 
-func (ss *SenderSession[I, B, ST, F, S, O, K]) Send(id I) error {
+func (ss *SenderSession[I, B, ST, F, S, O, K, IT, H]) Send(id I) error {
 	if err := ss.orchestrator.BeginSend(); err != nil {
 		return err
 	}
@@ -253,15 +265,18 @@ func (ss *SenderSession[I, B, ST, F, S, O, K]) Send(id I) error {
 		return err
 	}
 	if !filterHasId {
-		ss.sent[id] = true
+		if err := ss.sent.Put(id); err != nil {
+			return err
+		}
 
 		block, err := ss.store.Get(id)
 		if err != nil && err == errors.BlockNotFound {
 			return err
 		}
 
-		// We have the block
 		if err == nil {
+			// We have the block
+
 			if err := ss.blockSender.Send(block); err != nil {
 				return err
 			}
@@ -270,7 +285,7 @@ func (ss *SenderSession[I, B, ST, F, S, O, K]) Send(id I) error {
 			for {
 				link, err := links.Next()
 
-				if err == iterator.Done {
+				if err == iterator.ErrDone {
 					break
 				}
 
@@ -278,12 +293,12 @@ func (ss *SenderSession[I, B, ST, F, S, O, K]) Send(id I) error {
 					return err
 				}
 
-				filterHasId, err := ss.filter.Has(link)
+				filterHasId, err := ss.filter.Has(*link)
 				if err != nil {
 					return err
 				}
 				if !filterHasId {
-					if err := ss.Send(link); err != nil {
+					if err := ss.Send(*link); err != nil {
 						return err
 					}
 				}
@@ -294,7 +309,7 @@ func (ss *SenderSession[I, B, ST, F, S, O, K]) Send(id I) error {
 	return nil
 }
 
-func (ss *SenderSession[I, B, ST, F, S, O, K]) Flush() error {
+func (ss *SenderSession[I, B, ST, F, S, O, K, IT, H]) Flush() error {
 	if err := ss.orchestrator.BeginFlush(); err != nil {
 		return err
 	}
@@ -307,7 +322,7 @@ func (ss *SenderSession[I, B, ST, F, S, O, K]) Flush() error {
 	return nil
 }
 
-func (ss *SenderSession[I, B, ST, F, S, O, K]) Receive(have F, want []I) error {
+func (ss *SenderSession[I, B, ST, F, S, O, K, IT, H]) Receive(have F, want []I) error {
 	if err := ss.orchestrator.BeginReceive(); err != nil {
 		return err
 	}
