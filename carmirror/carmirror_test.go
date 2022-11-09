@@ -20,99 +20,111 @@ func TestBlock(t *testing.T) {
 // --- Interface implementations ---
 
 // BlockId
-var _ BlockId = (*gocid.Cid)(nil)
-
-// Iterator
-var _ iterator.Iterator[gocid.Cid] = (*iterator.SliceIterator[gocid.Cid])(nil)
-
-// BlockIdHashMap
-type MockHashMap[I BlockId, IT iterator.Iterator[I]] struct {
-	internalMap map[string]I
+type MockBlockId struct {
+	id gocid.Cid
 }
 
-func NewMockHashMap[I BlockId, IT iterator.Iterator[I]]() *MockHashMap[I, IT] {
-	return &MockHashMap[I, IT]{
-		internalMap: make(map[string]I),
+func NewMockBlockId(id gocid.Cid) *MockBlockId {
+	return &MockBlockId{id: id}
+}
+
+func (mid MockBlockId) String() string {
+	return mid.id.String()
+}
+
+var _ BlockId = (*MockBlockId)(nil)
+
+// Iterator
+type MockBlockIdIterator = iterator.SliceIterator[MockBlockId]
+type MockBlockIterator = iterator.SliceIterator[*MockBlock]
+
+var _ iterator.Iterator[MockBlockId] = (*MockBlockIdIterator)(nil)
+
+// BlockIdHashMap
+type MockHashMap struct {
+	internalMap map[string]MockBlockId
+}
+
+func NewMockHashMap() *MockHashMap {
+	return &MockHashMap{
+		internalMap: make(map[string]MockBlockId),
 	}
 }
 
-func (m *MockHashMap[I, IT]) Put(id I) error {
+func (m *MockHashMap) Put(id MockBlockId) error {
 	m.internalMap[id.String()] = id
 	return nil
 }
 
-func (m *MockHashMap[I, IT]) Has(id I) (bool, error) {
+func (m *MockHashMap) Has(id MockBlockId) (bool, error) {
 	_, ok := m.internalMap[id.String()]
 
 	return ok, nil
 }
 
-func (m *MockHashMap[I, IT]) Keys() (iterator.SliceIterator[I], error) {
-	values := make([]I, len(m.internalMap))
+func (m *MockHashMap) Keys() (*MockBlockIdIterator, error) {
+	values := make([]MockBlockId, len(m.internalMap))
 	for _, v := range m.internalMap {
 		values = append(values, v)
 	}
 	return iterator.NewSliceIterator(values), nil
 }
 
-var _ BlockIdHashMap[gocid.Cid, iterator.SliceIterator[gocid.Cid]] = (*MockHashMap[gocid.Cid, iterator.Iterator[gocid.Cid]])(nil)
+var _ BlockIdHashMap[MockBlockId, iterator.SliceIterator[MockBlockId]] = (*MockHashMap)(nil)
 
 // Block
-type IpldBlock[I gocid.Cid] struct {
-	id       I
-	rawBytes []byte
-	links    []I
+type MockBlock struct {
+	id    MockBlockId
+	links []MockBlockId
 }
 
-func NewIpldBlock[I gocid.Cid](id I, rawBytes []byte, links []I) *IpldBlock[I] {
-	return &IpldBlock[I]{
-		id:       id,
-		rawBytes: rawBytes,
-		links:    links,
+func NewMockBlock(id MockBlockId, links []MockBlockId) *MockBlock {
+	return &MockBlock{
+		id:    id,
+		links: links,
 	}
 }
 
-func (b *IpldBlock[I]) Id() I {
+func (b *MockBlock) Id() MockBlockId {
 	return b.id
 }
 
-func (b *IpldBlock[I]) RawBytes() []byte {
-	return b.rawBytes
+func (b *MockBlock) Links() MockBlockIdIterator {
+	return *iterator.NewSliceIterator(b.links)
 }
 
-func (b *IpldBlock[I]) Links() iterator.Iterator[I] {
-	return iterator.NewSliceIterator(b.links)
+var _ Block[MockBlockId, iterator.SliceIterator[MockBlockId]] = (*MockBlock)(nil)
+
+// BlockStore
+type MockStore struct {
+	// Mapping from Cid string to MockBlock
+	blocks map[string]*MockBlock
 }
 
-var _ Block[gocid.Cid] = (*IpldBlock[gocid.Cid])(nil)
+func NewMemoryMockBlockStore() *MockStore {
+	return &MockStore{
+		blocks: make(map[string]*MockBlock),
+	}
+}
 
-// // // BlockStore
-// // type MemoryIpldBlockStore struct {
-// // 	// Mapping from Cid string to IpldBlock
-// // 	blocks map[string]*Block
-// // }
+func (bs *MockStore) Get(id MockBlockId) (*MockBlock, error) {
+	return bs.blocks[id.String()], nil
+}
 
-// // func NewMemoryIpldBlockStore() *MemoryIpldBlockStore {
-// // 	return &MemoryIpldBlockStore{
-// // 		blocks: make(map[string]*Block),
-// // 	}
-// // }
+func (bs *MockStore) Has(id MockBlockId) (bool, error) {
+	_, ok := bs.blocks[id.String()]
+	return ok, nil
+}
 
-// // func (bs *MemoryIpldBlockStore) Get(cid BlockId) Block {
-// // 	return *bs.blocks[cid.String()]
-// // }
+func (bs *MockStore) Put(block *MockBlock) error {
+	cid := block.Id()
+	cidStr := cid.String()
+	bs.blocks[cidStr] = block
 
-// // func (bs *MemoryIpldBlockStore) Has(cid BlockId) bool {
-// // 	_, ok := bs.blocks[cid.String()]
-// // 	return ok
-// // }
+	return nil
+}
 
-// // func (bs *MemoryIpldBlockStore) Put(block Block) {
-// // 	cid := block.Id().String()
-// // 	bs.blocks[cid] = &block
-// // }
-
-// // var _ BlockStore = (*MemoryIpldBlockStore)(nil)
+var _ BlockStore[MockBlockId, MockBlockIdIterator, MockBlockIterator, *MockBlock] = (*MockStore)(nil)
 
 // // // MutablePointerResolver
 

@@ -13,8 +13,8 @@ type SliceIterator[T any] struct {
 	idx   int
 }
 
-func NewSliceIterator[T any](items []T) SliceIterator[T] {
-	return SliceIterator[T]{
+func NewSliceIterator[T any](items []T) *SliceIterator[T] {
+	return &SliceIterator[T]{
 		items: items,
 		idx:   0,
 	}

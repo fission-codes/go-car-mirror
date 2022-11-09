@@ -5,13 +5,6 @@ import (
 	"github.com/fission-codes/go-car-mirror/iterator"
 )
 
-// This was needed in part to deal with lack of ability to implement comparable in Go 1.18.
-type BlockIdHashMap[I BlockId, IT iterator.Iterator[I]] interface {
-	Put(I) error
-	Has(I) (bool, error)
-	Keys() (IT, error)
-}
-
 // BlockId represents a unique identifier for a Block.
 // This interface only represents the identifier, not the Block.
 type BlockId interface {
@@ -26,18 +19,25 @@ type BlockId interface {
 }
 
 // Block is an immutable data block referenced by a unique ID.
-type Block[I BlockId] interface {
+type Block[I BlockId, IT iterator.Iterator[I]] interface {
 	// TODO: Should I add an iterator type here?
 
 	// Id returns the BlockId for the Block.
 	Id() I
 
 	// Links returns a list of `BlockId`s linked to from the Block.
-	Links() iterator.Iterator[I]
+	Links() IT
+}
+
+// This was needed in part to deal with lack of ability to implement comparable in Go 1.18.
+type BlockIdHashMap[I BlockId, IT iterator.Iterator[I]] interface {
+	Put(I) error
+	Has(I) (bool, error)
+	Keys() (*IT, error)
 }
 
 // ReadableBlockStore represents read operations for a store of blocks.
-type ReadableBlockStore[I BlockId, B Block[I]] interface {
+type ReadableBlockStore[I BlockId, ITI iterator.Iterator[I], ITB iterator.Iterator[B], B Block[I, ITI]] interface {
 	// Get gets the block from the blockstore with the given ID.
 	Get(I) (B, error)
 
@@ -45,21 +45,21 @@ type ReadableBlockStore[I BlockId, B Block[I]] interface {
 	Has(I) (bool, error)
 
 	// All returns a lazy iterator over all block IDs in the blockstore.
-	All() iterator.Iterator[B]
+	// All() ITB
 
 	// TODO: Need a channel version?
 	// AllKeysChan() (<-chan I, error)
 }
 
-type BlockStore[I BlockId, B Block[I]] interface {
-	ReadableBlockStore[I, B]
+type BlockStore[I BlockId, ITI iterator.Iterator[I], ITB iterator.Iterator[B], B Block[I, ITI]] interface {
+	ReadableBlockStore[I, ITI, ITB, B]
 
 	// Put puts a given block to the blockstore.
 	Put(B) error
 
 	// PutMany puts a slice of blocks at the same time using batching
 	// capabilitie of the underlying blockstore if possible.
-	PutMany([]B, error)
+	// PutMany([]B, error)
 }
 
 type MutablePointerResolver[I BlockId] interface {
@@ -85,14 +85,14 @@ type Flushable interface {
 
 // BlockSender is responsible for sending blocks - immediately and asynchronously, or via a buffer.
 // The details are up to the implementor.
-type BlockSender[I BlockId, B Block[I]] interface {
+type BlockSender[I BlockId, ITI iterator.Iterator[I], B Block[I, ITI]] interface {
 	Flushable
 
 	Send(B) error
 }
 
 // BlockReceiver is responsible for receiving blocks.
-type BlockReceiver[I BlockId, B Block[I]] interface {
+type BlockReceiver[I BlockId, ITI iterator.Iterator[I], B Block[I, ITI]] interface {
 	Flushable
 
 	// Receive is called on receipt of a new block.
@@ -132,12 +132,14 @@ type Orchestrator interface {
 }
 
 type ReceiverSession[
-	ST BlockStore[I, B],
+	ST BlockStore[I, ITI, ITB, B],
 	A StatusAccumulator[F, I, S],
 	S StatusSender[F, I],
 	O Orchestrator,
 	I BlockId,
-	B Block[I],
+	B Block[I, ITI],
+	ITI iterator.Iterator[I],
+	ITB iterator.Iterator[B],
 	F BlockIdFilter[I],
 ] struct {
 	accumulator  A
@@ -146,7 +148,7 @@ type ReceiverSession[
 	store        ST
 }
 
-func (rs *ReceiverSession[ST, A, S, O, I, B, F]) AccumulateStatus(id I) error {
+func (rs *ReceiverSession[ST, A, S, O, I, B, ITI, ITB, F]) AccumulateStatus(id I) error {
 	if err := rs.orchestrator.BeginSend(); err != nil {
 		return err
 	}
@@ -186,7 +188,7 @@ func (rs *ReceiverSession[ST, A, S, O, I, B, F]) AccumulateStatus(id I) error {
 	return nil
 }
 
-func (rs *ReceiverSession[ST, A, S, O, I, B, F]) Flush() error {
+func (rs *ReceiverSession[ST, A, S, O, I, B, ITI, ITB, F]) Flush() error {
 	if err := rs.orchestrator.BeginFlush(); err != nil {
 		return err
 	}
@@ -202,7 +204,7 @@ func (rs *ReceiverSession[ST, A, S, O, I, B, F]) Flush() error {
 	return nil
 }
 
-func (rs *ReceiverSession[ST, A, S, O, I, B, F]) Receive(block B) error {
+func (rs *ReceiverSession[ST, A, S, O, I, B, ITI, ITB, F]) Receive(block B) error {
 	if err := rs.orchestrator.BeginReceive(); err != nil {
 		return err
 	}
@@ -238,14 +240,15 @@ func (rs *ReceiverSession[ST, A, S, O, I, B, F]) Receive(block B) error {
 
 type SenderSession[
 	I BlockId,
-	B Block[I],
-	ST BlockStore[I, B],
+	B Block[I, ITI],
+	ST BlockStore[I, ITI, ITB, B],
 	F BlockIdFilter[I],
-	S BlockSender[I, B],
+	S BlockSender[I, ITI, B],
 	O Orchestrator,
 	K comparable,
-	IT iterator.Iterator[I],
-	H BlockIdHashMap[I, IT],
+	ITI iterator.Iterator[I],
+	ITB iterator.Iterator[B],
+	H BlockIdHashMap[I, ITI],
 ] struct {
 	store        ST
 	blockSender  S
@@ -254,7 +257,7 @@ type SenderSession[
 	sent         H
 }
 
-func (ss *SenderSession[I, B, ST, F, S, O, K, IT, H]) Send(id I) error {
+func (ss *SenderSession[I, B, ST, F, S, O, K, ITI, ITB, H]) Send(id I) error {
 	if err := ss.orchestrator.BeginSend(); err != nil {
 		return err
 	}
@@ -309,7 +312,7 @@ func (ss *SenderSession[I, B, ST, F, S, O, K, IT, H]) Send(id I) error {
 	return nil
 }
 
-func (ss *SenderSession[I, B, ST, F, S, O, K, IT, H]) Flush() error {
+func (ss *SenderSession[I, B, ST, F, S, O, K, ITI, ITB, H]) Flush() error {
 	if err := ss.orchestrator.BeginFlush(); err != nil {
 		return err
 	}
@@ -322,7 +325,7 @@ func (ss *SenderSession[I, B, ST, F, S, O, K, IT, H]) Flush() error {
 	return nil
 }
 
-func (ss *SenderSession[I, B, ST, F, S, O, K, IT, H]) Receive(have F, want []I) error {
+func (ss *SenderSession[I, B, ST, F, S, O, K, ITI, ITB, H]) Receive(have F, want []I) error {
 	if err := ss.orchestrator.BeginReceive(); err != nil {
 		return err
 	}
