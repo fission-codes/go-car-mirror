@@ -11,7 +11,8 @@ type BlockId interface {
 	// TODO: Can't implement comparable.  See https://github.com/golang/go/issues/56548#issuecomment-1304359937.
 	// comparable
 
-	// TODO: What is needed to ensure BlockId can be used as keys?
+	// TODO: What is needed to ensure BlockId can be used as keys or added to a Filter?  Currently just using String.
+	Bytes() []byte
 
 	// String returns the BlockId as a string.
 	// Currently this is what we use for hash map keys.
@@ -25,13 +26,13 @@ type Block[I BlockId, IT iterator.Iterator[I]] interface {
 	// Id returns the BlockId for the Block.
 	Id() I
 
-	// Links returns a list of `BlockId`s linked to from the Block.
-	Links() IT
+	// Children returns a list of `BlockId`s linked to from the Block.
+	Children() IT
 }
 
 // This was needed in part to deal with lack of ability to implement comparable in Go 1.18.
 type BlockIdHashMap[I BlockId, IT iterator.Iterator[I]] interface {
-	Put(I) error
+	Add(I) error
 	Has(I) (bool, error)
 	Keys() (*IT, error)
 }
@@ -54,8 +55,8 @@ type ReadableBlockStore[I BlockId, ITI iterator.Iterator[I], ITB iterator.Iterat
 type BlockStore[I BlockId, ITI iterator.Iterator[I], ITB iterator.Iterator[B], B Block[I, ITI]] interface {
 	ReadableBlockStore[I, ITI, ITB, B]
 
-	// Put puts a given block to the blockstore.
-	Put(B) error
+	// Add puts a given block to the blockstore.
+	Add(B) error
 
 	// PutMany puts a slice of blocks at the same time using batching
 	// capabilitie of the underlying blockstore if possible.
@@ -76,7 +77,7 @@ type BlockIdFilter[I BlockId] interface {
 	Has(id I) (bool, error)
 
 	// Merge merges two Filters together.
-	Merge(other BlockIdFilter[I]) (BlockIdFilter[I], error)
+	Merge(other BlockIdFilter[I]) error
 }
 
 type Flushable interface {
@@ -103,13 +104,11 @@ type BlockReceiver[I BlockId, ITI iterator.Iterator[I], B Block[I, ITI]] interfa
 // The key intuition of CAR Mirror is that status can be sent efficiently using a lossy filter.
 // The StatusSender will therefore usually batch reported information and send it in bulk to the ReceiverSession.
 type StatusSender[F BlockIdFilter[I], I BlockId] interface {
-	// TODO: iterator over I
 	Send(have F, want []I) error
 }
 
 // StatusReceiver is responsible for receiving a status.
 type StatusReceiver[F BlockIdFilter[I], I BlockId] interface {
-	// TODO: iterator over I
 	Receive(have F, want []I) error
 }
 
@@ -168,7 +167,7 @@ func (rs *ReceiverSession[ST, A, S, O, I, B, ITI, ITB, F]) AccumulateStatus(id I
 		return err
 	}
 
-	links := block.Links()
+	links := block.Children()
 	for {
 		link, err := links.Next()
 
@@ -210,7 +209,7 @@ func (rs *ReceiverSession[ST, A, S, O, I, B, ITI, ITB, F]) Receive(block B) erro
 	}
 	defer rs.orchestrator.EndReceive()
 
-	if err := rs.store.Put(block); err != nil {
+	if err := rs.store.Add(block); err != nil {
 		return err
 	}
 
@@ -218,7 +217,7 @@ func (rs *ReceiverSession[ST, A, S, O, I, B, ITI, ITB, F]) Receive(block B) erro
 		return err
 	}
 
-	links := block.Links()
+	links := block.Children()
 	for {
 		link, err := links.Next()
 
@@ -268,7 +267,7 @@ func (ss *SenderSession[I, B, ST, F, S, O, K, ITI, ITB, H]) Send(id I) error {
 		return err
 	}
 	if !filterHasId {
-		if err := ss.sent.Put(id); err != nil {
+		if err := ss.sent.Add(id); err != nil {
 			return err
 		}
 
@@ -284,7 +283,7 @@ func (ss *SenderSession[I, B, ST, F, S, O, K, ITI, ITB, H]) Send(id I) error {
 				return err
 			}
 
-			links := block.Links()
+			links := block.Children()
 			for {
 				link, err := links.Next()
 
