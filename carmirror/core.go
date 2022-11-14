@@ -46,7 +46,7 @@ type ReadableBlockStore[I BlockId, ITI iterator.Iterator[I], ITB iterator.Iterat
 	Has(I) (bool, error)
 
 	// All returns a lazy iterator over all block IDs in the blockstore.
-	// All() ITB
+	All() ITB
 
 	// TODO: Need a channel version?
 	// AllKeysChan() (<-chan I, error)

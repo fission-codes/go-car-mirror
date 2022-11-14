@@ -120,6 +120,14 @@ func (bs *MockStore) Has(id MockBlockId) (bool, error) {
 	return ok, nil
 }
 
+func (bs *MockStore) All() iterator.SliceIterator[*MockBlock] {
+	values := make([]*MockBlock, len(bs.blocks))
+	for _, v := range bs.blocks {
+		values = append(values, v)
+	}
+	return *iterator.NewSliceIterator(values)
+}
+
 func (bs *MockStore) Add(block *MockBlock) error {
 	cid := block.Id()
 	cidStr := cid.String()
