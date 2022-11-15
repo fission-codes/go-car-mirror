@@ -1,171 +1,131 @@
 package carmirror
 
-import (
-	"testing"
+// import (
+// 	"encoding/hex"
+// 	"testing"
 
-	"github.com/fission-codes/go-bloom"
-	"github.com/fission-codes/go-car-mirror/iterator"
-	gocid "github.com/ipfs/go-cid"
-)
+// 	"math/rand"
 
-func TestBlock(t *testing.T) {
-	// gen := blocksutil.NewBlockGenerator()
-	// b := gen.Next()
-	// cid := b.Cid()
-	// var _
+// 	"github.com/fission-codes/go-bloom"
+// 	"github.com/fission-codes/go-car-mirror/iterator"
+// )
 
-	// assert.Assert(t, !bs.Has(ib2.Cid()))
-}
+// func TestBlock(t *testing.T) {
+// 	cid := RandCid()
+// 	if cid != "" {
+// 		t.Errorf("cid = %v", cid)
+// 	}
+// }
 
-// --- Interface implementations ---
+// func RandCid() string {
+// 	cid := make([]byte, 32)
+// 	rand.Read(cid)
+// 	return hex.EncodeToString(cid)
+// }
 
-// BlockId
-type MockBlockId struct {
-	id gocid.Cid
-}
+// // --- Interface implementations ---
 
-func NewMockBlockId(id gocid.Cid) *MockBlockId {
-	return &MockBlockId{id: id}
-}
+// // BlockId
+// type MockBlockId [32]byte
 
-func (mid MockBlockId) Bytes() []byte {
-	return mid.id.Bytes()
-}
+// // No way to type assert comparable?
+// // var _ BlockId = (*MockBlockId)(nil)
 
-func (mid MockBlockId) String() string {
-	return mid.id.String()
-}
+// // Iterator
+// type MockBlockIdIterator = iterator.SliceIterator[MockBlockId]
+// type MockBlockIterator = iterator.SliceIterator[*MockBlock]
 
-var _ BlockId = (*MockBlockId)(nil)
+// var _ iterator.Iterator[MockBlockId] = (*MockBlockIdIterator)(nil)
 
-// Iterator
-type MockBlockIdIterator = iterator.SliceIterator[MockBlockId]
-type MockBlockIterator = iterator.SliceIterator[*MockBlock]
+// // Block
+// type MockBlock struct {
+// 	id    MockBlockId
+// 	links []MockBlockId
+// }
 
-var _ iterator.Iterator[MockBlockId] = (*MockBlockIdIterator)(nil)
+// func NewMockBlock(id MockBlockId, links []MockBlockId) *MockBlock {
+// 	return &MockBlock{
+// 		id:    id,
+// 		links: links,
+// 	}
+// }
 
-// BlockIdHashMap
-type MockHashMap struct {
-	internalMap map[string]MockBlockId
-}
+// func (b *MockBlock) Id() MockBlockId {
+// 	return b.id
+// }
 
-func NewMockHashMap() *MockHashMap {
-	return &MockHashMap{
-		internalMap: make(map[string]MockBlockId),
-	}
-}
+// func (b *MockBlock) Children() MockBlockIdIterator {
+// 	return *iterator.NewSliceIterator(b.links)
+// }
 
-func (m *MockHashMap) Add(id MockBlockId) error {
-	m.internalMap[id.String()] = id
-	return nil
-}
+// var _ Block[MockBlockId, iterator.SliceIterator[MockBlockId]] = (*MockBlock)(nil)
 
-func (m *MockHashMap) Has(id MockBlockId) (bool, error) {
-	_, ok := m.internalMap[id.String()]
+// // BlockStore
+// type MockStore struct {
+// 	// Mapping from Cid string to MockBlock
+// 	blocks map[MockBlockId]*MockBlock
+// }
 
-	return ok, nil
-}
+// func NewMockBlockStore() *MockStore {
+// 	return &MockStore{
+// 		blocks: make(map[MockBlockId]*MockBlock),
+// 	}
+// }
 
-func (m *MockHashMap) Keys() (*MockBlockIdIterator, error) {
-	values := make([]MockBlockId, len(m.internalMap))
-	for _, v := range m.internalMap {
-		values = append(values, v)
-	}
-	return iterator.NewSliceIterator(values), nil
-}
+// func (bs *MockStore) Get(id MockBlockId) (*MockBlock, error) {
+// 	return bs.blocks[id], nil
+// }
 
-var _ BlockIdHashMap[MockBlockId, iterator.SliceIterator[MockBlockId]] = (*MockHashMap)(nil)
+// func (bs *MockStore) Has(id MockBlockId) (bool, error) {
+// 	_, ok := bs.blocks[id]
+// 	return ok, nil
+// }
 
-// Block
-type MockBlock struct {
-	id    MockBlockId
-	links []MockBlockId
-}
+// func (bs *MockStore) All() iterator.SliceIterator[*MockBlock] {
+// 	values := make([]*MockBlock, len(bs.blocks))
+// 	for _, v := range bs.blocks {
+// 		values = append(values, v)
+// 	}
+// 	return *iterator.NewSliceIterator(values)
+// }
 
-func NewMockBlock(id MockBlockId, links []MockBlockId) *MockBlock {
-	return &MockBlock{
-		id:    id,
-		links: links,
-	}
-}
+// func (bs *MockStore) Add(block *MockBlock) error {
+// 	cid := block.Id()
+// 	bs.blocks[cid] = block
 
-func (b *MockBlock) Id() MockBlockId {
-	return b.id
-}
+// 	return nil
+// }
 
-func (b *MockBlock) Children() MockBlockIdIterator {
-	return *iterator.NewSliceIterator(b.links)
-}
+// var _ BlockStore[MockBlockId, MockBlockIdIterator, *MockBlock] = (*MockStore)(nil)
 
-var _ Block[MockBlockId, iterator.SliceIterator[MockBlockId]] = (*MockBlock)(nil)
+// // MutablePointerResolver
 
-// BlockStore
-type MockStore struct {
-	// Mapping from Cid string to MockBlock
-	blocks map[string]*MockBlock
-}
+// // type IpfsMutablePointerResolver struct { ... }
+// // func (mpr *...) Resolve(ptr string) (id BlockId, err error) {}
 
-func NewMockBlockStore() *MockStore {
-	return &MockStore{
-		blocks: make(map[string]*MockBlock),
-	}
-}
+// // var _ MutablePointerResolver = (...)(nil)
 
-func (bs *MockStore) Get(id MockBlockId) (*MockBlock, error) {
-	return bs.blocks[id.String()], nil
-}
+// // Filter
 
-func (bs *MockStore) Has(id MockBlockId) (bool, error) {
-	_, ok := bs.blocks[id.String()]
-	return ok, nil
-}
+// type BloomFilter[I []byte] struct {
+// 	filter *bloom.Filter
+// }
 
-func (bs *MockStore) All() iterator.SliceIterator[*MockBlock] {
-	values := make([]*MockBlock, len(bs.blocks))
-	for _, v := range bs.blocks {
-		values = append(values, v)
-	}
-	return *iterator.NewSliceIterator(values)
-}
+// // TODO: Add New* methods to mirror those in bloom.Filter
 
-func (bs *MockStore) Add(block *MockBlock) error {
-	cid := block.Id()
-	cidStr := cid.String()
-	bs.blocks[cidStr] = block
+// func (f *BloomFilter[I]) Add(id []byte) error {
+// 	f.filter.Add(id)
 
-	return nil
-}
+// 	return nil
+// }
 
-var _ BlockStore[MockBlockId, MockBlockIdIterator, MockBlockIterator, *MockBlock] = (*MockStore)(nil)
+// func (f *BloomFilter[I]) Has(id []byte) (bool, error) {
+// 	return f.filter.Test(id), nil
+// }
 
-// MutablePointerResolver
+// func (f *BloomFilter[I]) Merge(other Filter[I]) error {
+// 	// TODO: Merge bloom filters together
+// 	return nil
+// }
 
-// type IpfsMutablePointerResolver struct { ... }
-// func (mpr *...) Resolve(ptr string) (id BlockId, err error) {}
-
-// var _ MutablePointerResolver = (...)(nil)
-
-// Filter
-
-type BloomFilter[I BlockId] struct {
-	filter *bloom.Filter
-}
-
-// TODO: Add New* methods to mirror those in bloom.Filter
-
-func (f *BloomFilter[I]) Add(id I) error {
-	f.filter.Add(id.Bytes())
-
-	return nil
-}
-
-func (f *BloomFilter[I]) Has(id I) (bool, error) {
-	return f.filter.Test(id.Bytes()), nil
-}
-
-func (f *BloomFilter[I]) Merge(other BlockIdFilter[I]) error {
-	// TODO: Merge bloom filters together
-	return nil
-}
-
-var _ BlockIdFilter[BlockId] = (*BloomFilter[BlockId])(nil)
+// var _ Filter[BlockId] = (*BloomFilter[BlockId])(nil)
