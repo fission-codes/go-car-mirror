@@ -1,6 +1,7 @@
 package carmirror
 
 import (
+	"github.com/fission-codes/go-car-mirror/errors"
 	"github.com/fission-codes/go-car-mirror/iterator"
 )
 
@@ -9,33 +10,33 @@ import (
 type BlockId comparable
 
 // Block is an immutable data block referenced by a unique ID.
-type Block[I BlockId, IT iterator.Iterator[I]] interface {
+type Block[I BlockId] interface {
 	// TODO: Should I add an iterator type here?
 
 	// Id returns the BlockId for the Block.
-	Id() I
+	Id() *I
 
 	// Children returns a list of `BlockId`s linked to from the Block.
-	Children() IT
+	Children() iterator.Iterator[I]
 }
 
 // ReadableBlockStore represents read operations for a store of blocks.
-type ReadableBlockStore[I BlockId, ITI iterator.Iterator[I], B Block[I, ITI]] interface {
+type ReadableBlockStore[I BlockId] interface {
 	// Get gets the block from the blockstore with the given ID.
-	Get(I) (B, error)
+	Get(*I) (Block[I], error)
 
 	// Has returns true if the blockstore has a block with the given ID.
-	Has(I) (bool, error)
+	Has(*I) (bool, error)
 
 	// All returns a channel that will receive all of the block IDs in this store.
 	All() (<-chan I, error)
 }
 
-type BlockStore[I BlockId, ITI iterator.Iterator[I], ITB iterator.Iterator[B], B Block[I, ITI]] interface {
-	ReadableBlockStore[I, ITI, B]
+type BlockStore[I BlockId] interface {
+	ReadableBlockStore[I]
 
 	// Add puts a given block to the blockstore.
-	Add(B) error
+	Add(Block[I]) error
 }
 
 type MutablePointerResolver[I BlockId] interface {
@@ -54,37 +55,37 @@ type Filter[K comparable] interface {
 
 // BlockSender is responsible for sending blocks - immediately and asynchronously, or via a buffer.
 // The details are up to the implementor.
-type BlockSender[I BlockId, ITI iterator.Iterator[I], B Block[I, ITI]] interface {
-	Send(B) error
+type BlockSender[I BlockId] interface {
+	Send(Block[I]) error
 	Flush() error
 	Close() error
 }
 
 // BlockReceiver is responsible for receiving blocks.
-type BlockReceiver[I BlockId, ITI iterator.Iterator[I], B Block[I, ITI]] interface {
+type BlockReceiver[I BlockId] interface {
 	// HandleBlock is called on receipt of a new block.
-	HandleBlock(B) error
+	HandleBlock(Block[I]) error
 }
 
 // StatusSender is responsible for sending status.
 // The key intuition of CAR Mirror is that status can be sent efficiently using a lossy filter.
 // The StatusSender will therefore usually batch reported information and send it in bulk to the ReceiverSession.
-type StatusSender[F Filter[I], I BlockId] interface {
-	Send(have F, want []I) error
+type StatusSender[I BlockId] interface {
+	Send(have Filter[I], want []I) error
 	Close() error
 }
 
 // StatusReceiver is responsible for receiving a status.
-type StatusReceiver[F Filter[I], I BlockId] interface {
-	HandleStatus(have F, want []I) error
+type StatusReceiver[I BlockId] interface {
+	HandleStatus(have Filter[I], want []I) error
 }
 
 // StatusAccumulator is responsible for collecting status.
-type StatusAccumulator[F Filter[I], I BlockId, S StatusSender[F, I]] interface {
-	Have(I) error
-	Want(I) error
-	Send(S) error
-	Receive(I) error
+type StatusAccumulator[I BlockId] interface {
+	Have(*I) error
+	Want(*I) error
+	Send(StatusSender[I]) error
+	Receive(*I) error
 }
 
 type SessionEvent uint16
@@ -102,14 +103,16 @@ const (
 	END_SEND
 	BEGIN_RECEIVE
 	END_RECEIVE
+	BEGIN_CHECK
+	END_CHECK
 )
 
 // Internal state...
 type Flags uint16
 
 // Orchestrator is responsible for managing the flow of blocks and/or status.
-type Orchestrator[E SessionEvent, F Flags] interface {
-	Notify(E) error
+type Orchestrator[F Flags] interface {
+	Notify(SessionEvent) error
 
 	// GetState is used to obtain state to send to a remote session.
 	GetState() (F, error)
@@ -121,76 +124,144 @@ type Orchestrator[E SessionEvent, F Flags] interface {
 }
 
 type SenderConnection[
-	E SessionEvent,
 	F Flags,
-	O Orchestrator[E, F],
 	I BlockId,
-	ITI iterator.Iterator[I],
-	B Block[I, ITI],
 ] interface {
-	GetBlockSender(O) BlockSender[I, ITI, B]
+	GetBlockSender(Orchestrator[F]) BlockSender[I]
 }
 
-// type ReceiverConnection interface{}
+type ReceiverConnection[
+	F Flags,
+	I BlockId,
+] interface {
+	GetStatusSender(Orchestrator[F]) StatusSender[I]
+}
 
-// type ReceiverSession[
-// 	ST BlockStore[I, ITI, ITB, B],
-// 	A StatusAccumulator[F, I, S],
-// 	S StatusSender[F, I],
-// 	O Orchestrator,
-// 	I BlockId,
-// 	B Block[I, ITI],
-// 	ITI iterator.Iterator[I],
-// 	ITB iterator.Iterator[B],
-// 	F Filter[I],
-// ] struct {
-// 	accumulator  A
-// 	status       S
-// 	orchestrator O
-// 	store        ST
-// }
+type ReceiverSession[
+	I BlockId,
+	F Flags,
+] struct {
+	accumulator  StatusAccumulator[I]
+	connection   ReceiverConnection[F, I]
+	orchestrator Orchestrator[F]
+	store        BlockStore[I]
+	pending      chan Block[I]
+	// pending      map[I]bool
+	// pendingMutex sync.RWMutex
+}
 
-// func (rs *ReceiverSession[ST, A, S, O, I, B, ITI, ITB, F]) AccumulateStatus(id I) error {
-// 	if err := rs.orchestrator.BeginSend(); err != nil {
-// 		return err
-// 	}
-// 	defer rs.orchestrator.EndSend()
+func (rs *ReceiverSession[I, F]) AccumulateStatus(id *I) error {
+	// Get block and handle errors
+	block, err := rs.store.Get(id)
+	if err == errors.BlockNotFound {
+		if err := rs.accumulator.Want(id); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
 
-// 	// Get block and handle errors
-// 	block, err := rs.store.Get(id)
-// 	if err == errors.BlockNotFound {
-// 		if err := rs.accumulator.Want(id); err != nil {
-// 			return err
-// 		}
-// 	} else if err != nil {
-// 		return err
-// 	}
+	if err := rs.accumulator.Have(id); err != nil {
+		return err
+	}
 
-// 	if err := rs.accumulator.Have(id); err != nil {
-// 		return err
-// 	}
+	links := block.Children()
+	for {
+		link, err := links.Next()
 
-// 	links := block.Children()
-// 	for {
-// 		link, err := links.Next()
+		if err == iterator.ErrDone {
+			break
+		}
 
-// 		if err == iterator.ErrDone {
-// 			break
-// 		}
+		if err != nil {
+			return err
+		}
 
-// 		if err != nil {
-// 			return err
-// 		}
+		if err := rs.AccumulateStatus(link); err != nil {
+			return err
+		}
+	}
 
-// 		if err := rs.AccumulateStatus(*link); err != nil {
-// 			return err
-// 		}
-// 	}
+	return nil
+}
 
-// 	return nil
-// }
+func (rs *ReceiverSession[I, F]) HandleBlock(block Block[I]) error {
+	rs.orchestrator.Notify(BEGIN_RECEIVE)
+	defer rs.orchestrator.Notify(END_RECEIVE)
 
-// func (rs *ReceiverSession[ST, A, S, O, I, B, ITI, ITB, F]) Flush() error {
+	if err := rs.store.Add(block); err != nil {
+		return err
+	}
+
+	if err := rs.accumulator.Receive(block.Id()); err != nil {
+		return err
+	}
+
+	rs.pending <- block
+	// rs.pendingMutex.Lock()
+	// defer rs.pendingMutex.Unlock()
+	// rs.pending[*block.Id()] = true
+
+	return nil
+}
+
+func (rs *ReceiverSession[I, F]) Run() error {
+	sender := rs.connection.GetStatusSender(rs.orchestrator)
+
+	rs.orchestrator.Notify(BEGIN_SESSION)
+	defer func() {
+		rs.orchestrator.Notify(END_SESSION)
+		sender.Close()
+	}()
+
+	isClosed, err := rs.orchestrator.IsClosed()
+	if err != nil {
+		return err
+	}
+
+	for !isClosed {
+		// TODO: Look into use of defer for this.
+		rs.orchestrator.Notify(BEGIN_CHECK)
+
+		// TODO: Any concerns with hangs here if nothing in pending?  Need goroutines?
+		if len(rs.pending) > 0 {
+			block := <-rs.pending
+
+			links := block.Children()
+			for {
+				link, err := links.Next()
+
+				if err == iterator.ErrDone {
+					break
+				}
+
+				if err != nil {
+					return err
+				}
+
+				if err := rs.AccumulateStatus(link); err != nil {
+					return err
+				}
+			}
+		} else {
+			// If we get here it means we have no more blocks to process. In a batch based process that's
+			// the only time we'd want to send. But for streaming maybe this should be in a separate loop
+			// so it can be triggered by the orchestrator - otherwise we wind up sending a status update every
+			// time the pending list becomes empty.
+
+			rs.orchestrator.Notify(BEGIN_SEND)
+			rs.accumulator.Send(sender)
+			rs.orchestrator.Notify(END_SEND)
+
+		}
+		rs.orchestrator.Notify(END_CHECK)
+	}
+	sender.Close()
+
+	return nil
+}
+
+// func (rs *ReceiverSession[I, F, E]) Flush() error {
 // 	if err := rs.orchestrator.BeginFlush(); err != nil {
 // 		return err
 // 	}
@@ -206,7 +277,7 @@ type SenderConnection[
 // 	return nil
 // }
 
-// func (rs *ReceiverSession[ST, A, S, O, I, B, ITI, ITB, F]) Receive(block B) error {
+// func (rs *ReceiverSession[I, F, E]) Receive(block B) error {
 // 	if err := rs.orchestrator.BeginReceive(); err != nil {
 // 		return err
 // 	}
