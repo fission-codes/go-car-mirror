@@ -18,18 +18,21 @@ func init() {
 func TestAntiEvergreen(t *testing.T) {
 	senderStore := NewMockBlockStore()
 	root := AddRandomTree(*senderStore, 5, 5, 0.0)
-	t.Logf("root = %x", root)
 
 	randomBlock, err := senderStore.RandomBlock()
 	if err != nil {
 		t.Errorf("Failed to get random block from store")
 	}
 
+	if !senderStore.HasAll(root) {
+		t.Errorf("Store should have all blocks")
+	}
+
 	senderStore.Remove(randomBlock.Id())
 
-	// if senderStore.HasAll(&root) {
-	// 	t.Errorf("Store should not have all blocks")
-	// }
+	if senderStore.HasAll(root) {
+		t.Errorf("Store should not have all blocks")
+	}
 }
 
 func RandId() [32]byte {
@@ -58,7 +61,7 @@ func AddRandomTree(store MockStore, maxChildren int, maxDepth int, pCrosslink fl
 			if err != nil {
 				panic(err)
 			}
-			block.AddChild(*existingBlock.Id())
+			block.AddChild(existingBlock.Id())
 		} else {
 			// gen rand num children
 			children := rand.Intn(maxChildren)
@@ -96,12 +99,12 @@ func NewMockBlock(id MockBlockId, links []MockBlockId) *MockBlock {
 	}
 }
 
-func (b *MockBlock) Id() *MockBlockId {
-	return &b.id
+func (b *MockBlock) Id() MockBlockId {
+	return b.id
 }
 
-func (b *MockBlock) Children() iterator.Iterator[MockBlockId] {
-	return *iterator.NewSliceIterator(b.links)
+func (b *MockBlock) Children() []MockBlockId {
+	return b.links
 }
 
 func (b *MockBlock) AddChild(id MockBlockId) error {
@@ -124,46 +127,35 @@ func NewMockBlockStore() *MockStore {
 	}
 }
 
-func (bs *MockStore) Get(id *MockBlockId) (Block[MockBlockId], error) {
-	return bs.blocks[*id], nil
+func (bs *MockStore) Get(id MockBlockId) (Block[MockBlockId], error) {
+	return bs.blocks[id], nil
 }
 
-func (bs *MockStore) Has(id *MockBlockId) (bool, error) {
-	_, ok := bs.blocks[*id]
+func (bs *MockStore) Has(id MockBlockId) (bool, error) {
+	_, ok := bs.blocks[id]
 	return ok, nil
 }
 
-func (bs *MockStore) Remove(id *MockBlockId) {
-	delete(bs.blocks, *id)
+func (bs *MockStore) Remove(id MockBlockId) {
+	delete(bs.blocks, id)
 }
 
-func (bs *MockStore) HasAll(root *MockBlockId) bool {
-	return bs.doHasAll(root) == nil
+func (bs *MockStore) HasAll(root MockBlockId) bool {
+	err := bs.doHasAll(root)
+	return err == nil
 }
 
-func (bs *MockStore) doHasAll(root *MockBlockId) error {
-	if b, ok := bs.blocks[*root]; ok {
-		children := b.Children()
-		for {
-			child, err := children.Next()
-
-			if err == iterator.ErrDone {
-				break
-			}
-
-			if err != nil {
-				return err
-			}
-
+func (bs *MockStore) doHasAll(root MockBlockId) error {
+	if b, ok := bs.blocks[root]; ok {
+		for _, child := range b.Children() {
 			if err := bs.doHasAll(child); err != nil {
 				return err
 			}
 		}
+		return nil
 	} else {
 		return fmt.Errorf("Missing block %x", root)
 	}
-
-	return nil
 }
 
 func (bs *MockStore) All() (<-chan MockBlockId, error) {
@@ -177,7 +169,7 @@ func (bs *MockStore) All() (<-chan MockBlockId, error) {
 
 func (bs *MockStore) Add(block Block[MockBlockId]) error {
 	id := block.Id()
-	bs.blocks[*id] = block
+	bs.blocks[id] = block
 
 	return nil
 }

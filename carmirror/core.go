@@ -2,7 +2,6 @@ package carmirror
 
 import (
 	"github.com/fission-codes/go-car-mirror/errors"
-	"github.com/fission-codes/go-car-mirror/iterator"
 )
 
 // BlockId represents a unique identifier for a Block.
@@ -14,19 +13,19 @@ type Block[I BlockId] interface {
 	// TODO: Should I add an iterator type here?
 
 	// Id returns the BlockId for the Block.
-	Id() *I
+	Id() I
 
 	// Children returns a list of `BlockId`s linked to from the Block.
-	Children() iterator.Iterator[I]
+	Children() []I
 }
 
 // ReadableBlockStore represents read operations for a store of blocks.
 type ReadableBlockStore[I BlockId] interface {
 	// Get gets the block from the blockstore with the given ID.
-	Get(*I) (Block[I], error)
+	Get(I) (Block[I], error)
 
 	// Has returns true if the blockstore has a block with the given ID.
-	Has(*I) (bool, error)
+	Has(I) (bool, error)
 
 	// All returns a channel that will receive all of the block IDs in this store.
 	All() (<-chan I, error)
@@ -82,10 +81,10 @@ type StatusReceiver[I BlockId] interface {
 
 // StatusAccumulator is responsible for collecting status.
 type StatusAccumulator[I BlockId] interface {
-	Have(*I) error
-	Want(*I) error
+	Have(I) error
+	Want(I) error
 	Send(StatusSender[I]) error
-	Receive(*I) error
+	Receive(I) error
 }
 
 type SessionEvent uint16
@@ -150,7 +149,7 @@ type ReceiverSession[
 	// pendingMutex sync.RWMutex
 }
 
-func (rs *ReceiverSession[I, F]) AccumulateStatus(id *I) error {
+func (rs *ReceiverSession[I, F]) AccumulateStatus(id I) error {
 	// Get block and handle errors
 	block, err := rs.store.Get(id)
 	if err == errors.BlockNotFound {
@@ -165,19 +164,8 @@ func (rs *ReceiverSession[I, F]) AccumulateStatus(id *I) error {
 		return err
 	}
 
-	children := block.Children()
-	for {
-		link, err := children.Next()
-
-		if err == iterator.ErrDone {
-			break
-		}
-
-		if err != nil {
-			return err
-		}
-
-		if err := rs.AccumulateStatus(link); err != nil {
+	for _, child := range block.Children() {
+		if err := rs.AccumulateStatus(child); err != nil {
 			return err
 		}
 	}
@@ -227,19 +215,8 @@ func (rs *ReceiverSession[I, F]) Run() error {
 		if len(rs.pending) > 0 {
 			block := <-rs.pending
 
-			children := block.Children()
-			for {
-				link, err := children.Next()
-
-				if err == iterator.ErrDone {
-					break
-				}
-
-				if err != nil {
-					return err
-				}
-
-				if err := rs.AccumulateStatus(link); err != nil {
+			for _, child := range block.Children() {
+				if err := rs.AccumulateStatus(child); err != nil {
 					return err
 				}
 			}
