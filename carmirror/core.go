@@ -165,9 +165,9 @@ func (rs *ReceiverSession[I, F]) AccumulateStatus(id *I) error {
 		return err
 	}
 
-	links := block.Children()
+	children := block.Children()
 	for {
-		link, err := links.Next()
+		link, err := children.Next()
 
 		if err == iterator.ErrDone {
 			break
@@ -227,9 +227,9 @@ func (rs *ReceiverSession[I, F]) Run() error {
 		if len(rs.pending) > 0 {
 			block := <-rs.pending
 
-			links := block.Children()
+			children := block.Children()
 			for {
-				link, err := links.Next()
+				link, err := children.Next()
 
 				if err == iterator.ErrDone {
 					break
@@ -291,9 +291,9 @@ func (rs *ReceiverSession[I, F]) Run() error {
 // 		return err
 // 	}
 
-// 	links := block.Children()
+// 	children := block.Children()
 // 	for {
-// 		link, err := links.Next()
+// 		link, err := children.Next()
 
 // 		if err == iterator.ErrDone {
 // 			break
@@ -356,9 +356,9 @@ func (rs *ReceiverSession[I, F]) Run() error {
 // 				return err
 // 			}
 
-// 			links := block.Children()
+// 			children := block.Children()
 // 			for {
-// 				link, err := links.Next()
+// 				link, err := children.Next()
 
 // 				if err == iterator.ErrDone {
 // 					break

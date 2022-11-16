@@ -23,7 +23,7 @@ func NewSliceIterator[T any](items []T) *SliceIterator[T] {
 func (i SliceIterator[T]) Next() (*T, error) {
 	if i.idx < len(i.items) {
 		i.idx += 1
-		return &i.items[i.idx], nil
+		return &i.items[i.idx-1], nil
 	} else {
 		return nil, ErrDone
 	}

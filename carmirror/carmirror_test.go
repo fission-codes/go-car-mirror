@@ -1,8 +1,9 @@
 package carmirror
 
 import (
-	"encoding/hex"
+	"fmt"
 	"testing"
+	"time"
 
 	"math/rand"
 
@@ -10,17 +11,68 @@ import (
 	"github.com/fission-codes/go-car-mirror/iterator"
 )
 
-func TestBlock(t *testing.T) {
-	cid := RandCid()
-	if cid == "" {
-		t.Errorf("cid = %v", cid)
-	}
+func init() {
+	rand.Seed(time.Now().UnixNano())
 }
 
-func RandCid() string {
-	cid := make([]byte, 32)
-	rand.Read(cid)
-	return hex.EncodeToString(cid)
+func TestAntiEvergreen(t *testing.T) {
+	senderStore := NewMockBlockStore()
+	root := AddRandomTree(*senderStore, 5, 5, 0.0)
+	t.Logf("root = %x", root)
+
+	randomBlock, err := senderStore.RandomBlock()
+	if err != nil {
+		t.Errorf("Failed to get random block from store")
+	}
+
+	senderStore.Remove(randomBlock.Id())
+
+	// if senderStore.HasAll(&root) {
+	// 	t.Errorf("Store should not have all blocks")
+	// }
+}
+
+func RandId() [32]byte {
+	// id := make([]byte, 32)
+	var id [32]byte
+	rand.Read(id[:])
+	return id
+}
+
+func RandMockBlock() MockBlock {
+	id := RandId()
+	return *NewMockBlock(id, []MockBlockId{})
+}
+
+func RandBool(p float64) bool {
+	return rand.Float64() < p
+}
+
+func AddRandomTree(store MockStore, maxChildren int, maxDepth int, pCrosslink float64) MockBlockId {
+	id := RandId()
+	block := NewMockBlock(id, []MockBlockId{})
+
+	if maxDepth > 0 {
+		if RandBool(pCrosslink) {
+			existingBlock, err := store.RandomBlock()
+			if err != nil {
+				panic(err)
+			}
+			block.AddChild(*existingBlock.Id())
+		} else {
+			// gen rand num children
+			children := rand.Intn(maxChildren)
+			for child := 0; child < children; child++ {
+				childMinDepth := maxDepth / 2
+				childMaxDepth := rand.Intn(maxDepth-childMinDepth) + childMinDepth
+				block.AddChild(AddRandomTree(store, maxChildren, childMaxDepth, pCrosslink))
+			}
+		}
+	}
+
+	store.Add(block)
+
+	return id
 }
 
 // BlockId
@@ -52,6 +104,12 @@ func (b *MockBlock) Children() iterator.Iterator[MockBlockId] {
 	return *iterator.NewSliceIterator(b.links)
 }
 
+func (b *MockBlock) AddChild(id MockBlockId) error {
+	b.links = append(b.links, id)
+
+	return nil
+}
+
 var _ Block[MockBlockId] = (*MockBlock)(nil)
 
 // BlockStore
@@ -75,6 +133,39 @@ func (bs *MockStore) Has(id *MockBlockId) (bool, error) {
 	return ok, nil
 }
 
+func (bs *MockStore) Remove(id *MockBlockId) {
+	delete(bs.blocks, *id)
+}
+
+func (bs *MockStore) HasAll(root *MockBlockId) bool {
+	return bs.doHasAll(root) == nil
+}
+
+func (bs *MockStore) doHasAll(root *MockBlockId) error {
+	if b, ok := bs.blocks[*root]; ok {
+		children := b.Children()
+		for {
+			child, err := children.Next()
+
+			if err == iterator.ErrDone {
+				break
+			}
+
+			if err != nil {
+				return err
+			}
+
+			if err := bs.doHasAll(child); err != nil {
+				return err
+			}
+		}
+	} else {
+		return fmt.Errorf("Missing block %x", root)
+	}
+
+	return nil
+}
+
 func (bs *MockStore) All() (<-chan MockBlockId, error) {
 	// values := make([]*Block[MockBlockId], len(bs.blocks))
 	values := make(chan MockBlockId)
@@ -85,10 +176,26 @@ func (bs *MockStore) All() (<-chan MockBlockId, error) {
 }
 
 func (bs *MockStore) Add(block Block[MockBlockId]) error {
-	bid := block.Id()
-	bs.blocks[*bid] = block
+	id := block.Id()
+	bs.blocks[*id] = block
 
 	return nil
+}
+
+func (bs *MockStore) RandomBlock() (Block[MockBlockId], error) {
+	if len(bs.blocks) == 0 {
+		return nil, fmt.Errorf("No blocks in store")
+	}
+
+	i := rand.Intn(len(bs.blocks))
+	for _, v := range bs.blocks {
+		if i == 0 {
+			return v, nil
+		}
+		i--
+	}
+
+	return nil, fmt.Errorf("This should never happen")
 }
 
 var _ BlockStore[MockBlockId] = (*MockStore)(nil)
