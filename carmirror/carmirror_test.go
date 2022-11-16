@@ -141,8 +141,19 @@ func (bs *MockStore) Remove(id MockBlockId) {
 }
 
 func (bs *MockStore) HasAll(root MockBlockId) bool {
-	err := bs.doHasAll(root)
-	return err == nil
+	var hasAllInternal = func(root MockBlockId) error {
+		if b, ok := bs.blocks[root]; ok {
+			for _, child := range b.Children() {
+				if err := bs.doHasAll(child); err != nil {
+					return err
+				}
+			}
+			return nil
+		} else {
+			return fmt.Errorf("Missing block %x", root)
+		}
+	}
+	return hasAllInternal(root) == nil
 }
 
 func (bs *MockStore) doHasAll(root MockBlockId) error {
