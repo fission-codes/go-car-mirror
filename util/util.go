@@ -1,7 +1,9 @@
 package util
 
 import (
+	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"golang.org/x/exp/constraints"
 )
@@ -19,25 +21,30 @@ func NextPowerOfTwo(i uint64) uint64 {
 }
 
 type SharedFlagSet[F constraints.Unsigned] struct {
-	flags   F
+	flags   atomic.Value
 	condvar *sync.Cond
 }
 
 func NewSharedFlagSet[F constraints.Unsigned](init F) *SharedFlagSet[F] {
 	res := new(SharedFlagSet[F])
-	res.flags = init
+	res.flags.Store(init)
 	res.condvar = sync.NewCond(new(sync.Mutex))
 	return res
 }
 
+func (fs *SharedFlagSet[F]) GetAll() F {
+	return fs.flags.Load().(F)
+}
+
 func (fs *SharedFlagSet[F]) Update(unset F, set F) {
 	fs.condvar.L.Lock()
-	fs.flags = fs.flags&unset | set
+	fs.flags.Store(fs.flags.Load().(F)&^unset | set)
 	fs.condvar.L.Unlock()
 	fs.condvar.Broadcast()
 }
 
 func (fs *SharedFlagSet[F]) Set(flags F) {
+	fmt.Printf("Setting %b\n", flags)
 	fs.Update(0, flags)
 }
 
@@ -46,30 +53,38 @@ func (fs *SharedFlagSet[F]) Unset(flags F) {
 }
 
 func (fs *SharedFlagSet[F]) Wait(status F) {
+	fmt.Printf("Wait for %b\n", status)
 	fs.condvar.L.Lock()
-	for fs.flags&status != status {
+	fmt.Printf("got lock\n")
+	for fs.flags.Load().(F)&status != status {
+		fmt.Printf("Got %b\n", fs.flags.Load())
 		fs.condvar.Wait()
+		fmt.Printf("Now Got %b\n", fs.flags.Load())
 	}
+	fmt.Printf("unlock\n")
 	fs.condvar.L.Unlock()
 }
 
-func (fs *SharedFlagSet[F]) WaitUpdate(mask F, current F) F {
+func (fs *SharedFlagSet[F]) WaitAny(mask F, current F) F {
 	fs.condvar.L.Lock()
 	defer fs.condvar.L.Unlock()
-	for fs.flags&mask == current {
+	for fs.flags.Load().(F)&mask == current {
 		fs.condvar.Wait()
 	}
-	return fs.flags
+	return fs.flags.Load().(F)
+}
+
+func (fs *SharedFlagSet[F]) WaitExact(mask F, current F) F {
+	fs.condvar.L.Lock()
+	defer fs.condvar.L.Unlock()
+	for fs.flags.Load().(F)&mask != current {
+		fs.condvar.Wait()
+	}
+	return fs.flags.Load().(F)
 }
 
 func (fs *SharedFlagSet[F]) Contains(flags F) bool {
 	fs.condvar.L.Lock()
 	defer fs.condvar.L.Unlock()
-	return fs.flags&flags == flags
-}
-
-func (fs *SharedFlagSet[F]) GetAll() F {
-	fs.condvar.L.Lock()
-	defer fs.condvar.L.Unlock()
-	return fs.flags
+	return fs.flags.Load().(F)&flags == flags
 }
