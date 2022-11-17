@@ -1,7 +1,6 @@
 package util
 
 import (
-	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -44,7 +43,6 @@ func (fs *SharedFlagSet[F]) Update(unset F, set F) {
 }
 
 func (fs *SharedFlagSet[F]) Set(flags F) {
-	fmt.Printf("Setting %b\n", flags)
 	fs.Update(0, flags)
 }
 
@@ -53,15 +51,10 @@ func (fs *SharedFlagSet[F]) Unset(flags F) {
 }
 
 func (fs *SharedFlagSet[F]) Wait(status F) {
-	fmt.Printf("Wait for %b\n", status)
 	fs.condvar.L.Lock()
-	fmt.Printf("got lock\n")
 	for fs.flags.Load().(F)&status != status {
-		fmt.Printf("Got %b\n", fs.flags.Load())
 		fs.condvar.Wait()
-		fmt.Printf("Now Got %b\n", fs.flags.Load())
 	}
-	fmt.Printf("unlock\n")
 	fs.condvar.L.Unlock()
 }
 
