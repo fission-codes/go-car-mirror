@@ -1,8 +1,20 @@
 package carmirror
 
 import (
+	"sync"
+
 	"github.com/fission-codes/go-car-mirror/errors"
+	"go.uber.org/zap"
+	"golang.org/x/exp/constraints"
 )
+
+var log *zap.SugaredLogger
+
+func init() {
+	logger, _ := zap.NewProduction()
+	defer logger.Sync() // flushes buffer, if any
+	log = logger.Sugar()
+}
 
 // BlockId represents a unique identifier for a Block.
 // This interface only represents the identifier, not the Block.
@@ -107,7 +119,7 @@ const (
 )
 
 // Internal state...
-type Flags uint16
+type Flags constraints.Unsigned
 
 // Orchestrator is responsible for managing the flow of blocks and/or status.
 type Orchestrator[F Flags] interface {
@@ -173,24 +185,19 @@ func (rs *ReceiverSession[I, F]) AccumulateStatus(id I) error {
 	return nil
 }
 
-func (rs *ReceiverSession[I, F]) HandleBlock(block Block[I]) error {
+func (rs *ReceiverSession[I, F]) HandleBlock(block Block[I]) {
 	rs.orchestrator.Notify(BEGIN_RECEIVE)
 	defer rs.orchestrator.Notify(END_RECEIVE)
 
 	if err := rs.store.Add(block); err != nil {
-		return err
+		log.Debugf("Failed to add block to store. err = %v", err)
 	}
 
 	if err := rs.accumulator.Receive(block.Id()); err != nil {
-		return err
+		log.Debugf("Failed to receive block. err = %v", err)
 	}
 
 	rs.pending <- block
-	// rs.pendingMutex.Lock()
-	// defer rs.pendingMutex.Unlock()
-	// rs.pending[*block.Id()] = true
-
-	return nil
 }
 
 func (rs *ReceiverSession[I, F]) Run() error {
@@ -238,153 +245,115 @@ func (rs *ReceiverSession[I, F]) Run() error {
 	return nil
 }
 
-// func (rs *ReceiverSession[I, F, E]) Flush() error {
-// 	if err := rs.orchestrator.BeginFlush(); err != nil {
-// 		return err
-// 	}
+func (ss *ReceiverSession[I, F]) HandleState(state F) error {
+	return ss.orchestrator.ReceiveState(state)
+}
 
-// 	if err := rs.accumulator.Send(rs.status); err != nil {
-// 		return err
-// 	}
+type SenderSession[
+	I BlockId,
+	F Flags,
+] struct {
+	store        BlockStore[I]
+	connection   SenderConnection[F, I]
+	orchestrator Orchestrator[F]
+	filter       Filter[I]
+	sent         sync.Map
+	pending      chan I
+}
 
-// 	if err := rs.orchestrator.EndFlush(); err != nil {
-// 		return err
-// 	}
+func (ss *SenderSession[I, F]) Run() error {
+	sender := ss.connection.GetBlockSender(ss.orchestrator)
+	if err := ss.orchestrator.Notify(BEGIN_SESSION); err != nil {
+		return err
+	}
 
-// 	return nil
-// }
+	for {
+		isClosed, err := ss.orchestrator.IsClosed()
+		if err != nil {
+			return err
+		}
+		if isClosed {
+			break
+		}
 
-// func (rs *ReceiverSession[I, F, E]) Receive(block B) error {
-// 	if err := rs.orchestrator.BeginReceive(); err != nil {
-// 		return err
-// 	}
-// 	defer rs.orchestrator.EndReceive()
+		if err := ss.orchestrator.Notify(BEGIN_SEND); err != nil {
+			return err
+		}
 
-// 	if err := rs.store.Add(block); err != nil {
-// 		return err
-// 	}
+		id := <-ss.pending
 
-// 	if err := rs.accumulator.Receive(block.Id()); err != nil {
-// 		return err
-// 	}
+		if _, ok := ss.sent.Load(id); !ok {
+			ss.sent.Store(id, true)
 
-// 	children := block.Children()
-// 	for {
-// 		link, err := children.Next()
+			block, err := ss.store.Get(id)
+			if err != nil {
+				if err != errors.BlockNotFound {
+					return err
+				}
+			} else {
+				if err := sender.Send(block); err != nil {
+					return err
+				}
+				for _, child := range block.Children() {
+					if ss.filter.DoesNotContain(child) {
+						ss.pending <- child
+					}
+				}
+			}
+		} else {
+			if err := ss.orchestrator.Notify(BEGIN_DRAINING); err != nil {
+				return err
+			}
+			if err := sender.Flush(); err != nil {
+				return err
+			}
+			ss.orchestrator.Notify(END_DRAINING)
+		}
+		ss.orchestrator.Notify(END_SEND)
+	}
+	ss.orchestrator.Notify(END_SESSION)
+	if err := sender.Close(); err != nil {
+		return err
+	}
+	return nil
+}
 
-// 		if err == iterator.ErrDone {
-// 			break
-// 		}
+func (ss *SenderSession[I, F]) HandleStatus(have Filter[I], want []I) error {
+	if err := ss.orchestrator.Notify(BEGIN_RECEIVE); err != nil {
+		return err
+	}
+	defer ss.orchestrator.Notify(END_RECEIVE)
 
-// 		if err != nil {
-// 			return err
-// 		}
+	filter, err := ss.filter.Merge(have)
+	if err != nil {
+		return err
+	}
+	ss.filter = filter
 
-// 		if err := rs.AccumulateStatus(*link); err != nil {
-// 			return err
-// 		}
-// 	}
+	for _, id := range want {
+		ss.pending <- id
+	}
 
-// 	return nil
-// }
+	return nil
+}
 
-// type SenderSession[
-// 	I BlockId,
-// 	B Block[I, ITI],
-// 	ST BlockStore[I, ITI, ITB, B],
-// 	F Filter[I],
-// 	S BlockSender[I, ITI, B],
-// 	O Orchestrator,
-// 	K comparable,
-// 	ITI iterator.Iterator[I],
-// 	ITB iterator.Iterator[B],
-// ] struct {
-// 	store        ST
-// 	blockSender  S
-// 	orchestrator O
-// 	filter       F
-// 	sent         H
-// }
+func (ss *SenderSession[I, F]) Close() error {
+	if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
+		return err
+	}
+	defer ss.orchestrator.Notify(END_CLOSE)
 
-// func (ss *SenderSession[I, B, ST, F, S, O, K, ITI, ITB, H]) Send(id I) error {
-// 	if err := ss.orchestrator.BeginSend(); err != nil {
-// 		return err
-// 	}
-// 	defer ss.orchestrator.EndSend()
+	// TODO: Clear the bloom filter
 
-// 	filterHasId, err := ss.filter.Has(id)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	if !filterHasId {
-// 		if err := ss.sent.Add(id); err != nil {
-// 			return err
-// 		}
+	return nil
+}
 
-// 		block, err := ss.store.Get(id)
-// 		if err != nil && err == errors.BlockNotFound {
-// 			return err
-// 		}
+func (ss *SenderSession[I, F]) Enqueue(id I) error {
+	ss.pending <- id
 
-// 		if err == nil {
-// 			// We have the block
+	return nil
+}
 
-// 			if err := ss.blockSender.Send(block); err != nil {
-// 				return err
-// 			}
-
-// 			children := block.Children()
-// 			for {
-// 				link, err := children.Next()
-
-// 				if err == iterator.ErrDone {
-// 					break
-// 				}
-
-// 				if err != nil {
-// 					return err
-// 				}
-
-// 				filterHasId, err := ss.filter.Has(*link)
-// 				if err != nil {
-// 					return err
-// 				}
-// 				if !filterHasId {
-// 					if err := ss.Send(*link); err != nil {
-// 						return err
-// 					}
-// 				}
-// 			}
-// 		}
-// 	}
-
-// 	return nil
-// }
-
-// func (ss *SenderSession[I, B, ST, F, S, O, K, ITI, ITB, H]) Flush() error {
-// 	if err := ss.orchestrator.BeginFlush(); err != nil {
-// 		return err
-// 	}
-// 	defer ss.orchestrator.EndFlush()
-
-// 	if err := ss.blockSender.Flush(); err != nil {
-// 		return err
-// 	}
-
-// 	return nil
-// }
-
-// func (ss *SenderSession[I, B, ST, F, S, O, K, ITI, ITB, H]) Receive(have F, want []I) error {
-// 	if err := ss.orchestrator.BeginReceive(); err != nil {
-// 		return err
-// 	}
-// 	defer ss.orchestrator.EndReceive()
-
-// 	for _, id := range want {
-// 		if err := ss.Send(id); err != nil {
-// 			return err
-// 		}
-// 	}
-
-// 	return nil
-// }
+func (ss *SenderSession[I, F]) HandleState(state F) error {
+	return ss.orchestrator.ReceiveState(state)
+}

@@ -34,11 +34,11 @@ func TestFlagSetWait(t *testing.T) {
 
 	}()
 
-	flags.Wait(12)
+	flags.Wait(4 | 8)
 	flags.Set(2)
 	flags.WaitExact(8, 0)
 	flags.Set(1)
-	flags.WaitExact(12, 0)
+	flags.WaitExact(4|8, 0)
 
 	if a != 3 {
 		t.Fatalf(`expected 1*2+1 = 3, got %d`, a)
