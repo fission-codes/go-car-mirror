@@ -1,6 +1,7 @@
 package carmirror
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 
@@ -182,4 +183,61 @@ func (io *InstrumentedOrchestrator[F, O]) IsClosed() (bool, error) {
 	result, err := io.orchestrator.IsClosed()
 	LOG.Debugf("InstrumentedOrchestrator", "method", "IsClosed", "result", result, "err", err)
 	return result, err
+}
+
+type InstrumentedBlockStore[I BlockId] struct {
+	store BlockStore[I]
+	stats Stats
+}
+
+func NewInstrumentedBlockStore[I BlockId](store BlockStore[I], stats Stats) *InstrumentedBlockStore[I] {
+	return &InstrumentedBlockStore[I]{
+		store: store,
+		stats: stats,
+	}
+}
+
+func (ibs *InstrumentedBlockStore[I]) Get(id I) (Block[I], error) {
+	LOG.Debugf("InstrumentedBlockStore", "method", "Get", "id", id)
+	result, err := ibs.store.Get(id)
+	if err == nil {
+		ibs.stats.Log("Get.Ok")
+	} else {
+		ibs.stats.Log("Get." + err.Error())
+		LOG.Debugf("InstrumentedBlockStore", "method", "Get", "error", err)
+	}
+	return result, err
+}
+
+func (ibs *InstrumentedBlockStore[I]) Has(id I) (bool, error) {
+	LOG.Debugf("InstrumentedBlockStore", "method", "Has", "id", id)
+	result, err := ibs.store.Has(id)
+	if err == nil {
+		ibs.stats.Log(fmt.Sprintf("Has.%v", result))
+	} else {
+		ibs.stats.Log(fmt.Sprintf("Has.%v", err))
+		LOG.Debugf("InstrumentedBlockStore", "method", "Has", "result", result, "error", err)
+	}
+	return result, err
+}
+
+func (ibs *InstrumentedBlockStore[I]) All() (<-chan I, error) {
+	LOG.Debugf("InstrumentedBlockStore", "method", "All")
+	blocks, err := ibs.store.All()
+	result := make(chan I)
+	if err == nil {
+		ibs.stats.Log(fmt.Sprintf("Has.%v", result))
+		go func(blocks <-chan I) {
+			for block := range blocks {
+				ibs.stats.Log(fmt.Sprintf("All.chan"))
+				result <- block
+			}
+
+		}(blocks)
+	} else {
+		ibs.stats.Log(fmt.Sprintf("All.%v", err))
+		LOG.Debugf("InstrumentedBlockStore", "method", "All", "error", err)
+	}
+	return result, err
+
 }
