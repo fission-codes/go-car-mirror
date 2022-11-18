@@ -61,17 +61,17 @@ type BatchBlockSender[I BlockId, B Block[I]] interface {
 }
 
 // ReceiverSession[I BlockId, F Flags]
-type SimpleBatchBlockReceiver[I BlockId, B Block[I]] struct {
-	session ReceiverSession[I, BatchStatus]
+type SimpleBatchBlockReceiver[I BlockId, B Block[I], F Filter[I, F]] struct {
+	session ReceiverSession[I, BatchStatus, F]
 }
 
-func NewSimpleBatchBlockReceiver[I BlockId, B Block[I]](rs ReceiverSession[I, BatchStatus]) *SimpleBatchBlockReceiver[I, B] {
-	return &SimpleBatchBlockReceiver[I, B]{
+func NewSimpleBatchBlockReceiver[I BlockId, B Block[I], F Filter[I, F]](rs ReceiverSession[I, BatchStatus, F]) *SimpleBatchBlockReceiver[I, B, F] {
+	return &SimpleBatchBlockReceiver[I, B, F]{
 		session: rs,
 	}
 }
 
-func (sbbr *SimpleBatchBlockReceiver[I, B]) HandleList(flags BatchStatus, list []B) error {
+func (sbbr *SimpleBatchBlockReceiver[I, B, F]) HandleList(flags BatchStatus, list []B) error {
 	var wg sync.WaitGroup
 
 	for _, block := range list {

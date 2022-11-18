@@ -117,7 +117,6 @@ var _ Block[MockBlockId] = (*MockBlock)(nil)
 
 // BlockStore
 type MockStore struct {
-	// Mapping from Cid string to MockBlock
 	blocks map[MockBlockId]Block[MockBlockId]
 }
 
@@ -217,6 +216,13 @@ type BloomFilter[I MockBlockId] struct {
 }
 
 // TODO: Add New* methods to mirror those in bloom.Filter
+func NewBloomFilter[I MockBlockId](bitCount uint64, hashCount uint64) *BloomFilter[I] {
+	filter, _ := bloom.NewFilter(bitCount, hashCount)
+
+	return &BloomFilter[I]{
+		filter: filter,
+	}
+}
 
 func (f *BloomFilter[I]) Add(id MockBlockId) error {
 	f.filter.Add(id[:])
@@ -228,9 +234,11 @@ func (f *BloomFilter[I]) DoesNotContain(id MockBlockId) bool {
 	return !f.filter.Test(id[:])
 }
 
-func (f *BloomFilter[I]) Merge(other Filter[I]) (Filter[MockBlockId], error) {
-	// TODO: Merge bloom filters together.  Update those methods to not mutate.
-	return nil, nil
+func (f *BloomFilter[I]) Merge(other *BloomFilter[I]) (*BloomFilter[I], error) {
+	nf := f.filter.Copy()
+	nf.Union(other.filter)
+	n := NewBloomFilter[I](f.filter.BitCount(), f.filter.HashCount())
+	return n, nil
 }
 
-var _ Filter[MockBlockId] = (*BloomFilter[MockBlockId])(nil)
+var _ Filter[MockBlockId, BloomFilter[MockBlockId]] = (*BloomFilter[MockBlockId])(nil)
