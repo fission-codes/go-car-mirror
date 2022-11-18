@@ -118,6 +118,41 @@ const (
 	END_CHECK
 )
 
+func (se SessionEvent) String() string {
+	switch se {
+	case BEGIN_SESSION:
+		return "BEGIN_SESSION"
+	case END_SESSION:
+		return "END_SESSION"
+	case BEGIN_DRAINING:
+		return "BEGIN_DRAINING"
+	case END_DRAINING:
+		return "END_DRAINING"
+	case BEGIN_CLOSE:
+		return "BEGIN_CLOSE"
+	case END_CLOSE:
+		return "END_CLOSE"
+	case BEGIN_FLUSH:
+		return "BEGIN_FLUSH"
+	case END_FLUSH:
+		return "END_FLUSH"
+	case BEGIN_SEND:
+		return "BEGIN_SEND"
+	case END_SEND:
+		return "END_SEND"
+	case BEGIN_RECEIVE:
+		return "BEGIN_RECEIVE"
+	case END_RECEIVE:
+		return "END_RECEIVE"
+	case BEGIN_CHECK:
+		return "BEGIN_CHECK"
+	case END_CHECK:
+		return "END_CHECK"
+	default:
+		return "<unknown>"
+	}
+}
+
 // Internal state...
 type Flags constraints.Unsigned
 

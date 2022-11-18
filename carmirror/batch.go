@@ -1,6 +1,7 @@
 package carmirror
 
 import (
+	"strings"
 	"sync"
 
 	"github.com/fission-codes/go-car-mirror/util"
@@ -9,7 +10,7 @@ import (
 type BatchStatus uint32
 
 const (
-	RECEIVER_READY BatchStatus = iota
+	RECEIVER_READY BatchStatus = iota << 1
 	RECEIVER_CLOSING
 	RECEIVER_CLOSED
 	RECEIVER_CHECKING
@@ -19,6 +20,36 @@ const (
 	RECEIVER = RECEIVER_READY | RECEIVER_CLOSING | RECEIVER_CHECKING | RECEIVER_CLOSED
 	SENDER   = SENDER_READY | SENDER_CLOSING | SENDER_CLOSED
 )
+
+func (bs BatchStatus) Strings() []string {
+	var strings []string
+	if bs&RECEIVER_READY != 0 {
+		strings = append(strings, "RECEIVER_READY")
+	}
+	if bs&RECEIVER_CLOSING != 0 {
+		strings = append(strings, "RECEIVER_CLOSING")
+	}
+	if bs&RECEIVER_CLOSED != 0 {
+		strings = append(strings, "RECEIVER_CLOSED")
+	}
+	if bs&RECEIVER_CHECKING != 0 {
+		strings = append(strings, "RECEIVER_CHECKING")
+	}
+	if bs&SENDER_READY != 0 {
+		strings = append(strings, "SENDER_READY")
+	}
+	if bs&SENDER_CLOSING != 0 {
+		strings = append(strings, "SENDER_CLOSING")
+	}
+	if bs&SENDER_CLOSED != 0 {
+		strings = append(strings, "SENDER_CLOSED")
+	}
+	return strings
+}
+
+func (bs BatchStatus) String() string {
+	return strings.Join(bs.Strings(), "|")
+}
 
 type BatchBlockReceiver[I BlockId, B Block[I]] interface {
 	HandleList(BatchStatus, B) error
