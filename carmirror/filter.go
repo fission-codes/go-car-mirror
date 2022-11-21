@@ -14,8 +14,8 @@ const (
 	SIDE_B Side = 1
 )
 
-var ERR_INCOMPATIBLE_FILTER = errors.New("Incompatible filter type")
-var ERR_BLOOM_OVERFLOW = errors.New("Bloom filter overflowing")
+var ErrIncompatibleFilter = errors.New("incompatible filter type")
+var ErrBloomOverflow = errors.New("bloom filter overflowing")
 
 type CompoundFilter[K comparable] struct {
 	a Filter[K]
@@ -134,7 +134,7 @@ func (f *BloomFilter[K, H]) Add(id K) error {
 		}
 		return nil
 	} else {
-		return ERR_BLOOM_OVERFLOW
+		return ErrBloomOverflow
 	}
 }
 
@@ -152,10 +152,10 @@ func (f *BloomFilter[K, H]) AddAll(other Filter[K]) error {
 			}
 			return err
 		} else {
-			return ERR_BLOOM_OVERFLOW
+			return ErrBloomOverflow
 		}
 	} else {
-		return ERR_INCOMPATIBLE_FILTER
+		return ErrIncompatibleFilter
 	}
 }
 
@@ -188,7 +188,7 @@ func NewRootFilter[K comparable](min_capacity uint, factory FilterFactory[K]) *R
 }
 
 func (rf *RootFilter[K]) DoesNotContain(id K) bool {
-	return rf.filter == nil || rf.DoesNotContain(id)
+	return rf.filter == nil || rf.filter.DoesNotContain(id)
 }
 
 func (rf *RootFilter[K]) AddAll(other Filter[K]) error {
@@ -240,7 +240,7 @@ type PerfectFilter[K comparable] struct {
 	filter map[K]bool
 }
 
-func NewPerfectFilter[K comparable](min_capacity uint32, factory FilterFactory[K]) *PerfectFilter[K] {
+func NewPerfectFilter[K comparable]() *PerfectFilter[K] {
 	return &PerfectFilter[K]{make(map[K]bool)}
 }
 
@@ -256,7 +256,7 @@ func (pf *PerfectFilter[K]) AddAll(other Filter[K]) error {
 		}
 		return nil
 	} else {
-		return ERR_INCOMPATIBLE_FILTER
+		return ErrIncompatibleFilter
 	}
 }
 
