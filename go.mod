@@ -3,7 +3,7 @@ module github.com/fission-codes/go-car-mirror
 go 1.19
 
 require (
-	github.com/fission-codes/go-bloom v0.0.0-20221121015551-99a8f5e1380d
+	github.com/fission-codes/go-bloom v0.0.0-20221121163634-b10cd0f871af
 	github.com/ipfs/go-cid v0.0.1
 	go.uber.org/zap v1.23.0
 	golang.org/x/exp v0.0.0-20221114191408-850992195362

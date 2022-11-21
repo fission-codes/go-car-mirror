@@ -62,8 +62,8 @@ type Filter[K comparable] interface {
 	AddAll(other Filter[K]) error
 	Add(id K) error
 	Clear() error
-	GetCapacity() uint32
-	GetCount() uint32
+	GetCapacity() int // may return -1 to indicate unconstrained
+	GetCount() int
 }
 
 // BlockSender is responsible for sending blocks - immediately and asynchronously, or via a buffer.
