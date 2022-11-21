@@ -56,12 +56,14 @@ type MutablePointerResolver[I BlockId] interface {
 }
 
 // Filter is anything similar to a bloom filter that can efficiently (and without perfect accuracy) keep track of a list of `BlockId`s.
-type Filter[K comparable, T any] interface {
+type Filter[K comparable] interface {
 	// DoesNotContain returns true if id is not present in the filter.
 	DoesNotContain(id K) bool
-
-	// Merge merges two Filters together.
-	Merge(other *T) (*T, error)
+	AddAll(other Filter[K]) error
+	Add(id K) error
+	Clear() error
+	GetCapacity() uint32
+	GetCount() uint32
 }
 
 // BlockSender is responsible for sending blocks - immediately and asynchronously, or via a buffer.
@@ -81,21 +83,21 @@ type BlockReceiver[I BlockId] interface {
 // StatusSender is responsible for sending status.
 // The key intuition of CAR Mirror is that status can be sent efficiently using a lossy filter.
 // The StatusSender will therefore usually batch reported information and send it in bulk to the ReceiverSession.
-type StatusSender[I BlockId, F Filter[I, F]] interface {
-	Send(have F, want []I) error
+type StatusSender[I BlockId] interface {
+	Send(have Filter[I], want []I) error
 	Close() error
 }
 
 // StatusReceiver is responsible for receiving a status.
-type StatusReceiver[I BlockId, F Filter[I, F]] interface {
-	HandleStatus(have F, want []I) error
+type StatusReceiver[I BlockId] interface {
+	HandleStatus(have Filter[I], want []I) error
 }
 
 // StatusAccumulator is responsible for collecting status.
-type StatusAccumulator[I BlockId, F Filter[I, F]] interface {
+type StatusAccumulator[I BlockId] interface {
 	Have(I) error
 	Want(I) error
-	Send(StatusSender[I, F]) error
+	Send(StatusSender[I]) error
 	Receive(I) error
 }
 
@@ -172,7 +174,6 @@ type Orchestrator[F Flags] interface {
 type SenderConnection[
 	F Flags,
 	I BlockId,
-	FI Filter[I, FI],
 ] interface {
 	GetBlockSender(Orchestrator[F]) BlockSender[I]
 }
@@ -180,18 +181,16 @@ type SenderConnection[
 type ReceiverConnection[
 	F Flags,
 	I BlockId,
-	FI Filter[I, FI],
 ] interface {
-	GetStatusSender(Orchestrator[F]) StatusSender[I, FI]
+	GetStatusSender(Orchestrator[F]) StatusSender[I]
 }
 
 type ReceiverSession[
 	I BlockId,
 	F Flags,
-	FI Filter[I, FI],
 ] struct {
-	accumulator  StatusAccumulator[I, FI]
-	connection   ReceiverConnection[F, I, FI]
+	accumulator  StatusAccumulator[I]
+	connection   ReceiverConnection[F, I]
 	orchestrator Orchestrator[F]
 	store        BlockStore[I]
 	pending      chan Block[I]
@@ -199,7 +198,7 @@ type ReceiverSession[
 	// pendingMutex sync.RWMutex
 }
 
-func (rs *ReceiverSession[I, F, FI]) AccumulateStatus(id I) error {
+func (rs *ReceiverSession[I, F]) AccumulateStatus(id I) error {
 	// Get block and handle errors
 	block, err := rs.store.Get(id)
 	if err == errors.BlockNotFound {
@@ -223,7 +222,7 @@ func (rs *ReceiverSession[I, F, FI]) AccumulateStatus(id I) error {
 	return nil
 }
 
-func (rs *ReceiverSession[I, F, FI]) HandleBlock(block Block[I]) {
+func (rs *ReceiverSession[I, F]) HandleBlock(block Block[I]) {
 	rs.orchestrator.Notify(BEGIN_RECEIVE)
 	defer rs.orchestrator.Notify(END_RECEIVE)
 
@@ -238,7 +237,7 @@ func (rs *ReceiverSession[I, F, FI]) HandleBlock(block Block[I]) {
 	rs.pending <- block
 }
 
-func (rs *ReceiverSession[I, F, FI]) Run() error {
+func (rs *ReceiverSession[I, F]) Run() error {
 	sender := rs.connection.GetStatusSender(rs.orchestrator)
 
 	rs.orchestrator.Notify(BEGIN_SESSION)
@@ -283,24 +282,23 @@ func (rs *ReceiverSession[I, F, FI]) Run() error {
 	return nil
 }
 
-func (ss *ReceiverSession[I, F, FI]) HandleState(state F) error {
+func (ss *ReceiverSession[I, F]) HandleState(state F) error {
 	return ss.orchestrator.ReceiveState(state)
 }
 
 type SenderSession[
 	I BlockId,
 	F Flags,
-	FI Filter[I, FI],
 ] struct {
 	store        BlockStore[I]
-	connection   SenderConnection[F, I, FI]
+	connection   SenderConnection[F, I]
 	orchestrator Orchestrator[F]
-	filter       FI
+	filter       Filter[I]
 	sent         sync.Map
 	pending      chan I
 }
 
-func (ss *SenderSession[I, F, FI]) Run() error {
+func (ss *SenderSession[I, F]) Run() error {
 	sender := ss.connection.GetBlockSender(ss.orchestrator)
 	if err := ss.orchestrator.Notify(BEGIN_SESSION); err != nil {
 		return err
@@ -357,17 +355,16 @@ func (ss *SenderSession[I, F, FI]) Run() error {
 	return nil
 }
 
-func (ss *SenderSession[I, F, FI]) HandleStatus(have FI, want []I) error {
+func (ss *SenderSession[I, F]) HandleStatus(have Filter[I], want []I) error {
 	if err := ss.orchestrator.Notify(BEGIN_RECEIVE); err != nil {
 		return err
 	}
 	defer ss.orchestrator.Notify(END_RECEIVE)
 
-	filter, err := ss.filter.Merge(&have)
+	err := ss.filter.AddAll(have)
 	if err != nil {
 		return err
 	}
-	ss.filter = *filter
 
 	for _, id := range want {
 		ss.pending <- id
@@ -376,7 +373,7 @@ func (ss *SenderSession[I, F, FI]) HandleStatus(have FI, want []I) error {
 	return nil
 }
 
-func (ss *SenderSession[I, F, FI]) Close() error {
+func (ss *SenderSession[I, F]) Close() error {
 	if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
 		return err
 	}
@@ -387,12 +384,12 @@ func (ss *SenderSession[I, F, FI]) Close() error {
 	return nil
 }
 
-func (ss *SenderSession[I, F, FI]) Enqueue(id I) error {
+func (ss *SenderSession[I, F]) Enqueue(id I) error {
 	ss.pending <- id
 
 	return nil
 }
 
-func (ss *SenderSession[I, F, FI]) HandleState(state F) error {
+func (ss *SenderSession[I, F]) HandleState(state F) error {
 	return ss.orchestrator.ReceiveState(state)
 }

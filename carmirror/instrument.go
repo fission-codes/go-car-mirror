@@ -226,10 +226,9 @@ func (ibs *InstrumentedBlockStore[I]) All() (<-chan I, error) {
 	blocks, err := ibs.store.All()
 	result := make(chan I)
 	if err == nil {
-		ibs.stats.Log(fmt.Sprintf("Has.%v", result))
 		go func(blocks <-chan I) {
 			for block := range blocks {
-				ibs.stats.Log(fmt.Sprintf("All.chan"))
+				ibs.stats.Log("All.chan")
 				result <- block
 			}
 

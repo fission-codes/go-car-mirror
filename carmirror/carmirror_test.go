@@ -7,7 +7,6 @@ import (
 
 	"math/rand"
 
-	"github.com/fission-codes/go-bloom"
 	"github.com/fission-codes/go-car-mirror/iterator"
 )
 
@@ -210,35 +209,3 @@ var _ BlockStore[MockBlockId] = (*MockStore)(nil)
 // var _ MutablePointerResolver = (...)(nil)
 
 // Filter
-
-type BloomFilter[I MockBlockId] struct {
-	filter *bloom.Filter
-}
-
-// TODO: Add New* methods to mirror those in bloom.Filter
-func NewBloomFilter[I MockBlockId](bitCount uint64, hashCount uint64) *BloomFilter[I] {
-	filter, _ := bloom.NewFilter(bitCount, hashCount)
-
-	return &BloomFilter[I]{
-		filter: filter,
-	}
-}
-
-func (f *BloomFilter[I]) Add(id MockBlockId) error {
-	f.filter.Add(id[:])
-
-	return nil
-}
-
-func (f *BloomFilter[I]) DoesNotContain(id MockBlockId) bool {
-	return !f.filter.Test(id[:])
-}
-
-func (f *BloomFilter[I]) Merge(other *BloomFilter[I]) (*BloomFilter[I], error) {
-	nf := f.filter.Copy()
-	nf.Union(other.filter)
-	n := NewBloomFilter[I](f.filter.BitCount(), f.filter.HashCount())
-	return n, nil
-}
-
-var _ Filter[MockBlockId, BloomFilter[MockBlockId]] = (*BloomFilter[MockBlockId])(nil)
