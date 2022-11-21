@@ -69,9 +69,15 @@ type Filter[K comparable] interface {
 // BlockSender is responsible for sending blocks - immediately and asynchronously, or via a buffer.
 // The details are up to the implementor.
 type BlockSender[I BlockId] interface {
-	Send(Block[I]) error
+	SendBlock(Block[I]) error
 	Flush() error
 	Close() error
+}
+
+// BlockReceiver is responsible for receiving blocks.
+type StateReceiver[F Flags] interface {
+	// HandleBlock is called on receipt of a new block.
+	HandleState(F) error
 }
 
 // BlockReceiver is responsible for receiving blocks.
@@ -84,7 +90,7 @@ type BlockReceiver[I BlockId] interface {
 // The key intuition of CAR Mirror is that status can be sent efficiently using a lossy filter.
 // The StatusSender will therefore usually batch reported information and send it in bulk to the ReceiverSession.
 type StatusSender[I BlockId] interface {
-	Send(have Filter[I], want []I) error
+	SendStatus(have Filter[I], want []I) error
 	Close() error
 }
 
@@ -328,7 +334,7 @@ func (ss *SenderSession[I, F]) Run() error {
 					return err
 				}
 			} else {
-				if err := sender.Send(block); err != nil {
+				if err := sender.SendBlock(block); err != nil {
 					return err
 				}
 				for _, child := range block.Children() {

@@ -201,6 +201,96 @@ func (bs *MockStore) RandomBlock() (Block[MockBlockId], error) {
 
 var _ BlockStore[MockBlockId] = (*MockStore)(nil)
 
+type BlockMessage struct {
+	status BatchStatus
+	blocks []Block[MockBlockId]
+}
+
+type BlockChannel struct {
+	channel  chan BlockMessage
+	receiver BatchBlockReceiver[MockBlockId]
+}
+
+func (ch *BlockChannel) SendList(status BatchStatus, blocks []Block[MockBlockId]) error {
+	ch.channel <- BlockMessage{status, blocks}
+	return nil
+}
+
+func (ch *BlockChannel) Close() error {
+	close(ch.channel)
+	return nil
+}
+
+func (ch *BlockChannel) SetListener(receiver BatchBlockReceiver[MockBlockId]) {
+	ch.receiver = receiver
+}
+
+func (ch *BlockChannel) run() error {
+	var err error = nil
+	for result := range ch.channel {
+		ch.receiver.HandleList(result.status, result.blocks)
+	}
+	return err
+}
+
+type StatusMessage struct {
+	status BatchStatus
+	have   Filter[MockBlockId]
+	want   []MockBlockId
+}
+
+type StatusChannel struct {
+	channel        chan StatusMessage
+	statusReceiver StatusReceiver[MockBlockId]
+	stateReceiver  StateReceiver[BatchStatus]
+	orchestrator   Orchestrator[BatchStatus]
+}
+
+func (ch *StatusChannel) SendStatus(have Filter[MockBlockId], want []MockBlockId) error {
+	state, err := ch.orchestrator.GetState()
+	if err != nil {
+		return err
+	}
+	ch.channel <- StatusMessage{state, have, want}
+	return nil
+}
+
+func (ch *StatusChannel) Close() error {
+	close(ch.channel)
+	return nil
+}
+
+func (ch *StatusChannel) SetStatusListener(receiver StatusReceiver[MockBlockId]) {
+	ch.statusReceiver = receiver
+}
+
+func (ch *StatusChannel) SetStateListener(receiver StateReceiver[BatchStatus]) {
+	ch.stateReceiver = receiver
+}
+
+func (ch *StatusChannel) run() error {
+	var err error = nil
+	for result := range ch.channel {
+		ch.statusReceiver.HandleStatus(result.have, result.want)
+		ch.stateReceiver.HandleState(result.status)
+	}
+	return err
+}
+
+type MockConnection struct {
+	batchBlockChannel BlockChannel
+	statusChannel     StatusChannel
+	max_batch_size    uint
+}
+
+func (conn *MockConnection) GetBlockSender(orchestrator Orchestrator[BatchStatus]) BlockSender[MockBlockId] {
+	return NewSimpleBatchBlockSender[MockBlockId](&conn.batchBlockChannel, orchestrator, uint32(conn.max_batch_size))
+}
+
+func (conn *MockConnection) GetStatusSender(orchestrator Orchestrator[BatchStatus]) StatusSender[MockBlockId] {
+	return &conn.statusChannel
+}
+
 // MutablePointerResolver
 
 // type IpfsMutablePointerResolver struct { ... }
@@ -209,3 +299,61 @@ var _ BlockStore[MockBlockId] = (*MockStore)(nil)
 // var _ MutablePointerResolver = (...)(nil)
 
 // Filter
+
+//func MockBatchTransfer(sender_store MockStore, receiver_store MockStore, root MockId, max_batch_size uint) err {
+//
+//	snapshotBefore := GLOBAL_REPORTING.snapshot()
+//
+//	connection := MockConnection::new(max_batch_size);
+//
+//	debug!("done setup");
+//
+//	let sender_session = Arc::new(SenderSession::<
+//		instrument::InstrumentedStore<MockStore>,
+//		MockConnection,
+//		Arc<RwLock<FilterList>>,
+//		instrument::InstrumentedOrchestrator<BatchSendOrchestrator>
+//	>::new(instrument::instrument_store(sender_store, "sender_store"), connection.clone(), Arc::new(RwLock::new(FilterList::new(0.01, 100)))));
+//
+//	debug!("done sender");
+//
+//	let receiver_session = Arc::new(ReceiverSession::<
+//		instrument::InstrumentedStore<MockStore>,
+//		MockConnection,
+//		SimpleStatusAccumulatorRef<MockId>,
+//		BatchReceiveOrchestrator
+//	>::new(instrument::instrument_store(receiver_store, "receiver_store"), connection.clone(), SimpleStatusAccumulator::new(0.01, 100)));
+//
+//	debug!("done receiver");
+//
+//	sender_session.enqueue(root).await;
+//	sender_session.close().await?;
+//
+//	let sender_command_session = sender_session.clone();
+//	let receiver_command_session = receiver_session.clone();
+//
+//	let sender_commands : AsyncResult<()> = Box::pin(async {
+//		sender_command_session.run().await?;
+//		debug!("sender session terminated");
+//		Ok(())
+//	});
+//
+//	let receiver_commands : AsyncResult<()> = Box::pin(async {
+//		receiver_command_session.run().await?;
+//		debug!("receiver session terminated");
+//		Ok(())
+//	});
+//
+//	try_join_all([
+//		instrument::instrument_result(sender_commands, "sender_commands"),
+//		instrument::instrument_result(receiver_commands, "receiver_commands"),
+//		instrument::instrument_result(connection.listen_blocks(receiver_session), "receiver_session"),
+//		instrument::instrument_result(connection.listen_status(sender_session), "sender_session"),
+//	]).timeout(Duration::from_millis(2000))
+//	.await??;
+//
+//	let snapshot_after = reporting.snapshot()?;
+//	let diff = snapshot_before.diff(&snapshot_after);
+//	info!("Dump Snapshot\n{:?}", diff);
+//	Ok(())
+//}

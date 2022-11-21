@@ -51,12 +51,12 @@ func (bs BatchStatus) String() string {
 	return strings.Join(bs.Strings(), "|")
 }
 
-type BatchBlockReceiver[I BlockId, B Block[I]] interface {
-	HandleList(BatchStatus, B) error
+type BatchBlockReceiver[I BlockId] interface {
+	HandleList(BatchStatus, []Block[I]) error
 }
 
-type BatchBlockSender[I BlockId, B Block[I]] interface {
-	SendList(BatchStatus, []B) error
+type BatchBlockSender[I BlockId] interface {
+	SendList(BatchStatus, []Block[I]) error
 	Close() error
 }
 
@@ -90,24 +90,24 @@ func (sbbr *SimpleBatchBlockReceiver[I, B]) HandleList(flags BatchStatus, list [
 	return nil
 }
 
-type SimpleBatchBlockSender[I BlockId, B Block[I]] struct {
+type SimpleBatchBlockSender[I BlockId] struct {
 	orchestrator Orchestrator[BatchStatus]
-	list         []B
+	list         []Block[I]
 	listMutex    sync.Mutex
-	sender       BatchBlockSender[I, B]
+	sender       BatchBlockSender[I]
 	maxBatchSize uint32
 }
 
-func NewSimpleBatchBlockSender[I BlockId, B Block[I]](sender BatchBlockSender[I, B], orchestrator Orchestrator[BatchStatus], maxBatchSize uint32) *SimpleBatchBlockSender[I, B] {
-	return &SimpleBatchBlockSender[I, B]{
+func NewSimpleBatchBlockSender[I BlockId](sender BatchBlockSender[I], orchestrator Orchestrator[BatchStatus], maxBatchSize uint32) *SimpleBatchBlockSender[I] {
+	return &SimpleBatchBlockSender[I]{
 		orchestrator: orchestrator,
-		list:         make([]B, 0, maxBatchSize),
+		list:         make([]Block[I], 0, maxBatchSize),
 		sender:       sender,
 		maxBatchSize: maxBatchSize,
 	}
 }
 
-func (sbbs *SimpleBatchBlockSender[I, B]) SendBlock(block B) error {
+func (sbbs *SimpleBatchBlockSender[I]) SendBlock(block Block[I]) error {
 	sbbs.listMutex.Lock()
 	sbbs.list = append(sbbs.list, block)
 	sbbs.listMutex.Unlock()
@@ -119,11 +119,11 @@ func (sbbs *SimpleBatchBlockSender[I, B]) SendBlock(block B) error {
 	return nil
 }
 
-func (sbbs *SimpleBatchBlockSender[I, B]) Close() error {
+func (sbbs *SimpleBatchBlockSender[I]) Close() error {
 	return sbbs.sender.Close()
 }
 
-func (sbbs *SimpleBatchBlockSender[I, B]) Flush() error {
+func (sbbs *SimpleBatchBlockSender[I]) Flush() error {
 	sbbs.orchestrator.Notify(BEGIN_FLUSH)
 	defer sbbs.orchestrator.Notify(END_FLUSH)
 

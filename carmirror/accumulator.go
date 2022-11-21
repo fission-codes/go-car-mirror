@@ -43,6 +43,6 @@ func (ssa *SimpleStatusAccumulator[I]) Receive(id I) error {
 func (ssa *SimpleStatusAccumulator[I]) Send(sender StatusSender[I]) error {
 	ssa.mutex.Lock()
 	defer ssa.mutex.Unlock()
-	sender.Send(ssa.have, maps.Keys(ssa.want))
+	sender.SendStatus(ssa.have, maps.Keys(ssa.want))
 	return ssa.have.Clear()
 }
