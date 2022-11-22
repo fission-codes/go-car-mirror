@@ -81,7 +81,8 @@ type StateReceiver[F Flags] interface {
 }
 
 // BlockReceiver is responsible for receiving blocks.
-type BlockReceiver[I BlockId] interface {
+type BlockReceiver[I BlockId, F Flags] interface {
+	StateReceiver[F]
 	// HandleBlock is called on receipt of a new block.
 	HandleBlock(Block[I]) error
 }
@@ -95,7 +96,8 @@ type StatusSender[I BlockId] interface {
 }
 
 // StatusReceiver is responsible for receiving a status.
-type StatusReceiver[I BlockId] interface {
+type StatusReceiver[I BlockId, F Flags] interface {
+	StateReceiver[F]
 	HandleStatus(have Filter[I], want []I) error
 }
 
@@ -204,6 +206,21 @@ type ReceiverSession[
 	// pendingMutex sync.RWMutex
 }
 
+func NewReceiverSession[I BlockId, F Flags](
+	store BlockStore[I],
+	connection ReceiverConnection[F, I],
+	accumulator StatusAccumulator[I],
+	orchestrator Orchestrator[F],
+) *ReceiverSession[I, F] {
+	return &ReceiverSession[I, F]{
+		accumulator,
+		connection,
+		orchestrator,
+		store,
+		make(chan Block[I]),
+	}
+}
+
 func (rs *ReceiverSession[I, F]) AccumulateStatus(id I) error {
 	// Get block and handle errors
 	block, err := rs.store.Get(id)
@@ -302,6 +319,17 @@ type SenderSession[
 	filter       Filter[I]
 	sent         sync.Map
 	pending      chan I
+}
+
+func NewSenderSession[I BlockId, F Flags](store BlockStore[I], connection SenderConnection[F, I], filter Filter[I], orchestrator Orchestrator[F]) *SenderSession[I, F] {
+	return &SenderSession[I, F]{
+		store,
+		connection,
+		orchestrator,
+		filter,
+		sync.Map{},
+		make(chan I),
+	}
 }
 
 func (ss *SenderSession[I, F]) Run() error {

@@ -61,22 +61,22 @@ type BatchBlockSender[I BlockId] interface {
 }
 
 // ReceiverSession[I BlockId, F Flags]
-type SimpleBatchBlockReceiver[I BlockId, B Block[I]] struct {
-	session ReceiverSession[I, BatchStatus]
+type SimpleBatchBlockReceiver[I BlockId] struct {
+	session *ReceiverSession[I, BatchStatus]
 }
 
-func NewSimpleBatchBlockReceiver[I BlockId, B Block[I]](rs ReceiverSession[I, BatchStatus]) *SimpleBatchBlockReceiver[I, B] {
-	return &SimpleBatchBlockReceiver[I, B]{
+func NewSimpleBatchBlockReceiver[I BlockId](rs *ReceiverSession[I, BatchStatus]) *SimpleBatchBlockReceiver[I] {
+	return &SimpleBatchBlockReceiver[I]{
 		session: rs,
 	}
 }
 
-func (sbbr *SimpleBatchBlockReceiver[I, B]) HandleList(flags BatchStatus, list []B) error {
+func (sbbr *SimpleBatchBlockReceiver[I]) HandleList(flags BatchStatus, list []Block[I]) error {
 	var wg sync.WaitGroup
 
 	for _, block := range list {
 		wg.Add(1)
-		go func(block B) {
+		go func(block Block[I]) {
 			defer wg.Done()
 
 			sbbr.session.HandleBlock(block)
@@ -146,6 +146,12 @@ type BatchSendOrchestrator struct {
 	flags util.SharedFlagSet[BatchStatus]
 }
 
+func NewBatchSendOrchestrator() *BatchSendOrchestrator {
+	return &BatchSendOrchestrator{
+		flags: *util.NewSharedFlagSet(BatchStatus(0)),
+	}
+}
+
 func (bso *BatchSendOrchestrator) Notify(event SessionEvent) error {
 	switch event {
 	case BEGIN_SESSION:
@@ -169,21 +175,28 @@ func (bso *BatchSendOrchestrator) Notify(event SessionEvent) error {
 	return nil
 }
 
-func (bso *BatchSendOrchestrator) GetState() BatchStatus {
-	return bso.flags.GetAll()
+func (bso *BatchSendOrchestrator) GetState() (BatchStatus, error) {
+	return bso.flags.GetAll(), nil
 }
 
-func (bso *BatchSendOrchestrator) ReceiveState(batchStatus BatchStatus) {
+func (bso *BatchSendOrchestrator) ReceiveState(batchStatus BatchStatus) error {
 	bso.flags.Update(RECEIVER, batchStatus)
+	return nil
 }
 
-func (bso *BatchSendOrchestrator) IsClosed() bool {
-	return bso.flags.Contains(SENDER_CLOSED)
+func (bso *BatchSendOrchestrator) IsClosed() (bool, error) {
+	return bso.flags.Contains(SENDER_CLOSED), nil
 }
 
 // BatchReceiveOrchestrator
 type BatchReceiveOrchestrator struct {
 	flags util.SharedFlagSet[BatchStatus]
+}
+
+func NewBatchReceiveOrchestrator() *BatchReceiveOrchestrator {
+	return &BatchReceiveOrchestrator{
+		flags: *util.NewSharedFlagSet(BatchStatus(0)),
+	}
 }
 
 func (bro *BatchReceiveOrchestrator) Notify(event SessionEvent) error {
@@ -205,15 +218,16 @@ func (bro *BatchReceiveOrchestrator) Notify(event SessionEvent) error {
 	return nil
 }
 
-func (bro *BatchReceiveOrchestrator) GetState() BatchStatus {
-	return bro.flags.GetAll()
+func (bro *BatchReceiveOrchestrator) GetState() (BatchStatus, error) {
+	return bro.flags.GetAll(), nil
 }
 
-func (bro *BatchReceiveOrchestrator) ReceiveState(batchStatus BatchStatus) {
+func (bro *BatchReceiveOrchestrator) ReceiveState(batchStatus BatchStatus) error {
 	// Slight hack here to allow ReceiverChecking to be updated by SimpleBatchBlockReceiver
 	bro.flags.Update(SENDER|RECEIVER_CHECKING, batchStatus)
+	return nil
 }
 
-func (bro *BatchReceiveOrchestrator) IsClosed() bool {
-	return bro.flags.Contains(SENDER_CLOSED)
+func (bro *BatchReceiveOrchestrator) IsClosed() (bool, error) {
+	return bro.flags.Contains(SENDER_CLOSED), nil
 }

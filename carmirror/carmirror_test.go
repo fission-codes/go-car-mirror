@@ -1,6 +1,7 @@
 package carmirror
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -13,6 +14,8 @@ import (
 func init() {
 	rand.Seed(time.Now().UnixNano())
 }
+
+var ErrReceiverNotSet error = errors.New("Receiver Not Set")
 
 func TestAntiEvergreen(t *testing.T) {
 	senderStore := NewMockBlockStore()
@@ -221,13 +224,16 @@ func (ch *BlockChannel) Close() error {
 	return nil
 }
 
-func (ch *BlockChannel) SetListener(receiver BatchBlockReceiver[MockBlockId]) {
+func (ch *BlockChannel) SetBlockListener(receiver BatchBlockReceiver[MockBlockId]) {
 	ch.receiver = receiver
 }
 
-func (ch *BlockChannel) run() error {
+func (ch *BlockChannel) listen() error {
 	var err error = nil
 	for result := range ch.channel {
+		if ch.receiver == nil {
+			return ErrReceiverNotSet
+		}
 		ch.receiver.HandleList(result.status, result.blocks)
 	}
 	return err
@@ -239,56 +245,94 @@ type StatusMessage struct {
 	want   []MockBlockId
 }
 
-type StatusChannel struct {
-	channel        chan StatusMessage
-	statusReceiver StatusReceiver[MockBlockId]
-	stateReceiver  StateReceiver[BatchStatus]
-	orchestrator   Orchestrator[BatchStatus]
+type MockStatusReceiver struct {
+	channel        <-chan StatusMessage
+	statusReceiver StatusReceiver[MockBlockId, BatchStatus]
 }
 
-func (ch *StatusChannel) SendStatus(have Filter[MockBlockId], want []MockBlockId) error {
-	state, err := ch.orchestrator.GetState()
-	if err != nil {
-		return err
-	}
-	ch.channel <- StatusMessage{state, have, want}
-	return nil
-}
-
-func (ch *StatusChannel) Close() error {
-	close(ch.channel)
-	return nil
-}
-
-func (ch *StatusChannel) SetStatusListener(receiver StatusReceiver[MockBlockId]) {
+func (ch *MockStatusReceiver) SetStatusListener(receiver StatusReceiver[MockBlockId, BatchStatus]) {
 	ch.statusReceiver = receiver
 }
 
-func (ch *StatusChannel) SetStateListener(receiver StateReceiver[BatchStatus]) {
-	ch.stateReceiver = receiver
-}
-
-func (ch *StatusChannel) run() error {
+func (ch *MockStatusReceiver) listen() error {
 	var err error = nil
 	for result := range ch.channel {
+		if ch.statusReceiver == nil {
+			return ErrReceiverNotSet
+		}
 		ch.statusReceiver.HandleStatus(result.have, result.want)
-		ch.stateReceiver.HandleState(result.status)
+		ch.statusReceiver.HandleState(result.status)
 	}
 	return err
 }
 
+type MockStatusSender struct {
+	channel      chan<- StatusMessage
+	orchestrator Orchestrator[BatchStatus]
+}
+
+func NewMockStatusSender(channel chan<- StatusMessage, orchestrator Orchestrator[BatchStatus]) *MockStatusSender {
+	return &MockStatusSender{
+		channel,
+		orchestrator,
+	}
+}
+
+func (sn *MockStatusSender) SendStatus(have Filter[MockBlockId], want []MockBlockId) error {
+	state, err := sn.orchestrator.GetState()
+	if err == nil {
+		return err
+	}
+	sn.channel <- StatusMessage{state, have, want}
+	return nil
+}
+
+func (sn *MockStatusSender) Close() error {
+	close(sn.channel)
+	return nil
+}
+
 type MockConnection struct {
 	batchBlockChannel BlockChannel
-	statusChannel     StatusChannel
-	max_batch_size    uint
+	statusReceiver    MockStatusReceiver
+	statusChannel     chan StatusMessage
+	maxBatchSize      uint
+}
+
+func NewMockConnection(maxBatchSize uint) *MockConnection {
+
+	statusChannel := make(chan StatusMessage)
+
+	return &MockConnection{
+		BlockChannel{
+			make(chan BlockMessage),
+			nil,
+		},
+		MockStatusReceiver{
+			statusChannel,
+			nil,
+		},
+		statusChannel,
+		maxBatchSize,
+	}
 }
 
 func (conn *MockConnection) GetBlockSender(orchestrator Orchestrator[BatchStatus]) BlockSender[MockBlockId] {
-	return NewSimpleBatchBlockSender[MockBlockId](&conn.batchBlockChannel, orchestrator, uint32(conn.max_batch_size))
+	return NewSimpleBatchBlockSender[MockBlockId](&conn.batchBlockChannel, orchestrator, uint32(conn.maxBatchSize))
 }
 
 func (conn *MockConnection) GetStatusSender(orchestrator Orchestrator[BatchStatus]) StatusSender[MockBlockId] {
-	return &conn.statusChannel
+	return NewMockStatusSender(conn.statusChannel, orchestrator)
+}
+
+func (conn *MockConnection) ListenStatus(sender *SenderSession[MockBlockId, BatchStatus]) error {
+	conn.statusReceiver.SetStatusListener(sender)
+	return conn.statusReceiver.listen()
+}
+
+func (conn *MockConnection) ListenBlocks(receiver *ReceiverSession[MockBlockId, BatchStatus]) error {
+	conn.batchBlockChannel.SetBlockListener(NewSimpleBatchBlockReceiver(receiver))
+	return conn.batchBlockChannel.listen()
 }
 
 // MutablePointerResolver
@@ -300,60 +344,59 @@ func (conn *MockConnection) GetStatusSender(orchestrator Orchestrator[BatchStatu
 
 // Filter
 
-//func MockBatchTransfer(sender_store MockStore, receiver_store MockStore, root MockId, max_batch_size uint) err {
-//
-//	snapshotBefore := GLOBAL_REPORTING.snapshot()
-//
-//	connection := MockConnection::new(max_batch_size);
-//
-//	debug!("done setup");
-//
-//	let sender_session = Arc::new(SenderSession::<
-//		instrument::InstrumentedStore<MockStore>,
-//		MockConnection,
-//		Arc<RwLock<FilterList>>,
-//		instrument::InstrumentedOrchestrator<BatchSendOrchestrator>
-//	>::new(instrument::instrument_store(sender_store, "sender_store"), connection.clone(), Arc::new(RwLock::new(FilterList::new(0.01, 100)))));
-//
-//	debug!("done sender");
-//
-//	let receiver_session = Arc::new(ReceiverSession::<
-//		instrument::InstrumentedStore<MockStore>,
-//		MockConnection,
-//		SimpleStatusAccumulatorRef<MockId>,
-//		BatchReceiveOrchestrator
-//	>::new(instrument::instrument_store(receiver_store, "receiver_store"), connection.clone(), SimpleStatusAccumulator::new(0.01, 100)));
-//
-//	debug!("done receiver");
-//
-//	sender_session.enqueue(root).await;
-//	sender_session.close().await?;
-//
-//	let sender_command_session = sender_session.clone();
-//	let receiver_command_session = receiver_session.clone();
-//
-//	let sender_commands : AsyncResult<()> = Box::pin(async {
-//		sender_command_session.run().await?;
-//		debug!("sender session terminated");
-//		Ok(())
-//	});
-//
-//	let receiver_commands : AsyncResult<()> = Box::pin(async {
-//		receiver_command_session.run().await?;
-//		debug!("receiver session terminated");
-//		Ok(())
-//	});
-//
-//	try_join_all([
-//		instrument::instrument_result(sender_commands, "sender_commands"),
-//		instrument::instrument_result(receiver_commands, "receiver_commands"),
-//		instrument::instrument_result(connection.listen_blocks(receiver_session), "receiver_session"),
-//		instrument::instrument_result(connection.listen_status(sender_session), "sender_session"),
-//	]).timeout(Duration::from_millis(2000))
-//	.await??;
-//
-//	let snapshot_after = reporting.snapshot()?;
-//	let diff = snapshot_before.diff(&snapshot_after);
-//	info!("Dump Snapshot\n{:?}", diff);
-//	Ok(())
-//}
+func MockBatchTransfer(sender_store *MockStore, receiver_store *MockStore, root MockBlockId, max_batch_size uint) error {
+
+	snapshotBefore := GLOBAL_REPORTING.Snapshot()
+
+	connection := NewMockConnection(max_batch_size)
+
+	sender_session := NewSenderSession[MockBlockId, BatchStatus](
+		sender_store,
+		connection,
+		NewRootFilter(1024, makeBloom),
+		NewBatchSendOrchestrator(),
+	)
+
+	receiver_session := NewReceiverSession[MockBlockId, BatchStatus](
+		receiver_store,
+		connection,
+		NewSimpleStatusAccumulator[MockBlockId](NewRootFilter(1024, makeBloom)),
+		NewBatchReceiveOrchestrator(),
+	)
+
+	sender_session.Enqueue(root)
+	sender_session.Close()
+
+	err_chan := make(chan error)
+	go func() {
+		err_chan <- sender_session.Run()
+		LOG.Debugf("sender session terminated")
+	}()
+
+	go func() {
+		err_chan <- receiver_session.Run()
+		LOG.Debugf("receiver session terminated")
+	}()
+
+	go func() {
+		err_chan <- connection.ListenBlocks(receiver_session)
+		LOG.Debugf("block listener terminated")
+	}()
+
+	go func() {
+		err_chan <- connection.ListenStatus(sender_session)
+		LOG.Debugf("status listener terminated")
+	}()
+
+	for i := 0; i < 4; i++ {
+		err := <-err_chan
+		if err != nil {
+			return err
+		}
+	}
+
+	snapshotAfter := GLOBAL_REPORTING.Snapshot()
+	diff := snapshotBefore.Diff(snapshotAfter)
+	diff.Write(LOG)
+	return nil
+}
