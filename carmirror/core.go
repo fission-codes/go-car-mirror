@@ -351,23 +351,24 @@ func (ss *SenderSession[I, F]) Run() error {
 			return err
 		}
 
-		id := <-ss.pending
+		if len(ss.pending) > 0 {
+			id := <-ss.pending
+			if _, ok := ss.sent.Load(id); !ok {
+				ss.sent.Store(id, true)
 
-		if _, ok := ss.sent.Load(id); !ok {
-			ss.sent.Store(id, true)
-
-			block, err := ss.store.Get(id)
-			if err != nil {
-				if err != errors.BlockNotFound {
-					return err
-				}
-			} else {
-				if err := sender.SendBlock(block); err != nil {
-					return err
-				}
-				for _, child := range block.Children() {
-					if ss.filter.DoesNotContain(child) {
-						ss.pending <- child
+				block, err := ss.store.Get(id)
+				if err != nil {
+					if err != errors.BlockNotFound {
+						return err
+					}
+				} else {
+					if err := sender.SendBlock(block); err != nil {
+						return err
+					}
+					for _, child := range block.Children() {
+						if ss.filter.DoesNotContain(child) {
+							ss.pending <- child
+						}
 					}
 				}
 			}

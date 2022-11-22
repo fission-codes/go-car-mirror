@@ -1,6 +1,7 @@
 package carmirror
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"testing"
@@ -84,6 +85,10 @@ func AddRandomTree(store *MockStore, maxChildren int, maxDepth int, pCrosslink f
 
 // BlockId
 type MockBlockId [32]byte
+
+func (id MockBlockId) String() string {
+	return base64.URLEncoding.EncodeToString(id[:])
+}
 
 // Iterator
 type MockBlockIdIterator = iterator.SliceIterator[MockBlockId]
@@ -361,7 +366,7 @@ func MockBatchTransfer(sender_store *MockStore, receiver_store *MockStore, root 
 		NewInstrumentedBlockStore[MockBlockId](sender_store, GLOBAL_STATS.WithContext("SenderStore")),
 		connection,
 		NewRootFilter(1024, makeBloom),
-		NewInstrumentedOrchestrator[BatchStatus](NewBatchSendOrchestrator(), GLOBAL_STATS.WithContext("SenderOrchestrator")),
+		NewInstrumentedOrchestrator[BatchStatus](NewBatchSendOrchestrator(), GLOBAL_STATS.WithContext("BatchSendOrchestrator")),
 	)
 
 	log.Debugf("created sender_session")
@@ -370,7 +375,7 @@ func MockBatchTransfer(sender_store *MockStore, receiver_store *MockStore, root 
 		NewInstrumentedBlockStore[MockBlockId](receiver_store, GLOBAL_STATS.WithContext("ReceiverStore")),
 		connection,
 		NewSimpleStatusAccumulator[MockBlockId](NewRootFilter(1024, makeBloom)),
-		NewInstrumentedOrchestrator[BatchStatus](NewBatchReceiveOrchestrator(), GLOBAL_STATS.WithContext("SenderOrchestrator")),
+		NewInstrumentedOrchestrator[BatchStatus](NewBatchReceiveOrchestrator(), GLOBAL_STATS.WithContext("BatchReceiveOrchestrator")),
 	)
 
 	log.Debugf("created receiver_session")

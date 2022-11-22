@@ -180,10 +180,20 @@ func NewInstrumentedOrchestrator[F Flags, O Orchestrator[F]](orchestrator O, sta
 	}
 }
 
+func orError[F any](data F, err error) interface{} {
+	if err == nil {
+		return data
+	} else {
+		return err
+	}
+}
+
 func (io *InstrumentedOrchestrator[F, O]) Notify(event SessionEvent) error {
-	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "Notify", "event", event)
+	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "Notify", "event", event, "state", orError(io.orchestrator.GetState()))
 	io.stats.Log(event.String())
-	return io.orchestrator.Notify(event)
+	err := io.orchestrator.Notify(event)
+	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "Notify", "result", err, "state", orError(io.orchestrator.GetState()))
+	return err
 }
 
 func (io *InstrumentedOrchestrator[F, O]) GetState() (F, error) {

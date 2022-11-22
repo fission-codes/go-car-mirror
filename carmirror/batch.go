@@ -10,7 +10,7 @@ import (
 type BatchStatus uint32
 
 const (
-	RECEIVER_READY BatchStatus = iota << 1
+	RECEIVER_READY BatchStatus = 1 << iota
 	RECEIVER_CLOSING
 	RECEIVER_CLOSED
 	RECEIVER_CHECKING
@@ -206,7 +206,7 @@ func (bro *BatchReceiveOrchestrator) Notify(event SessionEvent) error {
 	case END_SESSION:
 		bro.flags.Update(RECEIVER_READY, RECEIVER_CLOSED)
 	case BEGIN_CHECK:
-		bro.flags.Wait(RECEIVER_READY)
+		bro.flags.Wait(RECEIVER_CHECKING)
 	case BEGIN_SEND:
 		if bro.flags.Contains(SENDER_CLOSING) {
 			bro.flags.Set(RECEIVER_CLOSING)
