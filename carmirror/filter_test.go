@@ -133,14 +133,6 @@ func TestRootAddAll(t *testing.T) {
 	)
 }
 
-func TestRootAddAllNoOverflow(t *testing.T) {
-	ModelTestAddAll(
-		NewRootFilter(52, makeBloom),
-		NewRootFilter(52, makeBloom),
-		t,
-	)
-}
-
 func TestBloomAddAllOverflow(t *testing.T) {
 
 	bloomA := NewBloomFilter[MockBlockId, bloom.HashFunction[MockBlockId]](128, IdHash)
@@ -161,6 +153,14 @@ func TestBloomAddAllOverflow(t *testing.T) {
 	if err != ErrBloomOverflow {
 		t.Errorf("Unexpected error %v", err)
 	}
+}
+
+func TestRootAddAllNoOverflow(t *testing.T) {
+	ModelTestAddAll(
+		NewRootFilter(52, makeBloom),
+		NewRootFilter(52, makeBloom),
+		t,
+	)
 }
 
 func makeBloom(capacity uint) Filter[MockBlockId] {

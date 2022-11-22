@@ -10,26 +10,37 @@ import (
 	"golang.org/x/exp/maps"
 )
 
-var LOG = zap.S()
-
 type Stats interface {
 	Log(string)
 	WithContext(string) Stats
+	Logger() *zap.SugaredLogger
+	Name() string
 }
 
 type Context struct {
-	parent  Stats
-	context string
+	parent Stats
+	name   string
+	logger *zap.SugaredLogger
 }
 
 func (ctx *Context) Log(event string) {
-	ctx.parent.Log(ctx.context + "." + event)
+	ctx.parent.Log(ctx.name + "." + event)
 }
 
-func (ctx *Context) WithContext(context string) Stats {
+func (ctx *Context) Logger() *zap.SugaredLogger {
+	return ctx.logger
+}
+
+func (ctx *Context) Name() string {
+	return ctx.name
+}
+
+func (ctx *Context) WithContext(name string) Stats {
+	name = ctx.name + "." + name
 	return &Context{
-		parent:  ctx,
-		context: context,
+		parent: ctx,
+		name:   name,
+		logger: ctx.logger.With("for", name),
 	}
 }
 
@@ -85,12 +96,14 @@ type Reporting interface {
 type DefaultStatsAndReporting struct {
 	mutex  sync.RWMutex
 	values map[string]uint64
+	logger *zap.SugaredLogger
 }
 
 func NewDefaultStatsAndReporting() *DefaultStatsAndReporting {
 	return &DefaultStatsAndReporting{
 		mutex:  sync.RWMutex{},
 		values: make(map[string]uint64),
+		logger: zap.S(),
 	}
 }
 
@@ -100,11 +113,20 @@ func (ds *DefaultStatsAndReporting) Log(event string) {
 	ds.mutex.Unlock()
 }
 
-func (ds *DefaultStatsAndReporting) WithContext(context string) Stats {
+func (ds *DefaultStatsAndReporting) WithContext(name string) Stats {
 	return &Context{
-		parent:  ds,
-		context: context,
+		parent: ds,
+		name:   name,
+		logger: ds.logger.With("for", name),
 	}
+}
+
+func (ds *DefaultStatsAndReporting) Logger() *zap.SugaredLogger {
+	return ds.logger
+}
+
+func (ds *DefaultStatsAndReporting) Name() string {
+	return "root"
 }
 
 func (ds *DefaultStatsAndReporting) GetCount(event string) uint64 {
@@ -159,29 +181,29 @@ func NewInstrumentedOrchestrator[F Flags, O Orchestrator[F]](orchestrator O, sta
 }
 
 func (io *InstrumentedOrchestrator[F, O]) Notify(event SessionEvent) error {
-	LOG.Debugf("InstrumentedOrchestrator", "method", "Notify", "event", event)
+	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "Notify", "event", event)
 	io.stats.Log(event.String())
 	return io.orchestrator.Notify(event)
 }
 
 func (io *InstrumentedOrchestrator[F, O]) GetState() (F, error) {
-	LOG.Debugf("InstrumentedOrchestrator", "method", "GetState")
+	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "GetState")
 	result, err := io.orchestrator.GetState()
-	LOG.Debugf("InstrumentedOrchestrator", "result", result, "err", err)
+	io.stats.Logger().Debugw("InstrumentedOrchestrator", "result", result, "err", err)
 	return result, err
 }
 
 func (io *InstrumentedOrchestrator[F, O]) ReceiveState(state F) error {
-	LOG.Debugf("InstrumentedOrchestrator", "method", "ReceiveState", "state", state)
+	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "ReceiveState", "state", state)
 	err := io.orchestrator.ReceiveState(state)
-	LOG.Debugf("InstrumentedOrchestrator", "method", "ReceiveState", "err", err)
+	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "ReceiveState", "err", err)
 	return err
 }
 
 func (io *InstrumentedOrchestrator[F, O]) IsClosed() (bool, error) {
-	LOG.Debugf("InstrumentedOrchestrator", "method", "IsClosed")
+	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "IsClosed")
 	result, err := io.orchestrator.IsClosed()
-	LOG.Debugf("InstrumentedOrchestrator", "method", "IsClosed", "result", result, "err", err)
+	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "IsClosed", "result", result, "err", err)
 	return result, err
 }
 
@@ -198,31 +220,31 @@ func NewInstrumentedBlockStore[I BlockId](store BlockStore[I], stats Stats) *Ins
 }
 
 func (ibs *InstrumentedBlockStore[I]) Get(id I) (Block[I], error) {
-	LOG.Debugf("InstrumentedBlockStore", "method", "Get", "id", id)
+	ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Get", "id", id)
 	result, err := ibs.store.Get(id)
 	if err == nil {
 		ibs.stats.Log("Get.Ok")
 	} else {
 		ibs.stats.Log("Get." + err.Error())
-		LOG.Debugf("InstrumentedBlockStore", "method", "Get", "error", err)
+		ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Get", "error", err)
 	}
 	return result, err
 }
 
 func (ibs *InstrumentedBlockStore[I]) Has(id I) (bool, error) {
-	LOG.Debugf("InstrumentedBlockStore", "method", "Has", "id", id)
+	ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Has", "id", id)
 	result, err := ibs.store.Has(id)
 	if err == nil {
 		ibs.stats.Log(fmt.Sprintf("Has.%v", result))
 	} else {
 		ibs.stats.Log(fmt.Sprintf("Has.%v", err))
-		LOG.Debugf("InstrumentedBlockStore", "method", "Has", "result", result, "error", err)
+		ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Has", "result", result, "error", err)
 	}
 	return result, err
 }
 
 func (ibs *InstrumentedBlockStore[I]) All() (<-chan I, error) {
-	LOG.Debugf("InstrumentedBlockStore", "method", "All")
+	ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "All")
 	blocks, err := ibs.store.All()
 	result := make(chan I)
 	if err == nil {
@@ -235,8 +257,104 @@ func (ibs *InstrumentedBlockStore[I]) All() (<-chan I, error) {
 		}(blocks)
 	} else {
 		ibs.stats.Log(fmt.Sprintf("All.%v", err))
-		LOG.Debugf("InstrumentedBlockStore", "method", "All", "error", err)
+		ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "All", "error", err)
 	}
 	return result, err
 
+}
+
+func (ibs *InstrumentedBlockStore[I]) Add(block Block[I]) error {
+	ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Add", "id", block.Id())
+	err := ibs.store.Add(block)
+	if err == nil {
+		ibs.stats.Log("Add.Ok")
+	} else {
+		ibs.stats.Log("Add." + err.Error())
+		ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Add", "error", err)
+	}
+	return err
+}
+
+type InstrumentedBlockSender[I BlockId] struct {
+	sender BlockSender[I]
+	stats  Stats
+}
+
+func NewInstrumentedBlockSender[I BlockId](sender BlockSender[I], stats Stats) *InstrumentedBlockSender[I] {
+	return &InstrumentedBlockSender[I]{
+		sender,
+		stats,
+	}
+}
+
+func (ibs *InstrumentedBlockSender[I]) SendBlock(block Block[I]) error {
+	ibs.stats.Logger().Debugw("InstrumentedBlockSender", "method", "SendBlock", "id", block.Id())
+	err := ibs.sender.SendBlock(block)
+	if err == nil {
+		ibs.stats.Log("SendBlock.Ok")
+	} else {
+		ibs.stats.Log("SendBlock." + err.Error())
+		ibs.stats.Logger().Debugw("InstrumentedBlockSender", "method", "SendBlock", "error", err)
+	}
+	return err
+}
+
+func (ibs *InstrumentedBlockSender[I]) Flush() error {
+	ibs.stats.Logger().Debugw("InstrumentedBlockSender", "method", "Flush")
+	err := ibs.sender.Flush()
+	if err == nil {
+		ibs.stats.Log("Flush.Ok")
+	} else {
+		ibs.stats.Log("Flush." + err.Error())
+		ibs.stats.Logger().Debugw("InstrumentedBlockSender", "method", "Flush", "error", err)
+	}
+	return err
+}
+
+func (ibs *InstrumentedBlockSender[I]) Close() error {
+	ibs.stats.Logger().Debugw("InstrumentedBlockSender", "method", "Close")
+	err := ibs.sender.Close()
+	if err == nil {
+		ibs.stats.Log("Close.Ok")
+	} else {
+		ibs.stats.Log("Close." + err.Error())
+		ibs.stats.Logger().Debugw("InstrumentedBlockSender", "method", "Close", "error", err)
+	}
+	return err
+}
+
+type InstrumentedStatusSender[I BlockId] struct {
+	sender StatusSender[I]
+	stats  Stats
+}
+
+func NewInstrumentedStatusSender[I BlockId](sender StatusSender[I], stats Stats) *InstrumentedStatusSender[I] {
+	return &InstrumentedStatusSender[I]{
+		sender,
+		stats,
+	}
+}
+
+func (ibs *InstrumentedStatusSender[I]) SendStatus(have Filter[I], want []I) error {
+	ibs.stats.Logger().Debugw("InstrumentedStatusSender", "method", "SendStatus", "haves", have.GetCount(), "wants", len(want))
+	err := ibs.sender.SendStatus(have, want)
+	if err == nil {
+		ibs.stats.Log("SendStatus.Ok")
+	} else {
+		ibs.stats.Log("SendStatus." + err.Error())
+		ibs.stats.Logger().Debugw("InstrumentedStatusSender", "method", "SendStatus", "error", err)
+	}
+	return err
+}
+
+func (ibs *InstrumentedStatusSender[I]) Close() error {
+	ibs.stats.Logger().Debugw("InstrumentedStatusSender", "method", "Close")
+	err := ibs.sender.Close()
+	if err == nil {
+		ibs.stats.Log("Close.Ok")
+	} else {
+		ibs.stats.Log("Close." + err.Error())
+		ibs.stats.Logger().Debugw("InstrumentedStatusSender", "method", "Close", "error", err)
+	}
+	return err
 }

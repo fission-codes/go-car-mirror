@@ -9,17 +9,19 @@ import (
 	"math/rand"
 
 	"github.com/fission-codes/go-car-mirror/iterator"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
-var ErrReceiverNotSet error = errors.New("Receiver Not Set")
+var ErrReceiverNotSet error = errors.New("receiver not set")
 
 func TestAntiEvergreen(t *testing.T) {
-	senderStore := NewMockBlockStore()
-	root := AddRandomTree(*senderStore, 5, 5, 0.0)
+	senderStore := NewMockStore()
+	root := AddRandomTree(senderStore, 5, 5, 0.0)
 
 	randomBlock, err := senderStore.RandomBlock()
 	if err != nil {
@@ -53,7 +55,7 @@ func RandBool(p float64) bool {
 	return rand.Float64() < p
 }
 
-func AddRandomTree(store MockStore, maxChildren int, maxDepth int, pCrosslink float64) MockBlockId {
+func AddRandomTree(store *MockStore, maxChildren int, maxDepth int, pCrosslink float64) MockBlockId {
 	id := RandId()
 	block := NewMockBlock(id, []MockBlockId{})
 
@@ -122,7 +124,7 @@ type MockStore struct {
 	blocks map[MockBlockId]Block[MockBlockId]
 }
 
-func NewMockBlockStore() *MockStore {
+func NewMockStore() *MockStore {
 	return &MockStore{
 		blocks: make(map[MockBlockId]Block[MockBlockId]),
 	}
@@ -201,8 +203,6 @@ func (bs *MockStore) RandomBlock() (Block[MockBlockId], error) {
 
 	return nil, fmt.Errorf("This should never happen")
 }
-
-var _ BlockStore[MockBlockId] = (*MockStore)(nil)
 
 type BlockMessage struct {
 	status BatchStatus
@@ -318,11 +318,17 @@ func NewMockConnection(maxBatchSize uint) *MockConnection {
 }
 
 func (conn *MockConnection) GetBlockSender(orchestrator Orchestrator[BatchStatus]) BlockSender[MockBlockId] {
-	return NewSimpleBatchBlockSender[MockBlockId](&conn.batchBlockChannel, orchestrator, uint32(conn.maxBatchSize))
+	return NewInstrumentedBlockSender[MockBlockId](
+		NewSimpleBatchBlockSender[MockBlockId](&conn.batchBlockChannel, orchestrator, uint32(conn.maxBatchSize)),
+		GLOBAL_STATS.WithContext("MockBlockSender"),
+	)
 }
 
 func (conn *MockConnection) GetStatusSender(orchestrator Orchestrator[BatchStatus]) StatusSender[MockBlockId] {
-	return NewMockStatusSender(conn.statusChannel, orchestrator)
+	return NewInstrumentedStatusSender[MockBlockId](
+		NewMockStatusSender(conn.statusChannel, orchestrator),
+		GLOBAL_STATS.WithContext("MockStatusSender"),
+	)
 }
 
 func (conn *MockConnection) ListenStatus(sender *SenderSession[MockBlockId, BatchStatus]) error {
@@ -347,49 +353,61 @@ func (conn *MockConnection) ListenBlocks(receiver *ReceiverSession[MockBlockId, 
 func MockBatchTransfer(sender_store *MockStore, receiver_store *MockStore, root MockBlockId, max_batch_size uint) error {
 
 	snapshotBefore := GLOBAL_REPORTING.Snapshot()
+	log = zap.S()
 
 	connection := NewMockConnection(max_batch_size)
 
 	sender_session := NewSenderSession[MockBlockId, BatchStatus](
-		sender_store,
+		NewInstrumentedBlockStore[MockBlockId](sender_store, GLOBAL_STATS.WithContext("SenderStore")),
 		connection,
 		NewRootFilter(1024, makeBloom),
-		NewBatchSendOrchestrator(),
+		NewInstrumentedOrchestrator[BatchStatus](NewBatchSendOrchestrator(), GLOBAL_STATS.WithContext("SenderOrchestrator")),
 	)
 
+	log.Debugf("created sender_session")
+
 	receiver_session := NewReceiverSession[MockBlockId, BatchStatus](
-		receiver_store,
+		NewInstrumentedBlockStore[MockBlockId](receiver_store, GLOBAL_STATS.WithContext("ReceiverStore")),
 		connection,
 		NewSimpleStatusAccumulator[MockBlockId](NewRootFilter(1024, makeBloom)),
-		NewBatchReceiveOrchestrator(),
+		NewInstrumentedOrchestrator[BatchStatus](NewBatchReceiveOrchestrator(), GLOBAL_STATS.WithContext("SenderOrchestrator")),
 	)
+
+	log.Debugf("created receiver_session")
 
 	sender_session.Enqueue(root)
 	sender_session.Close()
 
+	log.Debugf("starting goroutines")
+
 	err_chan := make(chan error)
 	go func() {
+		log.Debugf("sender session started")
 		err_chan <- sender_session.Run()
-		LOG.Debugf("sender session terminated")
+		log.Debugf("sender session terminated")
 	}()
 
 	go func() {
+		log.Debugf("receiver session started")
 		err_chan <- receiver_session.Run()
-		LOG.Debugf("receiver session terminated")
+		log.Debugf("receiver session terminated")
 	}()
 
 	go func() {
+		log.Debugf("block listener started")
 		err_chan <- connection.ListenBlocks(receiver_session)
-		LOG.Debugf("block listener terminated")
+		log.Debugf("block listener terminated")
 	}()
 
 	go func() {
+		log.Debugf("status listener started")
 		err_chan <- connection.ListenStatus(sender_session)
-		LOG.Debugf("status listener terminated")
+		log.Debugf("status listener terminated")
 	}()
 
 	for i := 0; i < 4; i++ {
 		err := <-err_chan
+		log.Debugf("goroutine terminated with %v", err)
 		if err != nil {
 			return err
 		}
@@ -397,6 +415,25 @@ func MockBatchTransfer(sender_store *MockStore, receiver_store *MockStore, root 
 
 	snapshotAfter := GLOBAL_REPORTING.Snapshot()
 	diff := snapshotBefore.Diff(snapshotAfter)
-	diff.Write(LOG)
+	diff.Write(log)
 	return nil
+}
+
+func InitLog() {
+	config := zap.NewDevelopmentConfig()
+	config.Level.SetLevel(zapcore.DebugLevel)
+	zap.ReplaceGlobals(zap.Must(config.Build()))
+	InitDefault()
+}
+
+func TestMockTransferToEmptyStoreSingleBatch(t *testing.T) {
+	InitLog()
+	InitDefault()
+	senderStore := NewMockStore()
+	root := AddRandomTree(senderStore, 5, 5, 0.0)
+	receiverStore := NewMockStore()
+	MockBatchTransfer(senderStore, receiverStore, root, 5000)
+	if !receiverStore.HasAll(root) {
+		t.Errorf("Expected receiver store to have all nodes")
+	}
 }

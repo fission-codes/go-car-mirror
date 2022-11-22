@@ -328,7 +328,7 @@ func NewSenderSession[I BlockId, F Flags](store BlockStore[I], connection Sender
 		orchestrator,
 		filter,
 		sync.Map{},
-		make(chan I),
+		make(chan I, 1024),
 	}
 }
 
