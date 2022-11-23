@@ -23,7 +23,8 @@ func NewSimpleStatusAccumulator[I BlockId](filter Filter[I]) *SimpleStatusAccumu
 func (ssa *SimpleStatusAccumulator[I]) Have(id I) error {
 	ssa.mutex.Lock()
 	defer ssa.mutex.Unlock()
-	return ssa.have.Add(id)
+	ssa.have = ssa.have.Add(id)
+	return nil
 }
 
 func (ssa *SimpleStatusAccumulator[I]) Want(id I) error {
@@ -44,5 +45,6 @@ func (ssa *SimpleStatusAccumulator[I]) Send(sender StatusSender[I]) error {
 	ssa.mutex.Lock()
 	defer ssa.mutex.Unlock()
 	sender.SendStatus(ssa.have, maps.Keys(ssa.want))
-	return ssa.have.Clear()
+	ssa.have = ssa.have.Clear()
+	return nil
 }

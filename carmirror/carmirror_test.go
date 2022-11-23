@@ -285,7 +285,7 @@ func NewMockStatusSender(channel chan<- StatusMessage, orchestrator Orchestrator
 
 func (sn *MockStatusSender) SendStatus(have Filter[MockBlockId], want []MockBlockId) error {
 	state, err := sn.orchestrator.GetState()
-	if err == nil {
+	if err != nil {
 		return err
 	}
 	sn.channel <- StatusMessage{state, have, want}
@@ -306,7 +306,7 @@ type MockConnection struct {
 
 func NewMockConnection(maxBatchSize uint) *MockConnection {
 
-	statusChannel := make(chan StatusMessage)
+	statusChannel := make(chan StatusMessage, 1024)
 
 	return &MockConnection{
 		BlockChannel{
@@ -336,13 +336,13 @@ func (conn *MockConnection) GetStatusSender(orchestrator Orchestrator[BatchStatu
 	)
 }
 
-func (conn *MockConnection) ListenStatus(sender *SenderSession[MockBlockId, BatchStatus]) error {
+func (conn *MockConnection) ListenStatus(sender StatusReceiver[MockBlockId, BatchStatus]) error {
 	conn.statusReceiver.SetStatusListener(sender)
 	return conn.statusReceiver.listen()
 }
 
-func (conn *MockConnection) ListenBlocks(receiver *ReceiverSession[MockBlockId, BatchStatus]) error {
-	conn.batchBlockChannel.SetBlockListener(NewSimpleBatchBlockReceiver(receiver))
+func (conn *MockConnection) ListenBlocks(receiver BlockReceiver[MockBlockId, BatchStatus]) error {
+	conn.batchBlockChannel.SetBlockListener(NewSimpleBatchBlockReceiver[MockBlockId](receiver))
 	return conn.batchBlockChannel.listen()
 }
 
@@ -365,7 +365,7 @@ func MockBatchTransfer(sender_store *MockStore, receiver_store *MockStore, root 
 	sender_session := NewSenderSession[MockBlockId, BatchStatus](
 		NewInstrumentedBlockStore[MockBlockId](sender_store, GLOBAL_STATS.WithContext("SenderStore")),
 		connection,
-		NewRootFilter(1024, makeBloom),
+		NewRootFilter(makeBloom(1024)),
 		NewInstrumentedOrchestrator[BatchStatus](NewBatchSendOrchestrator(), GLOBAL_STATS.WithContext("BatchSendOrchestrator")),
 	)
 
@@ -374,7 +374,7 @@ func MockBatchTransfer(sender_store *MockStore, receiver_store *MockStore, root 
 	receiver_session := NewReceiverSession[MockBlockId, BatchStatus](
 		NewInstrumentedBlockStore[MockBlockId](receiver_store, GLOBAL_STATS.WithContext("ReceiverStore")),
 		connection,
-		NewSimpleStatusAccumulator[MockBlockId](NewRootFilter(1024, makeBloom)),
+		NewSimpleStatusAccumulator[MockBlockId](NewRootFilter(makeBloom(1024))),
 		NewInstrumentedOrchestrator[BatchStatus](NewBatchReceiveOrchestrator(), GLOBAL_STATS.WithContext("BatchReceiveOrchestrator")),
 	)
 
@@ -406,7 +406,7 @@ func MockBatchTransfer(sender_store *MockStore, receiver_store *MockStore, root 
 
 	go func() {
 		log.Debugf("status listener started")
-		err_chan <- connection.ListenStatus(sender_session)
+		err_chan <- connection.ListenStatus(NewInstrumentedStatusReceiver[MockBlockId, BatchStatus](sender_session, GLOBAL_STATS.WithContext("StatusListener")))
 		log.Debugf("status listener terminated")
 	}()
 

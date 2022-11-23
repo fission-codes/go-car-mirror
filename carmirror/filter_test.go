@@ -12,15 +12,14 @@ func IdHash(id MockBlockId, seed uint64) uint64 {
 	return xxh3.HashSeed(id[:], seed)
 }
 
-func populateFilter(filter Filter[MockBlockId], count int) ([]MockBlockId, error) {
+func populateFilter(filter Filter[MockBlockId], count int) (Filter[MockBlockId], []MockBlockId) {
 	pf := make([]MockBlockId, 0, count)
-	var err error
-	for i := 0; i < count && err == nil; i++ {
+	for i := 0; i < count; i++ {
 		id := RandId()
-		err = filter.Add(id)
+		filter = filter.Add(id)
 		pf = append(pf, id)
 	}
-	return pf, err
+	return filter, pf
 }
 
 func checkPresent(filter Filter[MockBlockId], ids []MockBlockId) error {
@@ -34,13 +33,9 @@ func checkPresent(filter Filter[MockBlockId], ids []MockBlockId) error {
 
 func ModelFilterTest(filter Filter[MockBlockId], t *testing.T) {
 
-	ids, err := populateFilter(filter, 40)
-	if err != nil {
-		t.Errorf("failed to insert item")
-	} else {
-		if checkPresent(filter, ids) != nil {
-			t.Errorf("failed to retrieve item")
-		}
+	filter, ids := populateFilter(filter, 40)
+	if checkPresent(filter, ids) != nil {
+		t.Errorf("failed to retrieve item")
 	}
 
 	fpCount := 0
@@ -57,54 +52,54 @@ func ModelFilterTest(filter Filter[MockBlockId], t *testing.T) {
 }
 
 func TestBloomFilter(t *testing.T) {
-	ModelFilterTest(NewBloomFilter[MockBlockId, bloom.HashFunction[MockBlockId]](64, IdHash), t)
+	ModelFilterTest(makeBloom(64), t)
 }
 
 func TestRootFilter(t *testing.T) {
-	ModelFilterTest(NewRootFilter(64, makeBloom), t)
+	ModelFilterTest(NewRootFilter[MockBlockId](makeBloom(64)), t)
 }
 
 func TestBloomOverflow(t *testing.T) {
 
-	bloom := NewBloomFilter[MockBlockId, bloom.HashFunction[MockBlockId]](32, IdHash)
+	var bt Filter[MockBlockId] = makeBloom(32)
 
-	errCount := 0
-	for i := 0; i < 64; i++ {
+	for i := 0; i < 52; i++ {
 		id := RandId()
-		err := bloom.Add(id)
-		if err != nil {
-			if err == ErrBloomOverflow {
-				errCount++
-			} else {
-				t.Errorf("Unexpected error %v", err)
-			}
-		}
+		bt = bt.Add(id)
 	}
 
-	if errCount < 16 {
-		t.Errorf("Did not see expected overflow errors")
+	cf, ok := bt.(*CompoundFilter[MockBlockId])
+
+	if ok {
+		bfa, ok := cf.a.(*BloomFilter[MockBlockId, bloom.HashFunction[MockBlockId]])
+		if ok {
+			if bfa.count != 32 {
+				t.Errorf("Expected side a to be fully populated, but got %v items", bfa.count)
+			}
+		} else {
+			t.Errorf("Expected side a to be a bloom")
+		}
+		bfb, ok := cf.b.(*BloomFilter[MockBlockId, bloom.HashFunction[MockBlockId]])
+		if ok {
+			if bfb.count != 20 {
+				t.Errorf("Expected side b to have 20 items, but got %v items", bfb.count)
+			}
+		} else {
+			t.Errorf("Expected side b to be a bloom")
+		}
+	} else {
+		t.Errorf("Expected a compound filter after bloom overflow")
 	}
 }
 
 func ModelTestAddAll(filterA Filter[MockBlockId], filterB Filter[MockBlockId], t *testing.T) {
 
-	idsA, errA := populateFilter(filterA, 32)
-	idsB, errB := populateFilter(filterB, 32)
+	filterA, idsA := populateFilter(filterA, 32)
+	filterB, idsB := populateFilter(filterB, 32)
 
-	if errA != nil {
-		t.Errorf("Unexpected error %v", errA)
-	}
-	if errB != nil {
-		t.Errorf("Unexpected error %v", errB)
-	}
+	filterA = filterA.AddAll(filterB)
 
-	err := filterA.AddAll(filterB)
-
-	if err != nil {
-		t.Errorf("Unexpected error %v", err)
-	}
-
-	err = checkPresent(filterA, idsA)
+	err := checkPresent(filterA, idsA)
 
 	if err != nil {
 		t.Errorf("Failed to retrieve expected items from combined filter")
@@ -119,46 +114,94 @@ func ModelTestAddAll(filterA Filter[MockBlockId], filterB Filter[MockBlockId], t
 
 func TestBloomAddAll(t *testing.T) {
 	ModelTestAddAll(
-		NewBloomFilter[MockBlockId, bloom.HashFunction[MockBlockId]](128, IdHash),
-		NewBloomFilter[MockBlockId, bloom.HashFunction[MockBlockId]](128, IdHash),
+		makeBloom(128),
+		makeBloom(128),
 		t,
 	)
 }
 
 func TestRootAddAll(t *testing.T) {
 	ModelTestAddAll(
-		NewRootFilter(128, makeBloom),
-		NewRootFilter(128, makeBloom),
+		NewRootFilter(makeBloom(128)),
+		NewRootFilter(makeBloom(128)),
 		t,
 	)
 }
 
 func TestBloomAddAllOverflow(t *testing.T) {
 
-	bloomA := NewBloomFilter[MockBlockId, bloom.HashFunction[MockBlockId]](128, IdHash)
-	bloomB := NewBloomFilter[MockBlockId, bloom.HashFunction[MockBlockId]](128, IdHash)
+	var bloomA Filter[MockBlockId] = makeBloom(128)
+	var bloomB Filter[MockBlockId] = makeBloom(128)
 
-	_, errA := populateFilter(bloomA, 100)
-	_, errB := populateFilter(bloomB, 100)
+	bloomA, _ = populateFilter(bloomA, 100)
+	bloomB, _ = populateFilter(bloomB, 100)
 
-	if errA != nil {
-		t.Errorf("Unexpected error %v", errA)
+	bloomA = bloomA.AddAll(bloomB)
+
+	cf, ok := bloomA.(*CompoundFilter[MockBlockId])
+
+	if ok {
+		bfa, ok := cf.a.(*BloomFilter[MockBlockId, bloom.HashFunction[MockBlockId]])
+		if ok {
+			if bfa.count != 100 {
+				t.Errorf("Expected side a to have 100 items, but got %v items", bfa.count)
+			}
+		} else {
+			t.Errorf("Expected side a to be a bloom")
+		}
+		bfb, ok := cf.b.(*BloomFilter[MockBlockId, bloom.HashFunction[MockBlockId]])
+		if ok {
+			if bfb.count != 100 {
+				t.Errorf("Expected side b to have 100 items, but got %v items", bfb.count)
+			}
+		} else {
+			t.Errorf("Expected side b to be a bloom")
+		}
+	} else {
+		t.Errorf("Expected a compound filter after bloom overflow")
 	}
-	if errB != nil {
-		t.Errorf("Unexpected error %v", errB)
+
+}
+
+func TestBloomAddAllWithCommon(t *testing.T) {
+
+	var bloomA Filter[MockBlockId] = makeBloom(128)
+	var bloomB Filter[MockBlockId] = makeBloom(128)
+	var bloomC Filter[MockBlockId] = makeBloom(128)
+
+	bloomA, _ = populateFilter(bloomA, 50)
+	bloomB, _ = populateFilter(bloomB, 50)
+	bloomC, _ = populateFilter(bloomC, 50)
+
+	bloomA = bloomA.AddAll(bloomC)
+	bloomB = bloomB.AddAll(bloomC)
+
+	_, ok := bloomA.(*BloomFilter[MockBlockId, bloom.HashFunction[MockBlockId]])
+	if !ok {
+		t.Errorf("Expected bloomA to still be a BoomFilter")
 	}
 
-	err := bloomA.AddAll(bloomB)
+	_, ok = bloomB.(*BloomFilter[MockBlockId, bloom.HashFunction[MockBlockId]])
+	if !ok {
+		t.Errorf("Expected bloomB to still be a BoomFilter")
+	}
 
-	if err != ErrBloomOverflow {
-		t.Errorf("Unexpected error %v", err)
+	bloomA = bloomA.AddAll(bloomB)
+	_, ok = bloomA.(*BloomFilter[MockBlockId, bloom.HashFunction[MockBlockId]])
+	if !ok {
+		t.Errorf("Expected bloomA to still be a BoomFilter")
+	}
+
+	estimate := bloomA.GetCount()
+	if estimate < 80 || estimate > 120 {
+		t.Errorf("Expected bloomA count to be between 80 and 120; got %v", estimate)
 	}
 }
 
 func TestRootAddAllNoOverflow(t *testing.T) {
 	ModelTestAddAll(
-		NewRootFilter(52, makeBloom),
-		NewRootFilter(52, makeBloom),
+		NewRootFilter(makeBloom(52)),
+		NewRootFilter(makeBloom(52)),
 		t,
 	)
 }

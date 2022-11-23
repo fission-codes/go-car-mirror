@@ -62,28 +62,19 @@ type BatchBlockSender[I BlockId] interface {
 
 // ReceiverSession[I BlockId, F Flags]
 type SimpleBatchBlockReceiver[I BlockId] struct {
-	session *ReceiverSession[I, BatchStatus]
+	session BlockReceiver[I, BatchStatus]
 }
 
-func NewSimpleBatchBlockReceiver[I BlockId](rs *ReceiverSession[I, BatchStatus]) *SimpleBatchBlockReceiver[I] {
+func NewSimpleBatchBlockReceiver[I BlockId](rs BlockReceiver[I, BatchStatus]) *SimpleBatchBlockReceiver[I] {
 	return &SimpleBatchBlockReceiver[I]{
 		session: rs,
 	}
 }
 
 func (sbbr *SimpleBatchBlockReceiver[I]) HandleList(flags BatchStatus, list []Block[I]) error {
-	var wg sync.WaitGroup
-
 	for _, block := range list {
-		wg.Add(1)
-		go func(block Block[I]) {
-			defer wg.Done()
-
-			sbbr.session.HandleBlock(block)
-
-		}(block)
+		sbbr.session.HandleBlock(block)
 	}
-	wg.Wait()
 
 	sbbr.session.HandleState(flags | RECEIVER_CHECKING)
 

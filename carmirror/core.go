@@ -59,17 +59,22 @@ type MutablePointerResolver[I BlockId] interface {
 type Filter[K comparable] interface {
 	// DoesNotContain returns true if id is not present in the filter.
 	DoesNotContain(id K) bool
-	AddAll(other Filter[K]) error
-	Add(id K) error
-	Clear() error
-	GetCapacity() int // may return -1 to indicate unconstrained
+	// Get the total capacity of this filter; may return -1 to indicate unconstrained
+	GetCapacity() int
+	// Returns an estimate of the number of entries in the filter
 	GetCount() int
+	// Returns a copy or reference as appropriate
+	Copy() Filter[K]
+	// Mutate operations follow the go convention normally mutating but returning a new filter when necessary
+	AddAll(other Filter[K]) Filter[K]
+	Add(id K) Filter[K]
+	Clear() Filter[K]
 }
 
 // BlockSender is responsible for sending blocks - immediately and asynchronously, or via a buffer.
 // The details are up to the implementor.
 type BlockSender[I BlockId] interface {
-	SendBlock(Block[I]) error
+	SendBlock(block Block[I]) error
 	Flush() error
 	Close() error
 }
@@ -77,14 +82,14 @@ type BlockSender[I BlockId] interface {
 // BlockReceiver is responsible for receiving blocks.
 type StateReceiver[F Flags] interface {
 	// HandleBlock is called on receipt of a new block.
-	HandleState(F) error
+	HandleState(state F)
 }
 
 // BlockReceiver is responsible for receiving blocks.
 type BlockReceiver[I BlockId, F Flags] interface {
 	StateReceiver[F]
 	// HandleBlock is called on receipt of a new block.
-	HandleBlock(Block[I]) error
+	HandleBlock(block Block[I])
 }
 
 // StatusSender is responsible for sending status.
@@ -98,7 +103,7 @@ type StatusSender[I BlockId] interface {
 // StatusReceiver is responsible for receiving a status.
 type StatusReceiver[I BlockId, F Flags] interface {
 	StateReceiver[F]
-	HandleStatus(have Filter[I], want []I) error
+	HandleStatus(have Filter[I], want []I)
 }
 
 // StatusAccumulator is responsible for collecting status.
@@ -217,7 +222,7 @@ func NewReceiverSession[I BlockId, F Flags](
 		connection,
 		orchestrator,
 		store,
-		make(chan Block[I]),
+		make(chan Block[I], 1024),
 	}
 }
 
@@ -305,8 +310,11 @@ func (rs *ReceiverSession[I, F]) Run() error {
 	return nil
 }
 
-func (ss *ReceiverSession[I, F]) HandleState(state F) error {
-	return ss.orchestrator.ReceiveState(state)
+func (ss *ReceiverSession[I, F]) HandleState(state F) {
+	err := ss.orchestrator.ReceiveState(state)
+	if err != nil {
+		log.Errorw("ReceiverSession", "method", "HandleState", "error", err)
+	}
 }
 
 type SenderSession[
@@ -390,22 +398,17 @@ func (ss *SenderSession[I, F]) Run() error {
 	return nil
 }
 
-func (ss *SenderSession[I, F]) HandleStatus(have Filter[I], want []I) error {
+func (ss *SenderSession[I, F]) HandleStatus(have Filter[I], want []I) {
 	if err := ss.orchestrator.Notify(BEGIN_RECEIVE); err != nil {
-		return err
+		log.Errorw("SenderSession", "method", "HandleStatus", "error", err)
 	}
 	defer ss.orchestrator.Notify(END_RECEIVE)
 
-	err := ss.filter.AddAll(have)
-	if err != nil {
-		return err
-	}
+	ss.filter = ss.filter.AddAll(have)
 
 	for _, id := range want {
 		ss.pending <- id
 	}
-
-	return nil
 }
 
 func (ss *SenderSession[I, F]) Close() error {
@@ -425,6 +428,9 @@ func (ss *SenderSession[I, F]) Enqueue(id I) error {
 	return nil
 }
 
-func (ss *SenderSession[I, F]) HandleState(state F) error {
-	return ss.orchestrator.ReceiveState(state)
+func (ss *SenderSession[I, F]) HandleState(state F) {
+	err := ss.orchestrator.ReceiveState(state)
+	if err != nil {
+		log.Errorw("SenderSession", "method", "HandleState", "error", err)
+	}
 }

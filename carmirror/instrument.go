@@ -368,3 +368,25 @@ func (ibs *InstrumentedStatusSender[I]) Close() error {
 	}
 	return err
 }
+
+type InstrumentedStatusReceiver[I BlockId, F Flags] struct {
+	receiver StatusReceiver[I, F]
+	stats    Stats
+}
+
+func NewInstrumentedStatusReceiver[I BlockId, F Flags](receiver StatusReceiver[I, F], stats Stats) StatusReceiver[I, F] {
+	return &InstrumentedStatusReceiver[I, F]{
+		receiver,
+		stats,
+	}
+}
+
+func (ir *InstrumentedStatusReceiver[I, F]) HandleStatus(have Filter[I], want []I) {
+	ir.stats.Logger().Debugw("InstrumentedStatusReceiver", "method", "HandleStatus", "haves", have.GetCount(), "wants", len(want))
+	ir.receiver.HandleStatus(have, want)
+}
+
+func (ir *InstrumentedStatusReceiver[I, F]) HandleState(state F) {
+	ir.stats.Logger().Debugw("InstrumentedStatusReceiver", "method", "HandleStatus", "state", state)
+	ir.receiver.HandleState(state)
+}
