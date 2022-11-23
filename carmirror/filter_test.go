@@ -169,32 +169,32 @@ func TestBloomAddAllWithCommon(t *testing.T) {
 	var bloomB Filter[MockBlockId] = makeBloom(128)
 	var bloomC Filter[MockBlockId] = makeBloom(128)
 
-	bloomA, _ = populateFilter(bloomA, 50)
-	bloomB, _ = populateFilter(bloomB, 50)
-	bloomC, _ = populateFilter(bloomC, 50)
+	bloomA, _ = populateFilter(bloomA, 40)
+	bloomB, _ = populateFilter(bloomB, 40)
+	bloomC, _ = populateFilter(bloomC, 40)
 
 	bloomA = bloomA.AddAll(bloomC)
 	bloomB = bloomB.AddAll(bloomC)
 
 	_, ok := bloomA.(*BloomFilter[MockBlockId, bloom.HashFunction[MockBlockId]])
 	if !ok {
-		t.Errorf("Expected bloomA to still be a BoomFilter")
+		t.Errorf("Expected bloomA to still be a BloomFilter")
 	}
 
 	_, ok = bloomB.(*BloomFilter[MockBlockId, bloom.HashFunction[MockBlockId]])
 	if !ok {
-		t.Errorf("Expected bloomB to still be a BoomFilter")
+		t.Errorf("Expected bloomB to still be a BloomFilter")
 	}
 
 	bloomA = bloomA.AddAll(bloomB)
 	_, ok = bloomA.(*BloomFilter[MockBlockId, bloom.HashFunction[MockBlockId]])
 	if !ok {
-		t.Errorf("Expected bloomA to still be a BoomFilter")
+		t.Errorf("Expected bloomA to still be a BloomFilter")
 	}
 
 	estimate := bloomA.GetCount()
-	if estimate < 80 || estimate > 120 {
-		t.Errorf("Expected bloomA count to be between 80 and 120; got %v", estimate)
+	if estimate < 100 || estimate > 140 {
+		t.Errorf("Expected bloomA count to be between 100 and 140; got %v", estimate)
 	}
 }
 

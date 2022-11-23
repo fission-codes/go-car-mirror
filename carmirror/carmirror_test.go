@@ -439,3 +439,15 @@ func TestMockTransferToEmptyStoreSingleBatch(t *testing.T) {
 		t.Errorf("Expected receiver store to have all nodes")
 	}
 }
+
+func TestMockTransferToEmptyStoreMultiBatch(t *testing.T) {
+	InitLog()
+	InitDefault()
+	senderStore := NewMockStore()
+	root := AddRandomTree(senderStore, 5, 5, 0.0)
+	receiverStore := NewMockStore()
+	MockBatchTransfer(senderStore, receiverStore, root, 10)
+	if !receiverStore.HasAll(root) {
+		t.Errorf("Expected receiver store to have all nodes")
+	}
+}

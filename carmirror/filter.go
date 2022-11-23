@@ -140,7 +140,7 @@ func (f *BloomFilter[K, H]) AddAll(other Filter[K]) Filter[K] {
 			working_bloom := f.filter.Copy()
 			err := working_bloom.Union(obf.filter)
 			if err == nil {
-				new_count := int(f.filter.EstimateEntries())
+				new_count := int(working_bloom.EstimateEntries())
 				if new_count < f.capacity {
 					f.filter = working_bloom
 					f.count = new_count
