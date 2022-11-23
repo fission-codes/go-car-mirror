@@ -180,27 +180,19 @@ func NewInstrumentedOrchestrator[F Flags, O Orchestrator[F]](orchestrator O, sta
 	}
 }
 
-func orError[F any](data F, err error) interface{} {
-	if err == nil {
-		return data
-	} else {
-		return err
-	}
-}
-
 func (io *InstrumentedOrchestrator[F, O]) Notify(event SessionEvent) error {
-	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "Notify", "event", event, "state", orError(io.orchestrator.GetState()))
+	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "Notify", "event", event, "state", io.orchestrator.GetState())
 	io.stats.Log(event.String())
 	err := io.orchestrator.Notify(event)
-	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "Notify", "result", err, "state", orError(io.orchestrator.GetState()))
+	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "Notify", "result", err, "state", io.orchestrator.GetState())
 	return err
 }
 
-func (io *InstrumentedOrchestrator[F, O]) GetState() (F, error) {
+func (io *InstrumentedOrchestrator[F, O]) GetState() F {
 	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "GetState")
-	result, err := io.orchestrator.GetState()
-	io.stats.Logger().Debugw("InstrumentedOrchestrator", "result", result, "err", err)
-	return result, err
+	result := io.orchestrator.GetState()
+	io.stats.Logger().Debugw("InstrumentedOrchestrator", "result", result)
+	return result
 }
 
 func (io *InstrumentedOrchestrator[F, O]) ReceiveState(state F) error {
@@ -210,11 +202,11 @@ func (io *InstrumentedOrchestrator[F, O]) ReceiveState(state F) error {
 	return err
 }
 
-func (io *InstrumentedOrchestrator[F, O]) IsClosed() (bool, error) {
+func (io *InstrumentedOrchestrator[F, O]) IsClosed() bool {
 	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "IsClosed")
-	result, err := io.orchestrator.IsClosed()
-	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "IsClosed", "result", result, "err", err)
-	return result, err
+	result := io.orchestrator.IsClosed()
+	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "IsClosed", "result", result)
+	return result
 }
 
 type InstrumentedBlockStore[I BlockId] struct {

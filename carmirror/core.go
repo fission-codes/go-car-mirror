@@ -176,12 +176,12 @@ type Orchestrator[F Flags] interface {
 	Notify(SessionEvent) error
 
 	// GetState is used to obtain state to send to a remote session.
-	GetState() (F, error)
+	GetState() F
 
 	// ReceiveState is used to receive state from a remote session.
 	ReceiveState(F) error
 
-	IsClosed() (bool, error)
+	IsClosed() bool
 }
 
 type SenderConnection[
@@ -274,12 +274,7 @@ func (rs *ReceiverSession[I, F]) Run() error {
 		sender.Close()
 	}()
 
-	isClosed, err := rs.orchestrator.IsClosed()
-	if err != nil {
-		return err
-	}
-
-	for !isClosed {
+	for !rs.orchestrator.IsClosed() {
 		// TODO: Look into use of defer for this.
 		rs.orchestrator.Notify(BEGIN_CHECK)
 
@@ -305,7 +300,6 @@ func (rs *ReceiverSession[I, F]) Run() error {
 		}
 		rs.orchestrator.Notify(END_CHECK)
 	}
-	sender.Close()
 
 	return nil
 }
@@ -346,14 +340,7 @@ func (ss *SenderSession[I, F]) Run() error {
 		return err
 	}
 
-	for {
-		isClosed, err := ss.orchestrator.IsClosed()
-		if err != nil {
-			return err
-		}
-		if isClosed {
-			break
-		}
+	for !ss.orchestrator.IsClosed() {
 
 		if err := ss.orchestrator.Notify(BEGIN_SEND); err != nil {
 			return err

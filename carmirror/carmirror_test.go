@@ -284,10 +284,7 @@ func NewMockStatusSender(channel chan<- StatusMessage, orchestrator Orchestrator
 }
 
 func (sn *MockStatusSender) SendStatus(have Filter[MockBlockId], want []MockBlockId) error {
-	state, err := sn.orchestrator.GetState()
-	if err != nil {
-		return err
-	}
+	state := sn.orchestrator.GetState()
 	sn.channel <- StatusMessage{state, have, want}
 	return nil
 }

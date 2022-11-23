@@ -118,10 +118,7 @@ func (sbbs *SimpleBatchBlockSender[I]) Flush() error {
 	sbbs.orchestrator.Notify(BEGIN_FLUSH)
 	defer sbbs.orchestrator.Notify(END_FLUSH)
 
-	batchStatus, err := sbbs.orchestrator.GetState()
-	if err != nil {
-		return err
-	}
+	batchStatus := sbbs.orchestrator.GetState()
 	sbbs.listMutex.Lock()
 	defer sbbs.listMutex.Unlock()
 	if err := sbbs.sender.SendList(batchStatus&SENDER, sbbs.list); err != nil {
@@ -166,8 +163,8 @@ func (bso *BatchSendOrchestrator) Notify(event SessionEvent) error {
 	return nil
 }
 
-func (bso *BatchSendOrchestrator) GetState() (BatchStatus, error) {
-	return bso.flags.GetAll(), nil
+func (bso *BatchSendOrchestrator) GetState() BatchStatus {
+	return bso.flags.GetAll()
 }
 
 func (bso *BatchSendOrchestrator) ReceiveState(batchStatus BatchStatus) error {
@@ -175,8 +172,8 @@ func (bso *BatchSendOrchestrator) ReceiveState(batchStatus BatchStatus) error {
 	return nil
 }
 
-func (bso *BatchSendOrchestrator) IsClosed() (bool, error) {
-	return bso.flags.Contains(SENDER_CLOSED), nil
+func (bso *BatchSendOrchestrator) IsClosed() bool {
+	return bso.flags.Contains(SENDER_CLOSED)
 }
 
 // BatchReceiveOrchestrator
@@ -209,8 +206,8 @@ func (bro *BatchReceiveOrchestrator) Notify(event SessionEvent) error {
 	return nil
 }
 
-func (bro *BatchReceiveOrchestrator) GetState() (BatchStatus, error) {
-	return bro.flags.GetAll(), nil
+func (bro *BatchReceiveOrchestrator) GetState() BatchStatus {
+	return bro.flags.GetAll()
 }
 
 func (bro *BatchReceiveOrchestrator) ReceiveState(batchStatus BatchStatus) error {
@@ -219,6 +216,6 @@ func (bro *BatchReceiveOrchestrator) ReceiveState(batchStatus BatchStatus) error
 	return nil
 }
 
-func (bro *BatchReceiveOrchestrator) IsClosed() (bool, error) {
-	return bro.flags.Contains(SENDER_CLOSED), nil
+func (bro *BatchReceiveOrchestrator) IsClosed() bool {
+	return bro.flags.Contains(SENDER_CLOSED)
 }
