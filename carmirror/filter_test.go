@@ -31,6 +31,23 @@ func checkPresent(filter Filter[MockBlockId], ids []MockBlockId) error {
 	return nil
 }
 
+func constituentFilters(cf *CompoundFilter[MockBlockId]) []Filter[MockBlockId] {
+	var result []Filter[MockBlockId]
+	cfa, ok := cf.a.(*CompoundFilter[MockBlockId])
+	if ok {
+		result = append(result, constituentFilters(cfa)...)
+	} else {
+		result = append(result, cf.a)
+	}
+	cfb, ok := cf.b.(*CompoundFilter[MockBlockId])
+	if ok {
+		result = append(result, constituentFilters(cfb)...)
+	} else {
+		result = append(result, cf.b)
+	}
+	return result
+}
+
 func ModelFilterTest(filter Filter[MockBlockId], t *testing.T) {
 
 	filter, ids := populateFilter(filter, 40)
@@ -192,7 +209,7 @@ func TestBloomAddAllWithCommon(t *testing.T) {
 		t.Errorf("Expected bloomA to still be a BloomFilter")
 	}
 
-	estimate := bloomA.GetCount()
+	estimate := bloomA.Count()
 	if estimate < 100 || estimate > 140 {
 		t.Errorf("Expected bloomA count to be between 100 and 140; got %v", estimate)
 	}
@@ -204,6 +221,53 @@ func TestRootAddAllNoOverflow(t *testing.T) {
 		NewRootFilter(makeBloom(52)),
 		t,
 	)
+}
+
+func TestAddAllCompound(t *testing.T) {
+	filterA := makeBloom(32)
+	filterB := makeBloom(32)
+
+	filterA, idsA := populateFilter(filterA, 40)
+	filterB, idsB := populateFilter(filterB, 40)
+
+	_, ok := filterA.(*CompoundFilter[MockBlockId])
+
+	if !ok {
+		t.Errorf("Expected filterA to be a combined filter")
+	}
+
+	_, ok = filterB.(*CompoundFilter[MockBlockId])
+
+	if !ok {
+		t.Errorf("Expected filterB to be a combined filter")
+	}
+
+	filterA = filterA.AddAll(filterB)
+
+	err := checkPresent(filterA, idsA)
+
+	if err != nil {
+		t.Errorf("Failed to retrieve expected items from combined filter")
+	}
+
+	err = checkPresent(filterA, idsB)
+
+	if err != nil {
+		t.Errorf("Failed to retrieve expected items from combined filter")
+	}
+
+	// Filter A should at this point have three separate constituent filters - two saturated filters, and one unsaturated
+	cfA, ok := filterA.(*CompoundFilter[MockBlockId])
+
+	if ok {
+		filters := constituentFilters(cfA)
+		if len(filters) != 3 {
+			t.Errorf("Resulting compound filter has size %v, expected 3", len(filters))
+		}
+	} else {
+		t.Errorf("expected final filter to be a compound filter")
+	}
+
 }
 
 func makeBloom(capacity uint) Filter[MockBlockId] {

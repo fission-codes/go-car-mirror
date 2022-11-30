@@ -48,7 +48,7 @@ type Snapshot struct {
 	values map[string]uint64
 }
 
-func (snap *Snapshot) GetCount(event string) uint64 {
+func (snap *Snapshot) Count(event string) uint64 {
 	return snap.values[event]
 }
 
@@ -89,7 +89,7 @@ func (snap *Snapshot) Write(log *zap.SugaredLogger) {
 }
 
 type Reporting interface {
-	GetCount(string) uint64
+	Count(string) uint64
 	Snapshot() *Snapshot
 }
 
@@ -129,7 +129,7 @@ func (ds *DefaultStatsAndReporting) Name() string {
 	return "root"
 }
 
-func (ds *DefaultStatsAndReporting) GetCount(event string) uint64 {
+func (ds *DefaultStatsAndReporting) Count(event string) uint64 {
 	ds.mutex.RLock()
 	defer ds.mutex.RUnlock()
 	return ds.values[event]
@@ -338,7 +338,7 @@ func NewInstrumentedStatusSender[I BlockId](sender StatusSender[I], stats Stats)
 }
 
 func (ibs *InstrumentedStatusSender[I]) SendStatus(have Filter[I], want []I) error {
-	ibs.stats.Logger().Debugw("InstrumentedStatusSender", "method", "SendStatus", "haves", have.GetCount(), "wants", len(want))
+	ibs.stats.Logger().Debugw("InstrumentedStatusSender", "method", "SendStatus", "haves", have.Count(), "wants", len(want))
 	err := ibs.sender.SendStatus(have, want)
 	if err == nil {
 		ibs.stats.Log("SendStatus.Ok")
@@ -374,7 +374,7 @@ func NewInstrumentedStatusReceiver[I BlockId, F Flags](receiver StatusReceiver[I
 }
 
 func (ir *InstrumentedStatusReceiver[I, F]) HandleStatus(have Filter[I], want []I) {
-	ir.stats.Logger().Debugw("InstrumentedStatusReceiver", "method", "HandleStatus", "haves", have.GetCount(), "wants", len(want))
+	ir.stats.Logger().Debugw("InstrumentedStatusReceiver", "method", "HandleStatus", "haves", have.Count(), "wants", len(want))
 	ir.receiver.HandleStatus(have, want)
 }
 

@@ -55,22 +55,6 @@ type MutablePointerResolver[I BlockId] interface {
 	Resolve(ptr string) (I, error)
 }
 
-// Filter is anything similar to a bloom filter that can efficiently (and without perfect accuracy) keep track of a list of `BlockId`s.
-type Filter[K comparable] interface {
-	// DoesNotContain returns true if id is not present in the filter.
-	DoesNotContain(id K) bool
-	// Get the total capacity of this filter; may return -1 to indicate unconstrained
-	GetCapacity() int
-	// Returns an estimate of the number of entries in the filter
-	GetCount() int
-	// Returns a copy or reference as appropriate
-	Copy() Filter[K]
-	// Mutate operations follow the go convention normally mutating but returning a new filter when necessary
-	AddAll(other Filter[K]) Filter[K]
-	Add(id K) Filter[K]
-	Clear() Filter[K]
-}
-
 // BlockSender is responsible for sending blocks - immediately and asynchronously, or via a buffer.
 // The details are up to the implementor.
 type BlockSender[I BlockId] interface {
