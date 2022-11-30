@@ -1,4 +1,4 @@
-package carmirror
+package filter
 
 import (
 	"errors"
@@ -237,61 +237,61 @@ func (f *BloomFilter[K, H]) Copy() Filter[K] {
 }
 
 // A thread-safe Filter which wraps a regular Filter with a mutex.
-type RootFilter[K comparable] struct {
+type SynchronizedFilter[K comparable] struct {
 	filter Filter[K]
 	lock   sync.RWMutex
 }
 
-func NewRootFilter[K comparable](filter Filter[K]) *RootFilter[K] {
-	return &RootFilter[K]{filter: filter, lock: sync.RWMutex{}}
+func NewSynchronizedFilter[K comparable](filter Filter[K]) *SynchronizedFilter[K] {
+	return &SynchronizedFilter[K]{filter: filter, lock: sync.RWMutex{}}
 }
 
-func (rf *RootFilter[K]) DoesNotContain(id K) bool {
+func (rf *SynchronizedFilter[K]) DoesNotContain(id K) bool {
 	rf.lock.RLock()
 	defer rf.lock.RUnlock()
 	return rf.filter.DoesNotContain(id)
 }
 
-func (rf *RootFilter[K]) TryAddAll(other Filter[K]) error {
+func (rf *SynchronizedFilter[K]) TryAddAll(other Filter[K]) error {
 	rf.lock.Lock()
 	defer rf.lock.Unlock()
 	return rf.filter.TryAddAll(other)
 }
 
-func (rf *RootFilter[K]) AddAll(other Filter[K]) Filter[K] {
+func (rf *SynchronizedFilter[K]) AddAll(other Filter[K]) Filter[K] {
 	rf.lock.Lock()
 	defer rf.lock.Unlock()
 	rf.filter = rf.filter.AddAll(other)
 	return rf
 }
 
-func (rf *RootFilter[K]) Add(id K) Filter[K] {
+func (rf *SynchronizedFilter[K]) Add(id K) Filter[K] {
 	rf.lock.Lock()
 	defer rf.lock.Unlock()
 	rf.filter = rf.filter.Add(id)
 	return rf
 }
 
-func (rf *RootFilter[K]) Clear() Filter[K] {
+func (rf *SynchronizedFilter[K]) Clear() Filter[K] {
 	rf.lock.Lock()
 	defer rf.lock.Unlock()
 	rf.filter = rf.filter.Clear()
 	return rf
 }
 
-func (rf *RootFilter[K]) Copy() Filter[K] {
+func (rf *SynchronizedFilter[K]) Copy() Filter[K] {
 	rf.lock.Lock()
 	defer rf.lock.Unlock()
-	return &RootFilter[K]{filter: rf.filter.Copy(), lock: sync.RWMutex{}}
+	return &SynchronizedFilter[K]{filter: rf.filter.Copy(), lock: sync.RWMutex{}}
 }
 
-func (rf *RootFilter[K]) Capacity() int {
+func (rf *SynchronizedFilter[K]) Capacity() int {
 	rf.lock.RLock()
 	defer rf.lock.RUnlock()
 	return rf.filter.Capacity()
 }
 
-func (rf *RootFilter[K]) Count() int {
+func (rf *SynchronizedFilter[K]) Count() int {
 	rf.lock.RLock()
 	defer rf.lock.RUnlock()
 	return rf.filter.Count()

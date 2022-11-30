@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "../../../rs-car-mirror"
+		},
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../go-bloom"
+		}
+	],
+    "settings": {}
+}

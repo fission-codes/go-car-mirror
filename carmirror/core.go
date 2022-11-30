@@ -6,6 +6,8 @@ import (
 	"github.com/fission-codes/go-car-mirror/errors"
 	"go.uber.org/zap"
 	"golang.org/x/exp/constraints"
+
+	. "github.com/fission-codes/go-car-mirror/filter"
 )
 
 var log *zap.SugaredLogger

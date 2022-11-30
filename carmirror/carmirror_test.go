@@ -9,6 +9,7 @@ import (
 
 	"math/rand"
 
+	. "github.com/fission-codes/go-car-mirror/filter"
 	"github.com/fission-codes/go-car-mirror/iterator"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -362,7 +363,7 @@ func MockBatchTransfer(sender_store *MockStore, receiver_store *MockStore, root 
 	sender_session := NewSenderSession[MockBlockId, BatchStatus](
 		NewInstrumentedBlockStore[MockBlockId](sender_store, GLOBAL_STATS.WithContext("SenderStore")),
 		connection,
-		NewRootFilter(makeBloom(1024)),
+		NewSynchronizedFilter(makeBloom(1024)),
 		NewInstrumentedOrchestrator[BatchStatus](NewBatchSendOrchestrator(), GLOBAL_STATS.WithContext("BatchSendOrchestrator")),
 	)
 
@@ -371,7 +372,7 @@ func MockBatchTransfer(sender_store *MockStore, receiver_store *MockStore, root 
 	receiver_session := NewReceiverSession[MockBlockId, BatchStatus](
 		NewInstrumentedBlockStore[MockBlockId](receiver_store, GLOBAL_STATS.WithContext("ReceiverStore")),
 		connection,
-		NewSimpleStatusAccumulator[MockBlockId](NewRootFilter(makeBloom(1024))),
+		NewSimpleStatusAccumulator[MockBlockId](NewSynchronizedFilter(makeBloom(1024))),
 		NewInstrumentedOrchestrator[BatchStatus](NewBatchReceiveOrchestrator(), GLOBAL_STATS.WithContext("BatchReceiveOrchestrator")),
 	)
 

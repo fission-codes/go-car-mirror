@@ -3,6 +3,7 @@ package carmirror
 import (
 	"sync"
 
+	. "github.com/fission-codes/go-car-mirror/filter"
 	"golang.org/x/exp/maps"
 )
 

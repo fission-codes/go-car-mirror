@@ -1,6 +1,7 @@
-package carmirror
+package filter
 
 import (
+	"crypto/rand"
 	"errors"
 	"testing"
 
@@ -8,12 +9,21 @@ import (
 	"github.com/zeebo/xxh3"
 )
 
-func IdHash(id MockBlockId, seed uint64) uint64 {
+type TestId [32]byte
+
+func RandId() [32]byte {
+	// id := make([]byte, 32)
+	var id [32]byte
+	rand.Read(id[:])
+	return id
+}
+
+func IdHash(id TestId, seed uint64) uint64 {
 	return xxh3.HashSeed(id[:], seed)
 }
 
-func populateFilter(filter Filter[MockBlockId], count int) (Filter[MockBlockId], []MockBlockId) {
-	pf := make([]MockBlockId, 0, count)
+func populateFilter(filter Filter[TestId], count int) (Filter[TestId], []TestId) {
+	pf := make([]TestId, 0, count)
 	for i := 0; i < count; i++ {
 		id := RandId()
 		filter = filter.Add(id)
@@ -22,7 +32,7 @@ func populateFilter(filter Filter[MockBlockId], count int) (Filter[MockBlockId],
 	return filter, pf
 }
 
-func checkPresent(filter Filter[MockBlockId], ids []MockBlockId) error {
+func checkPresent(filter Filter[TestId], ids []TestId) error {
 	for _, id := range ids {
 		if filter.DoesNotContain(id) {
 			return errors.New("failed to retrieve item")
@@ -31,15 +41,15 @@ func checkPresent(filter Filter[MockBlockId], ids []MockBlockId) error {
 	return nil
 }
 
-func constituentFilters(cf *CompoundFilter[MockBlockId]) []Filter[MockBlockId] {
-	var result []Filter[MockBlockId]
-	cfa, ok := cf.a.(*CompoundFilter[MockBlockId])
+func constituentFilters(cf *CompoundFilter[TestId]) []Filter[TestId] {
+	var result []Filter[TestId]
+	cfa, ok := cf.a.(*CompoundFilter[TestId])
 	if ok {
 		result = append(result, constituentFilters(cfa)...)
 	} else {
 		result = append(result, cf.a)
 	}
-	cfb, ok := cf.b.(*CompoundFilter[MockBlockId])
+	cfb, ok := cf.b.(*CompoundFilter[TestId])
 	if ok {
 		result = append(result, constituentFilters(cfb)...)
 	} else {
@@ -48,7 +58,7 @@ func constituentFilters(cf *CompoundFilter[MockBlockId]) []Filter[MockBlockId] {
 	return result
 }
 
-func ModelFilterTest(filter Filter[MockBlockId], t *testing.T) {
+func ModelFilterTest(filter Filter[TestId], t *testing.T) {
 
 	filter, ids := populateFilter(filter, 40)
 	if checkPresent(filter, ids) != nil {
@@ -72,23 +82,23 @@ func TestBloomFilter(t *testing.T) {
 	ModelFilterTest(makeBloom(64), t)
 }
 
-func TestRootFilter(t *testing.T) {
-	ModelFilterTest(NewRootFilter[MockBlockId](makeBloom(64)), t)
+func TestSynchronizedFilter(t *testing.T) {
+	ModelFilterTest(NewSynchronizedFilter[TestId](makeBloom(64)), t)
 }
 
 func TestBloomOverflow(t *testing.T) {
 
-	var bt Filter[MockBlockId] = makeBloom(32)
+	var bt Filter[TestId] = makeBloom(32)
 
 	for i := 0; i < 52; i++ {
 		id := RandId()
 		bt = bt.Add(id)
 	}
 
-	cf, ok := bt.(*CompoundFilter[MockBlockId])
+	cf, ok := bt.(*CompoundFilter[TestId])
 
 	if ok {
-		bfa, ok := cf.a.(*BloomFilter[MockBlockId, bloom.HashFunction[MockBlockId]])
+		bfa, ok := cf.a.(*BloomFilter[TestId, bloom.HashFunction[TestId]])
 		if ok {
 			if bfa.count != 32 {
 				t.Errorf("Expected side a to be fully populated, but got %v items", bfa.count)
@@ -96,7 +106,7 @@ func TestBloomOverflow(t *testing.T) {
 		} else {
 			t.Errorf("Expected side a to be a bloom")
 		}
-		bfb, ok := cf.b.(*BloomFilter[MockBlockId, bloom.HashFunction[MockBlockId]])
+		bfb, ok := cf.b.(*BloomFilter[TestId, bloom.HashFunction[TestId]])
 		if ok {
 			if bfb.count != 20 {
 				t.Errorf("Expected side b to have 20 items, but got %v items", bfb.count)
@@ -109,7 +119,7 @@ func TestBloomOverflow(t *testing.T) {
 	}
 }
 
-func ModelTestAddAll(filterA Filter[MockBlockId], filterB Filter[MockBlockId], t *testing.T) {
+func ModelTestAddAll(filterA Filter[TestId], filterB Filter[TestId], t *testing.T) {
 
 	filterA, idsA := populateFilter(filterA, 32)
 	filterB, idsB := populateFilter(filterB, 32)
@@ -139,26 +149,26 @@ func TestBloomAddAll(t *testing.T) {
 
 func TestRootAddAll(t *testing.T) {
 	ModelTestAddAll(
-		NewRootFilter(makeBloom(128)),
-		NewRootFilter(makeBloom(128)),
+		NewSynchronizedFilter(makeBloom(128)),
+		NewSynchronizedFilter(makeBloom(128)),
 		t,
 	)
 }
 
 func TestBloomAddAllOverflow(t *testing.T) {
 
-	var bloomA Filter[MockBlockId] = makeBloom(128)
-	var bloomB Filter[MockBlockId] = makeBloom(128)
+	var bloomA Filter[TestId] = makeBloom(128)
+	var bloomB Filter[TestId] = makeBloom(128)
 
 	bloomA, _ = populateFilter(bloomA, 100)
 	bloomB, _ = populateFilter(bloomB, 100)
 
 	bloomA = bloomA.AddAll(bloomB)
 
-	cf, ok := bloomA.(*CompoundFilter[MockBlockId])
+	cf, ok := bloomA.(*CompoundFilter[TestId])
 
 	if ok {
-		bfa, ok := cf.a.(*BloomFilter[MockBlockId, bloom.HashFunction[MockBlockId]])
+		bfa, ok := cf.a.(*BloomFilter[TestId, bloom.HashFunction[TestId]])
 		if ok {
 			if bfa.count != 100 {
 				t.Errorf("Expected side a to have 100 items, but got %v items", bfa.count)
@@ -166,7 +176,7 @@ func TestBloomAddAllOverflow(t *testing.T) {
 		} else {
 			t.Errorf("Expected side a to be a bloom")
 		}
-		bfb, ok := cf.b.(*BloomFilter[MockBlockId, bloom.HashFunction[MockBlockId]])
+		bfb, ok := cf.b.(*BloomFilter[TestId, bloom.HashFunction[TestId]])
 		if ok {
 			if bfb.count != 100 {
 				t.Errorf("Expected side b to have 100 items, but got %v items", bfb.count)
@@ -182,9 +192,9 @@ func TestBloomAddAllOverflow(t *testing.T) {
 
 func TestBloomAddAllWithCommon(t *testing.T) {
 
-	var bloomA Filter[MockBlockId] = makeBloom(128)
-	var bloomB Filter[MockBlockId] = makeBloom(128)
-	var bloomC Filter[MockBlockId] = makeBloom(128)
+	var bloomA Filter[TestId] = makeBloom(128)
+	var bloomB Filter[TestId] = makeBloom(128)
+	var bloomC Filter[TestId] = makeBloom(128)
 
 	bloomA, _ = populateFilter(bloomA, 40)
 	bloomB, _ = populateFilter(bloomB, 40)
@@ -193,18 +203,18 @@ func TestBloomAddAllWithCommon(t *testing.T) {
 	bloomA = bloomA.AddAll(bloomC)
 	bloomB = bloomB.AddAll(bloomC)
 
-	_, ok := bloomA.(*BloomFilter[MockBlockId, bloom.HashFunction[MockBlockId]])
+	_, ok := bloomA.(*BloomFilter[TestId, bloom.HashFunction[TestId]])
 	if !ok {
 		t.Errorf("Expected bloomA to still be a BloomFilter")
 	}
 
-	_, ok = bloomB.(*BloomFilter[MockBlockId, bloom.HashFunction[MockBlockId]])
+	_, ok = bloomB.(*BloomFilter[TestId, bloom.HashFunction[TestId]])
 	if !ok {
 		t.Errorf("Expected bloomB to still be a BloomFilter")
 	}
 
 	bloomA = bloomA.AddAll(bloomB)
-	_, ok = bloomA.(*BloomFilter[MockBlockId, bloom.HashFunction[MockBlockId]])
+	_, ok = bloomA.(*BloomFilter[TestId, bloom.HashFunction[TestId]])
 	if !ok {
 		t.Errorf("Expected bloomA to still be a BloomFilter")
 	}
@@ -217,8 +227,8 @@ func TestBloomAddAllWithCommon(t *testing.T) {
 
 func TestRootAddAllNoOverflow(t *testing.T) {
 	ModelTestAddAll(
-		NewRootFilter(makeBloom(52)),
-		NewRootFilter(makeBloom(52)),
+		NewSynchronizedFilter(makeBloom(52)),
+		NewSynchronizedFilter(makeBloom(52)),
 		t,
 	)
 }
@@ -230,13 +240,13 @@ func TestAddAllCompound(t *testing.T) {
 	filterA, idsA := populateFilter(filterA, 40)
 	filterB, idsB := populateFilter(filterB, 40)
 
-	_, ok := filterA.(*CompoundFilter[MockBlockId])
+	_, ok := filterA.(*CompoundFilter[TestId])
 
 	if !ok {
 		t.Errorf("Expected filterA to be a combined filter")
 	}
 
-	_, ok = filterB.(*CompoundFilter[MockBlockId])
+	_, ok = filterB.(*CompoundFilter[TestId])
 
 	if !ok {
 		t.Errorf("Expected filterB to be a combined filter")
@@ -257,7 +267,7 @@ func TestAddAllCompound(t *testing.T) {
 	}
 
 	// Filter A should at this point have three separate constituent filters - two saturated filters, and one unsaturated
-	cfA, ok := filterA.(*CompoundFilter[MockBlockId])
+	cfA, ok := filterA.(*CompoundFilter[TestId])
 
 	if ok {
 		filters := constituentFilters(cfA)
@@ -270,6 +280,6 @@ func TestAddAllCompound(t *testing.T) {
 
 }
 
-func makeBloom(capacity uint) Filter[MockBlockId] {
-	return NewBloomFilter[MockBlockId, bloom.HashFunction[MockBlockId]](capacity, IdHash)
+func makeBloom(capacity uint) Filter[TestId] {
+	return NewBloomFilter[TestId, bloom.HashFunction[TestId]](capacity, IdHash)
 }
