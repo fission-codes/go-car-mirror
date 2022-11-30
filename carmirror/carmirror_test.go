@@ -9,8 +9,10 @@ import (
 
 	"math/rand"
 
+	"github.com/fission-codes/go-bloom"
 	. "github.com/fission-codes/go-car-mirror/filter"
 	"github.com/fission-codes/go-car-mirror/iterator"
+	"github.com/zeebo/xxh3"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -55,6 +57,14 @@ func RandMockBlock() MockBlock {
 
 func RandBool(p float64) bool {
 	return rand.Float64() < p
+}
+
+func IdHash(id MockBlockId, seed uint64) uint64 {
+	return xxh3.HashSeed(id[:], seed)
+}
+
+func makeBloom(capacity uint) Filter[MockBlockId] {
+	return NewBloomFilter[MockBlockId, bloom.HashFunction[MockBlockId]](capacity, IdHash)
 }
 
 func AddRandomTree(store *MockStore, maxChildren int, maxDepth int, pCrosslink float64) MockBlockId {
