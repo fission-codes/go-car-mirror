@@ -2,10 +2,10 @@ package filter
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"testing"
 
-	"github.com/fission-codes/go-bloom"
 	"github.com/zeebo/xxh3"
 )
 
@@ -43,17 +43,17 @@ func checkPresent(filter Filter[TestId], ids []TestId) error {
 
 func constituentFilters(cf *CompoundFilter[TestId]) []Filter[TestId] {
 	var result []Filter[TestId]
-	cfa, ok := cf.a.(*CompoundFilter[TestId])
+	cfa, ok := cf.SideA.(*CompoundFilter[TestId])
 	if ok {
 		result = append(result, constituentFilters(cfa)...)
 	} else {
-		result = append(result, cf.a)
+		result = append(result, cf.SideA)
 	}
-	cfb, ok := cf.b.(*CompoundFilter[TestId])
+	cfb, ok := cf.SideB.(*CompoundFilter[TestId])
 	if ok {
 		result = append(result, constituentFilters(cfb)...)
 	} else {
-		result = append(result, cf.b)
+		result = append(result, cf.SideB)
 	}
 	return result
 }
@@ -83,7 +83,7 @@ func TestBloomFilter(t *testing.T) {
 }
 
 func TestSynchronizedFilter(t *testing.T) {
-	ModelFilterTest(NewSynchronizedFilter[TestId](makeBloom(64)), t)
+	ModelFilterTest(NewSynchronizedFilter(makeBloom(64)), t)
 }
 
 func TestBloomOverflow(t *testing.T) {
@@ -98,7 +98,7 @@ func TestBloomOverflow(t *testing.T) {
 	cf, ok := bt.(*CompoundFilter[TestId])
 
 	if ok {
-		bfa, ok := cf.a.(*BloomFilter[TestId, bloom.HashFunction[TestId]])
+		bfa, ok := cf.SideA.(*BloomFilter[TestId])
 		if ok {
 			if bfa.count != 32 {
 				t.Errorf("Expected side a to be fully populated, but got %v items", bfa.count)
@@ -106,7 +106,7 @@ func TestBloomOverflow(t *testing.T) {
 		} else {
 			t.Errorf("Expected side a to be a bloom")
 		}
-		bfb, ok := cf.b.(*BloomFilter[TestId, bloom.HashFunction[TestId]])
+		bfb, ok := cf.SideB.(*BloomFilter[TestId])
 		if ok {
 			if bfb.count != 20 {
 				t.Errorf("Expected side b to have 20 items, but got %v items", bfb.count)
@@ -168,7 +168,7 @@ func TestBloomAddAllOverflow(t *testing.T) {
 	cf, ok := bloomA.(*CompoundFilter[TestId])
 
 	if ok {
-		bfa, ok := cf.a.(*BloomFilter[TestId, bloom.HashFunction[TestId]])
+		bfa, ok := cf.SideA.(*BloomFilter[TestId])
 		if ok {
 			if bfa.count != 100 {
 				t.Errorf("Expected side a to have 100 items, but got %v items", bfa.count)
@@ -176,7 +176,7 @@ func TestBloomAddAllOverflow(t *testing.T) {
 		} else {
 			t.Errorf("Expected side a to be a bloom")
 		}
-		bfb, ok := cf.b.(*BloomFilter[TestId, bloom.HashFunction[TestId]])
+		bfb, ok := cf.SideB.(*BloomFilter[TestId])
 		if ok {
 			if bfb.count != 100 {
 				t.Errorf("Expected side b to have 100 items, but got %v items", bfb.count)
@@ -203,18 +203,18 @@ func TestBloomAddAllWithCommon(t *testing.T) {
 	bloomA = bloomA.AddAll(bloomC)
 	bloomB = bloomB.AddAll(bloomC)
 
-	_, ok := bloomA.(*BloomFilter[TestId, bloom.HashFunction[TestId]])
+	_, ok := bloomA.(*BloomFilter[TestId])
 	if !ok {
 		t.Errorf("Expected bloomA to still be a BloomFilter")
 	}
 
-	_, ok = bloomB.(*BloomFilter[TestId, bloom.HashFunction[TestId]])
+	_, ok = bloomB.(*BloomFilter[TestId])
 	if !ok {
 		t.Errorf("Expected bloomB to still be a BloomFilter")
 	}
 
 	bloomA = bloomA.AddAll(bloomB)
-	_, ok = bloomA.(*BloomFilter[TestId, bloom.HashFunction[TestId]])
+	_, ok = bloomA.(*BloomFilter[TestId])
 	if !ok {
 		t.Errorf("Expected bloomA to still be a BloomFilter")
 	}
@@ -277,9 +277,34 @@ func TestAddAllCompound(t *testing.T) {
 	} else {
 		t.Errorf("expected final filter to be a compound filter")
 	}
-
 }
 
+func TestBloomSerializationJson(t *testing.T) {
+	bloom1 := makeBloom(64)
+	bytes, err := json.Marshal(bloom1)
+	if err != nil {
+		t.Errorf("Expected bloom to marshal to Json, got error %v instead", err)
+	} else {
+		bloom2 := BloomFilter[TestId]{filter: nil, capacity: 0, count: 0, hashFunction: 0}
+		err = json.Unmarshal(bytes, &bloom2)
+		if err != nil {
+			t.Errorf("Expected json %s to unmarshal to bloom, got error %v instead", bytes, err)
+		}
+		if !bloom1.Equal(&bloom2) {
+			t.Errorf("Expected blooms to be equal after serialization/deserialization")
+		}
+	}
+}
+
+const TEST_HASHER = 19710403 // No siginificance to this number
+
 func makeBloom(capacity uint) Filter[TestId] {
-	return NewBloomFilter[TestId, bloom.HashFunction[TestId]](capacity, IdHash)
+	// Normally this would occur in package init code, but this is just a test
+	RegisterHash(TEST_HASHER, IdHash)
+	if new, err := TryNewBloomFilter[TestId](capacity, TEST_HASHER); err == nil {
+		return new
+	} else {
+		panic("failed to instantiate test bloom")
+	}
+
 }
