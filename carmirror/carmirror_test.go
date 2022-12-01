@@ -63,7 +63,7 @@ func IdHash(id MockBlockId, seed uint64) uint64 {
 }
 
 func makeBloom(capacity uint) filter.Filter[MockBlockId] {
-	return filter.NewBloomFilter[MockBlockId](capacity, IdHash)
+	return filter.NewBloomFilter(capacity, IdHash)
 }
 
 func AddRandomTree(store *MockStore, maxChildren int, maxDepth int, pCrosslink float64) MockBlockId {
@@ -197,7 +197,7 @@ func (bs *MockStore) doHasAll(root MockBlockId) error {
 
 func (bs *MockStore) All() (<-chan MockBlockId, error) {
 	values := make(chan MockBlockId, len(bs.blocks))
-	for k, _ := range bs.blocks {
+	for k := range bs.blocks {
 		values <- k
 	}
 	close(values)
@@ -375,7 +375,7 @@ func (conn *MockConnection) ListenStatus(sender StatusReceiver[MockBlockId, Batc
 }
 
 func (conn *MockConnection) ListenBlocks(receiver BlockReceiver[MockBlockId, BatchStatus]) error {
-	conn.batchBlockChannel.SetBlockListener(NewSimpleBatchBlockReceiver[MockBlockId](receiver))
+	conn.batchBlockChannel.SetBlockListener(NewSimpleBatchBlockReceiver(receiver))
 	return conn.batchBlockChannel.listen()
 }
 
