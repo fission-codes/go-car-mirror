@@ -188,11 +188,11 @@ func (bs *MockStore) doHasAll(root MockBlockId) error {
 }
 
 func (bs *MockStore) All() (<-chan MockBlockId, error) {
-	// values := make([]*Block[MockBlockId], len(bs.blocks))
-	values := make(chan MockBlockId)
+	values := make(chan MockBlockId, len(bs.blocks))
 	for k, _ := range bs.blocks {
 		values <- k
 	}
+	close(values)
 	return values, nil
 }
 
@@ -201,6 +201,24 @@ func (bs *MockStore) Add(block Block[MockBlockId]) error {
 	bs.blocks[id] = block
 
 	return nil
+}
+
+func (bs *MockStore) AddAll(store BlockStore[MockBlockId]) error {
+	if blocks, err := store.All(); err == nil {
+		for id := range blocks {
+			if block, err := store.Get(id); err == nil {
+				err = bs.Add(block)
+				if err != nil {
+					return err
+				}
+			} else {
+				return err
+			}
+		}
+		return nil
+	} else {
+		return err
+	}
 }
 
 func (bs *MockStore) RandomBlock() (Block[MockBlockId], error) {
@@ -456,6 +474,24 @@ func TestMockTransferToEmptyStoreMultiBatch(t *testing.T) {
 	senderStore := NewMockStore()
 	root := AddRandomTree(senderStore, 5, 5, 0.0)
 	receiverStore := NewMockStore()
+	MockBatchTransfer(senderStore, receiverStore, root, 10)
+	if !receiverStore.HasAll(root) {
+		t.Errorf("Expected receiver store to have all nodes")
+	}
+}
+
+func TestMockTransferSingleMissingBlockBatch(t *testing.T) {
+	InitLog()
+	InitDefault()
+	senderStore := NewMockStore()
+	root := AddRandomTree(senderStore, 5, 5, 0.0)
+	receiverStore := NewMockStore()
+	receiverStore.AddAll(senderStore)
+	block, err := receiverStore.RandomBlock()
+	if err != nil {
+		t.Errorf("Could not fild random block %v", err)
+	}
+	receiverStore.Remove(block.Id())
 	MockBatchTransfer(senderStore, receiverStore, root, 10)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
