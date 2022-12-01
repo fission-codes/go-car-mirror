@@ -355,14 +355,14 @@ func NewMockConnection(maxBatchSize uint) *MockConnection {
 	}
 }
 
-func (conn *MockConnection) BlockSender(orchestrator Orchestrator[BatchStatus]) BlockSender[MockBlockId] {
+func (conn *MockConnection) OpenBlockSender(orchestrator Orchestrator[BatchStatus]) BlockSender[MockBlockId] {
 	return NewInstrumentedBlockSender[MockBlockId](
 		NewSimpleBatchBlockSender[MockBlockId](&conn.batchBlockChannel, orchestrator, uint32(conn.maxBatchSize)),
 		GLOBAL_STATS.WithContext("MockBlockSender"),
 	)
 }
 
-func (conn *MockConnection) StatusSender(orchestrator Orchestrator[BatchStatus]) StatusSender[MockBlockId] {
+func (conn *MockConnection) OpenStatusSender(orchestrator Orchestrator[BatchStatus]) StatusSender[MockBlockId] {
 	return NewInstrumentedStatusSender[MockBlockId](
 		NewMockStatusSender(conn.statusChannel, orchestrator),
 		GLOBAL_STATS.WithContext("MockStatusSender"),

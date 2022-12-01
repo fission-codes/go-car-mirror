@@ -219,14 +219,14 @@ type SenderConnection[
 	F Flags,
 	I BlockId,
 ] interface {
-	BlockSender(Orchestrator[F]) BlockSender[I]
+	OpenBlockSender(Orchestrator[F]) BlockSender[I]
 }
 
 type ReceiverConnection[
 	F Flags,
 	I BlockId,
 ] interface {
-	StatusSender(Orchestrator[F]) StatusSender[I]
+	OpenStatusSender(Orchestrator[F]) StatusSender[I]
 }
 
 type ReceiverSession[
@@ -298,7 +298,7 @@ func (rs *ReceiverSession[I, F]) HandleBlock(block Block[I]) {
 }
 
 func (rs *ReceiverSession[I, F]) Run() error {
-	sender := rs.connection.StatusSender(rs.orchestrator)
+	sender := rs.connection.OpenStatusSender(rs.orchestrator)
 
 	rs.orchestrator.Notify(BEGIN_SESSION)
 	defer func() {
@@ -367,7 +367,7 @@ func NewSenderSession[I BlockId, F Flags](store BlockStore[I], connection Sender
 }
 
 func (ss *SenderSession[I, F]) Run() error {
-	sender := ss.connection.BlockSender(ss.orchestrator)
+	sender := ss.connection.OpenBlockSender(ss.orchestrator)
 	if err := ss.orchestrator.Notify(BEGIN_SESSION); err != nil {
 		return err
 	}
