@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/fission-codes/go-bloom"
+	"golang.org/x/exp/maps"
 )
 
 // Filter is anything similar to a bloom filter that can efficiently (and without perfect accuracy) keep track of a list of `BlockId`s.
@@ -29,6 +30,45 @@ type Filter[K comparable] interface {
 	TryAddAll(other Filter[K]) error
 	// Add All will create a new filter if necessary to accomodate the merge
 	AddAll(other Filter[K]) Filter[K]
+}
+
+type FilterWireFormat[K comparable] struct {
+	BL *BloomFilter[K]    `json:"bl,omitempty"`
+	CM *CompoundFilter[K] `json:"cm,omitempty"`
+	EM *EmptyFilter[K]    `json:"em,omitempty"`
+	PF *PerfectFilter[K]  `json:"pf,omitempty"`
+}
+
+func (wf *FilterWireFormat[K]) any() Filter[K] {
+	if wf.BL != nil {
+		return wf.BL
+	}
+	if wf.CM != nil {
+		return wf.CM
+	}
+	if wf.EM != nil {
+		return wf.EM
+	}
+	if wf.PF != nil {
+		return wf.PF
+	}
+	return nil
+}
+
+func NewFilterWireFormat[K comparable](filter Filter[K]) *FilterWireFormat[K] {
+	if bl, ok := filter.(*BloomFilter[K]); ok {
+		return &FilterWireFormat[K]{BL: bl}
+	}
+	if cm, ok := filter.(*CompoundFilter[K]); ok {
+		return &FilterWireFormat[K]{CM: cm}
+	}
+	if em, ok := filter.(*EmptyFilter[K]); ok {
+		return &FilterWireFormat[K]{EM: em}
+	}
+	if pf, ok := filter.(*PerfectFilter[K]); ok {
+		return &FilterWireFormat[K]{PF: pf}
+	}
+	return nil
 }
 
 type Side uint8
@@ -142,6 +182,29 @@ func (cf *CompoundFilter[K]) Equal(other Filter[K]) bool {
 	return ok && cf.SideA.Equal(ocf.SideA) && cf.SideB.Equal(ocf.SideB)
 }
 
+func (cf *CompoundFilter[K]) UnmarshalJSON(bytes []byte) error {
+	var wireFormat CompoundFilterWireFormat[K] = CompoundFilterWireFormat[K]{}
+	err := json.Unmarshal(bytes, &wireFormat)
+	if err == nil {
+		cf.SideA = wireFormat.SideA.any()
+		cf.SideB = wireFormat.SideB.any()
+	}
+	return err
+}
+
+func (cf *CompoundFilter[K]) MarshalJSON() ([]byte, error) {
+	var wireFormat CompoundFilterWireFormat[K] = CompoundFilterWireFormat[K]{
+		SideA: NewFilterWireFormat(cf.SideA),
+		SideB: NewFilterWireFormat(cf.SideB),
+	}
+	return json.Marshal(wireFormat)
+}
+
+type CompoundFilterWireFormat[K comparable] struct {
+	SideA *FilterWireFormat[K] `json:"a"`
+	SideB *FilterWireFormat[K] `json:"b"`
+}
+
 // A bloom filter is a classic, fixed-capacity bloom filter which also stores an approximate count of the number of entries
 type BloomFilter[K comparable] struct {
 	filter       *bloom.Filter[K]
@@ -156,7 +219,7 @@ func NewBloomFilter[K comparable](capacity uint, function bloom.HashFunction[K])
 		capacity = math.MaxInt
 	}
 	bitCount, hashCount := bloom.EstimateParameters(uint64(capacity), bloom.EstimateFPP(uint64(capacity)))
-	filter, _ := bloom.NewFilter[K](bitCount, hashCount, function)
+	filter, _ := bloom.NewFilter(bitCount, hashCount, function)
 
 	return &BloomFilter[K]{
 		filter:       filter,
@@ -191,7 +254,7 @@ func TryNewBloomFilter[K comparable](capacity uint, function uint64) (*BloomFilt
 
 func TryNewBloomFilterFromBytes[K comparable](bytes []byte, bitCount uint64, hashCount uint64, function uint64) (*BloomFilter[K], error) {
 	if hashFunction, ok := RegistryLookup[K](function); ok {
-		filter := NewBloomFilterFromBytes[K](bytes, bitCount, hashCount, hashFunction)
+		filter := NewBloomFilterFromBytes(bytes, bitCount, hashCount, hashFunction)
 		filter.hashFunction = function
 		return filter, nil
 	} else {
@@ -208,7 +271,16 @@ func (f *BloomFilter[K]) Add(id K) Filter[K] {
 		}
 		return f
 	} else {
-		var extension Filter[K] = NewBloomFilter[K](uint(f.capacity)*2, f.filter.HashFunction())
+		var extension Filter[K]
+		var err error
+		if f.hashFunction != 0 {
+			// use the hash function Id if we have one
+			extension, err = TryNewBloomFilter[K](uint(f.capacity)*2, f.hashFunction)
+		}
+		if f.hashFunction == 0 || err != nil {
+			// otherwise fall back to using the hash function pointer from the bloom itself
+			extension = NewBloomFilter(uint(f.capacity)*2, f.filter.HashFunction())
+		}
 		extension = extension.Add(id)
 		return &CompoundFilter[K]{
 			SideA: f,
@@ -270,14 +342,15 @@ func (f *BloomFilter[K]) Count() int {
 }
 
 func (f *BloomFilter[K]) Clear() Filter[K] {
-	return NewBloomFilter[K](uint(f.capacity), f.filter.HashFunction())
+	return NewBloomFilter(uint(f.capacity), f.filter.HashFunction())
 }
 
 func (f *BloomFilter[K]) Copy() Filter[K] {
 	return &BloomFilter[K]{
-		filter:   f.filter.Copy(),
-		capacity: f.capacity,
-		count:    f.count,
+		filter:       f.filter.Copy(),
+		capacity:     f.capacity,
+		count:        f.count,
+		hashFunction: f.hashFunction,
 	}
 }
 
@@ -291,10 +364,10 @@ func (bf *BloomFilter[K]) Equal(other Filter[K]) bool {
 }
 
 type BloomWireFormat struct {
-	Bytes        []byte
-	HashFunction uint64
-	HashCount    uint64
-	BitCount     uint64
+	Bytes        []byte `json:"bytes"`
+	HashFunction uint64 `json:"hashFunction"`
+	HashCount    uint64 `json:"hashCount"`
+	BitCount     uint64 `json:"bitCount"`
 }
 
 func (bf *BloomFilter[K]) UnmarshalJSON(bytes []byte) error {
@@ -396,6 +469,23 @@ func (sf *SynchronizedFilter[K]) Equal(other Filter[K]) bool {
 	return sf.filter.Equal(osf.filter)
 }
 
+func (sf *SynchronizedFilter[K]) UnmarshalJSON(bytes []byte) error {
+	wireFormat := FilterWireFormat[K]{}
+	err := json.Unmarshal(bytes, &wireFormat)
+	if err == nil {
+		sf.lock.Lock()
+		defer sf.lock.Unlock()
+		sf.filter = wireFormat.any()
+	}
+	return err
+}
+
+func (sf *SynchronizedFilter[K]) MarshalJSON() ([]byte, error) {
+	sf.lock.RLock()
+	defer sf.lock.RUnlock()
+	return json.Marshal(NewFilterWireFormat(sf.filter))
+}
+
 // PerfectFilter is a Filter implementation which uses and underlying map - mainly for testing
 type PerfectFilter[K comparable] struct {
 	filter map[K]bool
@@ -468,9 +558,29 @@ func (pf *PerfectFilter[K]) Equal(other Filter[K]) bool {
 	return true
 }
 
+func (pf *PerfectFilter[K]) UnmarshalJSON(bytes []byte) error {
+	var wireFormat []K
+	err := json.Unmarshal(bytes, &wireFormat)
+	if err == nil {
+		pf.filter = make(map[K]bool, len(wireFormat))
+		for _, key := range wireFormat {
+			pf.filter[key] = true
+		}
+	}
+	return err
+}
+
+func (pf *PerfectFilter[K]) MarshalJSON() ([]byte, error) {
+	return json.Marshal(maps.Keys(pf.filter))
+}
+
 // EmptyFilter represents a filter which contains no entries. An allocator is provided which is used to create a new filter if necessary.
 type EmptyFilter[K comparable] struct {
-	allocator func() Filter[K]
+	allocator func() Filter[K] `json:"-"`
+}
+
+func NewEmptyFilter[K comparable](allocator func() Filter[K]) *EmptyFilter[K] {
+	return &EmptyFilter[K]{allocator}
 }
 
 func (ef *EmptyFilter[K]) DoesNotContain(id K) bool {
