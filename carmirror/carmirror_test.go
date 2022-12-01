@@ -320,7 +320,7 @@ func NewMockStatusSender(channel chan<- StatusMessage, orchestrator Orchestrator
 }
 
 func (sn *MockStatusSender) SendStatus(have filter.Filter[MockBlockId], want []MockBlockId) error {
-	state := sn.orchestrator.GetState()
+	state := sn.orchestrator.State()
 	sn.channel <- StatusMessage{state, have, want}
 	return nil
 }
@@ -355,14 +355,14 @@ func NewMockConnection(maxBatchSize uint) *MockConnection {
 	}
 }
 
-func (conn *MockConnection) GetBlockSender(orchestrator Orchestrator[BatchStatus]) BlockSender[MockBlockId] {
+func (conn *MockConnection) BlockSender(orchestrator Orchestrator[BatchStatus]) BlockSender[MockBlockId] {
 	return NewInstrumentedBlockSender[MockBlockId](
 		NewSimpleBatchBlockSender[MockBlockId](&conn.batchBlockChannel, orchestrator, uint32(conn.maxBatchSize)),
 		GLOBAL_STATS.WithContext("MockBlockSender"),
 	)
 }
 
-func (conn *MockConnection) GetStatusSender(orchestrator Orchestrator[BatchStatus]) StatusSender[MockBlockId] {
+func (conn *MockConnection) StatusSender(orchestrator Orchestrator[BatchStatus]) StatusSender[MockBlockId] {
 	return NewInstrumentedStatusSender[MockBlockId](
 		NewMockStatusSender(conn.statusChannel, orchestrator),
 		GLOBAL_STATS.WithContext("MockStatusSender"),

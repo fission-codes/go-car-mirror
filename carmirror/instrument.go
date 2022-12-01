@@ -183,16 +183,16 @@ func NewInstrumentedOrchestrator[F Flags, O Orchestrator[F]](orchestrator O, sta
 }
 
 func (io *InstrumentedOrchestrator[F, O]) Notify(event SessionEvent) error {
-	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "Notify", "event", event, "state", io.orchestrator.GetState())
+	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "Notify", "event", event, "state", io.orchestrator.State())
 	io.stats.Log(event.String())
 	err := io.orchestrator.Notify(event)
-	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "Notify", "result", err, "state", io.orchestrator.GetState())
+	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "Notify", "result", err, "state", io.orchestrator.State())
 	return err
 }
 
-func (io *InstrumentedOrchestrator[F, O]) GetState() F {
-	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "GetState")
-	result := io.orchestrator.GetState()
+func (io *InstrumentedOrchestrator[F, O]) State() F {
+	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "State")
+	result := io.orchestrator.State()
 	io.stats.Logger().Debugw("InstrumentedOrchestrator", "result", result)
 	return result
 }

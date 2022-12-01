@@ -31,7 +31,7 @@ func NewSharedFlagSet[F constraints.Unsigned](init F) *SharedFlagSet[F] {
 	return res
 }
 
-func (fs *SharedFlagSet[F]) GetAll() F {
+func (fs *SharedFlagSet[F]) All() F {
 	return fs.flags.Load().(F)
 }
 
