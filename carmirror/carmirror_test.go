@@ -93,6 +93,14 @@ func AddRandomTree(store *MockStore, maxChildren int, maxDepth int, pCrosslink f
 	return id
 }
 
+func AddRandomForest(store *MockStore, rootCount int) []MockBlockId {
+	roots := make([]MockBlockId, rootCount)
+	for i := 0; i < rootCount; i++ {
+		roots[i] = AddRandomTree(store, 10, 5, 0.05)
+	}
+	return roots
+}
+
 // BlockId
 type MockBlockId [32]byte
 
@@ -489,7 +497,7 @@ func TestMockTransferSingleMissingBlockBatch(t *testing.T) {
 	receiverStore.AddAll(senderStore)
 	block, err := receiverStore.RandomBlock()
 	if err != nil {
-		t.Errorf("Could not fild random block %v", err)
+		t.Errorf("Could not find random block %v", err)
 	}
 	receiverStore.Remove(block.Id())
 	MockBatchTransfer(senderStore, receiverStore, root, 10)
