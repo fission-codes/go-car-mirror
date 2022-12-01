@@ -206,8 +206,8 @@ type Flags constraints.Unsigned
 type Orchestrator[F Flags] interface {
 	Notify(SessionEvent) error
 
-	// GetState is used to obtain state to send to a remote session.
-	GetState() F
+	// State is used to obtain state to send to a remote session.
+	State() F
 
 	// ReceiveState is used to receive state from a remote session.
 	ReceiveState(F) error
@@ -219,14 +219,14 @@ type SenderConnection[
 	F Flags,
 	I BlockId,
 ] interface {
-	GetBlockSender(Orchestrator[F]) BlockSender[I]
+	BlockSender(Orchestrator[F]) BlockSender[I]
 }
 
 type ReceiverConnection[
 	F Flags,
 	I BlockId,
 ] interface {
-	GetStatusSender(Orchestrator[F]) StatusSender[I]
+	StatusSender(Orchestrator[F]) StatusSender[I]
 }
 
 type ReceiverSession[
@@ -298,7 +298,7 @@ func (rs *ReceiverSession[I, F]) HandleBlock(block Block[I]) {
 }
 
 func (rs *ReceiverSession[I, F]) Run() error {
-	sender := rs.connection.GetStatusSender(rs.orchestrator)
+	sender := rs.connection.StatusSender(rs.orchestrator)
 
 	rs.orchestrator.Notify(BEGIN_SESSION)
 	defer func() {
@@ -367,7 +367,7 @@ func NewSenderSession[I BlockId, F Flags](store BlockStore[I], connection Sender
 }
 
 func (ss *SenderSession[I, F]) Run() error {
-	sender := ss.connection.GetBlockSender(ss.orchestrator)
+	sender := ss.connection.BlockSender(ss.orchestrator)
 	if err := ss.orchestrator.Notify(BEGIN_SESSION); err != nil {
 		return err
 	}

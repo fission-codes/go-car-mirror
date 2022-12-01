@@ -118,7 +118,7 @@ func (sbbs *SimpleBatchBlockSender[I]) Flush() error {
 	sbbs.orchestrator.Notify(BEGIN_FLUSH)
 	defer sbbs.orchestrator.Notify(END_FLUSH)
 
-	batchStatus := sbbs.orchestrator.GetState()
+	batchStatus := sbbs.orchestrator.State()
 	sbbs.listMutex.Lock()
 	defer sbbs.listMutex.Unlock()
 	if err := sbbs.sender.SendList(batchStatus&SENDER, sbbs.list); err != nil {
@@ -163,8 +163,8 @@ func (bso *BatchSendOrchestrator) Notify(event SessionEvent) error {
 	return nil
 }
 
-func (bso *BatchSendOrchestrator) GetState() BatchStatus {
-	return bso.flags.GetAll()
+func (bso *BatchSendOrchestrator) State() BatchStatus {
+	return bso.flags.All()
 }
 
 func (bso *BatchSendOrchestrator) ReceiveState(batchStatus BatchStatus) error {
@@ -206,8 +206,8 @@ func (bro *BatchReceiveOrchestrator) Notify(event SessionEvent) error {
 	return nil
 }
 
-func (bro *BatchReceiveOrchestrator) GetState() BatchStatus {
-	return bro.flags.GetAll()
+func (bro *BatchReceiveOrchestrator) State() BatchStatus {
+	return bro.flags.All()
 }
 
 func (bro *BatchReceiveOrchestrator) ReceiveState(batchStatus BatchStatus) error {
