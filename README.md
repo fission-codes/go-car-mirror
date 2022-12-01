@@ -1,4 +1,4 @@
-![](https://github.com/fission-codes/go-car-mirror/raw/main/assets/logo.png?sanitize=true)
+<img src="https://raw.githubusercontent.com/fission-codes/go-car-mirror/main/assets/logo.png" alt="go-car-mirror Logo" height="300"></img>
 
 # go-car-mirror
 

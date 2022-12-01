@@ -260,11 +260,12 @@ func NewReceiverSession[I BlockId, F Flags](
 func (rs *ReceiverSession[I, F]) AccumulateStatus(id I) error {
 	// Get block and handle errors
 	block, err := rs.store.Get(id)
+
 	if err == errors.BlockNotFound {
-		if err := rs.accumulator.Want(id); err != nil {
-			return err
-		}
-	} else if err != nil {
+		return rs.accumulator.Want(id)
+	}
+
+	if err != nil {
 		return err
 	}
 
