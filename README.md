@@ -1,8 +1,4 @@
-<div align="center">
-  <a href="https://github.com/fission-codes/go-car-mirror" target="_blank">
-    <img src="https://raw.githubusercontent.com/fission-codes/go-car-mirror/main/assets/logo.png" alt="go-car-mirror Logo" height="200"></img>
-  </a>
-</div>
+<img src="https://raw.githubusercontent.com/fission-codes/go-car-mirror/main/assets/logo.png" alt="go-car-mirror Logo" height="300"></img>
 
 # go-car-mirror
 
