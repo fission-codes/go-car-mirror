@@ -52,6 +52,51 @@ type BlockStore[I BlockId] interface {
 	Add(Block[I]) error
 }
 
+type SynchronizedBlockStore[I BlockId] struct {
+	store BlockStore[I]
+	mutex sync.RWMutex
+}
+
+func NewSynchronizedBlockStore[I BlockId](store BlockStore[I]) *SynchronizedBlockStore[I] {
+	return &SynchronizedBlockStore[I]{store, sync.RWMutex{}}
+}
+
+func (bs *SynchronizedBlockStore[I]) Get(id I) (Block[I], error) {
+	bs.mutex.RLock()
+	defer bs.mutex.RUnlock()
+	return bs.store.Get(id)
+}
+
+func (bs *SynchronizedBlockStore[I]) Has(id I) (bool, error) {
+	bs.mutex.RLock()
+	defer bs.mutex.RUnlock()
+	return bs.store.Has(id)
+}
+
+func (bs *SynchronizedBlockStore[I]) All() (<-chan I, error) {
+	bs.mutex.RLock()
+	if all, err := bs.store.All(); err == nil {
+		res := make(chan I)
+		go func() {
+			defer bs.mutex.RUnlock()
+			for id := range all {
+				res <- id
+			}
+		}()
+		return res, nil
+	} else {
+		bs.mutex.RUnlock()
+		return nil, err
+	}
+}
+
+func (bs *SynchronizedBlockStore[I]) Add(block Block[I]) error {
+	bs.mutex.Lock()
+	defer bs.mutex.Unlock()
+	return bs.store.Add(block)
+
+}
+
 type MutablePointerResolver[I BlockId] interface {
 	// Resolve attempts to resolve ptr into a block ID.
 	Resolve(ptr string) (I, error)
