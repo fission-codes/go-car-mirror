@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	cbor "github.com/fxamacker/cbor/v2"
 	"github.com/zeebo/xxh3"
 )
 
@@ -279,27 +280,120 @@ func TestAddAllCompound(t *testing.T) {
 	}
 }
 
-func TestBloomSerializationJson(t *testing.T) {
-	bloom1 := makeBloom(64)
-	bytes, err := json.Marshal(bloom1)
+func ModelSerializationJsonTest[T comparable, F Filter[T], U Filter[T]](writeFrom F, readTo U, t *testing.T) {
+	bytes, err := json.Marshal(writeFrom)
 	if err != nil {
-		t.Errorf("Expected bloom to marshal to Json, got error %v instead", err)
+		t.Errorf("Expected filter to marshal to Json, got error %v instead", err)
 	} else {
-		bloom2 := BloomFilter[TestId]{filter: nil, capacity: 0, count: 0, hashFunction: 0}
-		err = json.Unmarshal(bytes, &bloom2)
+		err = json.Unmarshal(bytes, readTo)
 		if err != nil {
-			t.Errorf("Expected json %s to unmarshal to bloom, got error %v instead", bytes, err)
+			t.Errorf("Expected json %s to unmarshal to filter, got error %v instead", bytes, err)
 		}
-		if !bloom1.Equal(&bloom2) {
-			t.Errorf("Expected blooms to be equal after serialization/deserialization")
+		if !writeFrom.Equal(readTo) {
+			t.Errorf("Expected filters to be equal after serialization/deserialization")
 		}
 	}
+}
+
+func ModelSerializationCborTest[T comparable, F Filter[T], U Filter[T]](writeFrom F, readTo U, t *testing.T) {
+	bytes, err := cbor.Marshal(writeFrom)
+	if err != nil {
+		t.Errorf("Expected filter to marshal to CBOR, got error %v instead", err)
+	} else {
+		err = cbor.Unmarshal(bytes, readTo)
+		if err != nil {
+			t.Errorf("Expected CBOR %s to unmarshal to filter, got error %v instead", bytes, err)
+		}
+		if !writeFrom.Equal(readTo) {
+			t.Errorf("Expected filters to be equal after serialization/deserialization")
+		}
+	}
+}
+
+func TestBloomSerializationJson(t *testing.T) {
+	bloom1 := makeBloom(64)
+	populateFilter(bloom1, 20)
+	bloom2 := &BloomFilter[TestId]{filter: nil, capacity: 0, count: 0, hashFunction: 0}
+	ModelSerializationJsonTest[TestId](bloom1, bloom2, t)
+}
+
+func TestBloomSerializationCbor(t *testing.T) {
+	bloom1 := makeBloom(64)
+	populateFilter(bloom1, 20)
+	bloom2 := &BloomFilter[TestId]{filter: nil, capacity: 0, count: 0, hashFunction: 0}
+	ModelSerializationCborTest[TestId](bloom1, bloom2, t)
+}
+
+func TestCompoundSerializationJson(t *testing.T) {
+	bloom1 := makeBloom(64).AddAll(makeBloom(128)) // two blooms of incompatible sizes will create a compound filter
+	populateFilter(bloom1, 60)
+	bloom2 := &CompoundFilter[TestId]{nil, nil}
+	ModelSerializationJsonTest[TestId](bloom1, bloom2, t)
+}
+
+func TestCompoundSerializationCbor(t *testing.T) {
+	bloom1 := makeBloom(64).AddAll(makeBloom(128)) // two blooms of incompatible sizes will create a compound filter
+	populateFilter(bloom1, 60)
+	bloom2 := &CompoundFilter[TestId]{nil, nil}
+	ModelSerializationCborTest[TestId](bloom1, bloom2, t)
+}
+
+func TestEmptySerializationJson(t *testing.T) {
+	allocator := func() Filter[TestId] {
+		return makeBloom(128)
+	}
+	bloom1 := NewEmptyFilter(allocator)
+	bloom2 := &EmptyFilter[TestId]{}
+	ModelSerializationJsonTest[TestId](bloom1, bloom2, t)
+}
+
+func TestEmptySerializationCbor(t *testing.T) {
+	allocator := func() Filter[TestId] {
+		return makeBloom(128)
+	}
+	bloom1 := NewEmptyFilter(allocator)
+	bloom2 := &EmptyFilter[TestId]{}
+	ModelSerializationCborTest[TestId](bloom1, bloom2, t)
+}
+
+func TestPerfectFilterSerializationJson(t *testing.T) {
+	bloom1 := NewPerfectFilter[TestId]()
+	populateFilter(bloom1, 60)
+	bloom2 := &PerfectFilter[TestId]{make(map[TestId]bool)}
+	ModelSerializationJsonTest[TestId](bloom1, bloom2, t)
+}
+
+func TestPerfectFilterSerializationCbor(t *testing.T) {
+	bloom1 := NewPerfectFilter[TestId]()
+	populateFilter(bloom1, 60)
+	bloom2 := &PerfectFilter[TestId]{make(map[TestId]bool)}
+	ModelSerializationCborTest[TestId](bloom1, bloom2, t)
+}
+
+func TestSynchronizedFilterSerializationJson(t *testing.T) {
+	allocator := func() Filter[TestId] {
+		return makeBloom(128)
+	}
+	bloom1 := NewSynchronizedFilter[TestId](NewEmptyFilter(allocator))
+	populateFilter(bloom1, 60)
+	bloom2 := NewSynchronizedFilter[TestId](NewEmptyFilter(allocator))
+	ModelSerializationJsonTest[TestId](bloom1, bloom2, t)
+}
+
+func TestSynchronizedFilterSerializationCbor(t *testing.T) {
+	allocator := func() Filter[TestId] {
+		return makeBloom(128)
+	}
+	bloom1 := NewSynchronizedFilter[TestId](NewEmptyFilter(allocator))
+	populateFilter(bloom1, 60)
+	bloom2 := NewSynchronizedFilter[TestId](NewEmptyFilter(allocator))
+	ModelSerializationCborTest[TestId](bloom1, bloom2, t)
 }
 
 const TEST_HASHER = 19710403 // No siginificance to this number
 
 func makeBloom(capacity uint) Filter[TestId] {
-	// Normally this would occur in package init code, but this is just a test
+	// Normally RegisterHash would occur in package init code, but this is just a test
 	RegisterHash(TEST_HASHER, IdHash)
 	if new, err := TryNewBloomFilter[TestId](capacity, TEST_HASHER); err == nil {
 		return new
