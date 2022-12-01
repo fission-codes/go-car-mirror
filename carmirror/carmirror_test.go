@@ -9,6 +9,7 @@ import (
 
 	"math/rand"
 
+	cmerrors "github.com/fission-codes/go-car-mirror/errors"
 	. "github.com/fission-codes/go-car-mirror/filter"
 	"github.com/fission-codes/go-car-mirror/iterator"
 	"github.com/zeebo/xxh3"
@@ -146,7 +147,12 @@ func NewMockStore() *MockStore {
 }
 
 func (bs *MockStore) Get(id MockBlockId) (Block[MockBlockId], error) {
-	return bs.blocks[id], nil
+	block, ok := bs.blocks[id]
+	if !ok {
+		return nil, cmerrors.BlockNotFound
+	}
+
+	return block, nil
 }
 
 func (bs *MockStore) Has(id MockBlockId) (bool, error) {
