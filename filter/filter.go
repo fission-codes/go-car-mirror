@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/fission-codes/go-bloom"
+	cbor "github.com/fxamacker/cbor/v2"
 	"golang.org/x/exp/maps"
 )
 
@@ -80,7 +81,7 @@ const (
 
 var ErrIncompatibleFilter = errors.New("incompatible filter type")
 var ErrBloomOverflow = errors.New("bloom filter overflowing")
-var ErrCantMarshalBloomWithoutHashId = errors.New("Bloom must be created with a hash Id in order to marshal it")
+var ErrCantMarshalBloomWithoutHashId = errors.New("bloom must be created with a hash Id in order to marshal it")
 
 // A compound filter implements the union of two disparate filter types
 type CompoundFilter[K comparable] struct {
@@ -192,12 +193,30 @@ func (cf *CompoundFilter[K]) UnmarshalJSON(bytes []byte) error {
 	return err
 }
 
+func (cf *CompoundFilter[K]) UnmarshalCBOR(bytes []byte) error {
+	var wireFormat CompoundFilterWireFormat[K] = CompoundFilterWireFormat[K]{}
+	err := cbor.Unmarshal(bytes, &wireFormat)
+	if err == nil {
+		cf.SideA = wireFormat.SideA.any()
+		cf.SideB = wireFormat.SideB.any()
+	}
+	return err
+}
+
 func (cf *CompoundFilter[K]) MarshalJSON() ([]byte, error) {
 	var wireFormat CompoundFilterWireFormat[K] = CompoundFilterWireFormat[K]{
 		SideA: NewFilterWireFormat(cf.SideA),
 		SideB: NewFilterWireFormat(cf.SideB),
 	}
 	return json.Marshal(wireFormat)
+}
+
+func (cf *CompoundFilter[K]) MarshalCBOR() ([]byte, error) {
+	var wireFormat CompoundFilterWireFormat[K] = CompoundFilterWireFormat[K]{
+		SideA: NewFilterWireFormat(cf.SideA),
+		SideB: NewFilterWireFormat(cf.SideB),
+	}
+	return cbor.Marshal(wireFormat)
 }
 
 type CompoundFilterWireFormat[K comparable] struct {
@@ -363,34 +382,54 @@ func (bf *BloomFilter[K]) Equal(other Filter[K]) bool {
 		bf.hashFunction == obf.hashFunction
 }
 
-type BloomWireFormat struct {
+type BloomWireFormat[K comparable] struct {
 	Bytes        []byte `json:"bytes"`
 	HashFunction uint64 `json:"hashFunction"`
 	HashCount    uint64 `json:"hashCount"`
 	BitCount     uint64 `json:"bitCount"`
 }
 
-func (bf *BloomFilter[K]) UnmarshalJSON(bytes []byte) error {
-	wireFormat := BloomWireFormat{}
-	err := json.Unmarshal(bytes, &wireFormat)
-	if err != nil {
-		return err
-	}
-
-	if hashFunction, ok := RegistryLookup[K](wireFormat.HashFunction); ok {
-		bf.filter = bloom.NewFilterFromBloomBytes(wireFormat.BitCount, wireFormat.HashCount, wireFormat.Bytes, hashFunction)
-		bf.capacity = int(bf.filter.EstimateCapacity())
-		bf.count = int(bf.filter.EstimateEntries())
-		bf.hashFunction = wireFormat.HashFunction
+func (wf *BloomWireFormat[K]) UnmarshalTo(target *BloomFilter[K]) error {
+	if hashFunction, ok := RegistryLookup[K](wf.HashFunction); ok {
+		target.filter = bloom.NewFilterFromBloomBytes(wf.BitCount, wf.HashCount, wf.Bytes, hashFunction)
+		target.capacity = int(target.filter.EstimateCapacity())
+		target.count = int(target.filter.EstimateEntries())
+		target.hashFunction = wf.HashFunction
 		return nil
 	} else {
 		return ErrIncompatibleFilter
 	}
 }
 
+func (bf *BloomFilter[K]) UnmarshalJSON(bytes []byte) error {
+	wireFormat := BloomWireFormat[K]{}
+	err := json.Unmarshal(bytes, &wireFormat)
+	if err == nil {
+		err = wireFormat.UnmarshalTo(bf)
+	}
+	return err
+}
+
+func (bf *BloomFilter[K]) UnmarshalCBOR(bytes []byte) error {
+	wireFormat := BloomWireFormat[K]{}
+	err := cbor.Unmarshal(bytes, &wireFormat)
+	if err == nil {
+		err = wireFormat.UnmarshalTo(bf)
+	}
+	return err
+}
+
 func (bf *BloomFilter[K]) MarshalJSON() ([]byte, error) {
 	if bf.hashFunction != 0 {
-		return json.Marshal(&BloomWireFormat{bf.filter.Bytes(), bf.hashFunction, bf.filter.HashCount(), bf.filter.BitCount()})
+		return json.Marshal(&BloomWireFormat[K]{bf.filter.Bytes(), bf.hashFunction, bf.filter.HashCount(), bf.filter.BitCount()})
+	} else {
+		return nil, ErrCantMarshalBloomWithoutHashId
+	}
+}
+
+func (bf *BloomFilter[K]) MarshalCBOR() ([]byte, error) {
+	if bf.hashFunction != 0 {
+		return cbor.Marshal(&BloomWireFormat[K]{bf.filter.Bytes(), bf.hashFunction, bf.filter.HashCount(), bf.filter.BitCount()})
 	} else {
 		return nil, ErrCantMarshalBloomWithoutHashId
 	}
@@ -480,10 +519,27 @@ func (sf *SynchronizedFilter[K]) UnmarshalJSON(bytes []byte) error {
 	return err
 }
 
+func (sf *SynchronizedFilter[K]) UnmarshalCBOR(bytes []byte) error {
+	wireFormat := FilterWireFormat[K]{}
+	err := cbor.Unmarshal(bytes, &wireFormat)
+	if err == nil {
+		sf.lock.Lock()
+		defer sf.lock.Unlock()
+		sf.filter = wireFormat.any()
+	}
+	return err
+}
+
 func (sf *SynchronizedFilter[K]) MarshalJSON() ([]byte, error) {
 	sf.lock.RLock()
 	defer sf.lock.RUnlock()
 	return json.Marshal(NewFilterWireFormat(sf.filter))
+}
+
+func (sf *SynchronizedFilter[K]) MarshalCBOR() ([]byte, error) {
+	sf.lock.RLock()
+	defer sf.lock.RUnlock()
+	return cbor.Marshal(NewFilterWireFormat(sf.filter))
 }
 
 // PerfectFilter is a Filter implementation which uses and underlying map - mainly for testing
@@ -570,8 +626,24 @@ func (pf *PerfectFilter[K]) UnmarshalJSON(bytes []byte) error {
 	return err
 }
 
+func (pf *PerfectFilter[K]) UnmarshalCBOR(bytes []byte) error {
+	var wireFormat []K
+	err := cbor.Unmarshal(bytes, &wireFormat)
+	if err == nil {
+		pf.filter = make(map[K]bool, len(wireFormat))
+		for _, key := range wireFormat {
+			pf.filter[key] = true
+		}
+	}
+	return err
+}
+
 func (pf *PerfectFilter[K]) MarshalJSON() ([]byte, error) {
 	return json.Marshal(maps.Keys(pf.filter))
+}
+
+func (pf *PerfectFilter[K]) MarshalCBOR() ([]byte, error) {
+	return cbor.Marshal(maps.Keys(pf.filter))
 }
 
 // EmptyFilter represents a filter which contains no entries. An allocator is provided which is used to create a new filter if necessary.

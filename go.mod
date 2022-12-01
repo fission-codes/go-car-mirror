@@ -11,6 +11,7 @@ require (
 
 require (
 	github.com/fission-codes/go-bitset v0.0.0-20221117212908-fdb519e34c69 // indirect
+	github.com/fxamacker/cbor v1.5.1 // indirect
 	github.com/fxamacker/cbor/v2 v2.4.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/gxed/hashland/keccakpg v0.0.1 // indirect

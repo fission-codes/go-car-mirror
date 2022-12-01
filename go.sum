@@ -33,6 +33,8 @@ github.com/fission-codes/go-bloom v0.0.0-20221130194807-f8d5917f69e2 h1:hVWK14Xb
 github.com/fission-codes/go-bloom v0.0.0-20221130194807-f8d5917f69e2/go.mod h1:qNZuJ550jblK67hi7N7l/ygJpVQqNTiy0IC2/NDQ8yo=
 github.com/fission-codes/go-bloom v0.0.0-20221130203706-f6093fcbce27 h1:V3xqbHs6qt4BlJ03GXlt3Juc2vEMGgvLOORa9wcNIm4=
 github.com/fission-codes/go-bloom v0.0.0-20221130203706-f6093fcbce27/go.mod h1:qNZuJ550jblK67hi7N7l/ygJpVQqNTiy0IC2/NDQ8yo=
+github.com/fxamacker/cbor v1.5.1 h1:XjQWBgdmQyqimslUh5r4tUGmoqzHmBFQOImkWGi2awg=
+github.com/fxamacker/cbor v1.5.1/go.mod h1:3aPGItF174ni7dDzd6JZ206H8cmr4GDNBGpPa971zsU=
 github.com/fxamacker/cbor/v2 v2.4.0 h1:ri0ArlOR+5XunOP8CRUowT0pSJOwhW098ZCUyskZD88=
 github.com/fxamacker/cbor/v2 v2.4.0/go.mod h1:TA1xS00nchWmaBnEIxPSE5oHLuJBAVvqrtAnWBwBCVo=
 github.com/gogo/protobuf v1.3.2 h1:Ov1cvc58UF3b5XjBnZv7+opcTcQFZebYjWzi34vdm4Q=
