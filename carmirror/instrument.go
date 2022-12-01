@@ -9,7 +9,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 
-	. "github.com/fission-codes/go-car-mirror/filter"
+	"github.com/fission-codes/go-car-mirror/filter"
 )
 
 type Stats interface {
@@ -339,7 +339,7 @@ func NewInstrumentedStatusSender[I BlockId](sender StatusSender[I], stats Stats)
 	}
 }
 
-func (ibs *InstrumentedStatusSender[I]) SendStatus(have Filter[I], want []I) error {
+func (ibs *InstrumentedStatusSender[I]) SendStatus(have filter.Filter[I], want []I) error {
 	ibs.stats.Logger().Debugw("InstrumentedStatusSender", "method", "SendStatus", "haves", have.Count(), "wants", len(want))
 	err := ibs.sender.SendStatus(have, want)
 	if err == nil {
@@ -375,7 +375,7 @@ func NewInstrumentedStatusReceiver[I BlockId, F Flags](receiver StatusReceiver[I
 	}
 }
 
-func (ir *InstrumentedStatusReceiver[I, F]) HandleStatus(have Filter[I], want []I) {
+func (ir *InstrumentedStatusReceiver[I, F]) HandleStatus(have filter.Filter[I], want []I) {
 	ir.stats.Logger().Debugw("InstrumentedStatusReceiver", "method", "HandleStatus", "haves", have.Count(), "wants", len(want))
 	ir.receiver.HandleStatus(have, want)
 }

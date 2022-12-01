@@ -3,17 +3,17 @@ package carmirror
 import (
 	"sync"
 
-	. "github.com/fission-codes/go-car-mirror/filter"
+	"github.com/fission-codes/go-car-mirror/filter"
 	"golang.org/x/exp/maps"
 )
 
 type SimpleStatusAccumulator[I BlockId] struct {
-	have  Filter[I]
+	have  filter.Filter[I]
 	want  map[I]bool
 	mutex sync.Mutex
 }
 
-func NewSimpleStatusAccumulator[I BlockId](filter Filter[I]) *SimpleStatusAccumulator[I] {
+func NewSimpleStatusAccumulator[I BlockId](filter filter.Filter[I]) *SimpleStatusAccumulator[I] {
 	return &SimpleStatusAccumulator[I]{
 		have:  filter,
 		want:  make(map[I]bool),

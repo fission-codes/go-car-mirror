@@ -10,8 +10,7 @@ import (
 	"math/rand"
 
 	cmerrors "github.com/fission-codes/go-car-mirror/errors"
-	. "github.com/fission-codes/go-car-mirror/filter"
-	"github.com/fission-codes/go-car-mirror/iterator"
+	"github.com/fission-codes/go-car-mirror/filter"
 	"github.com/zeebo/xxh3"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -63,8 +62,8 @@ func IdHash(id MockBlockId, seed uint64) uint64 {
 	return xxh3.HashSeed(id[:], seed)
 }
 
-func makeBloom(capacity uint) Filter[MockBlockId] {
-	return NewBloomFilter[MockBlockId](capacity, IdHash)
+func makeBloom(capacity uint) filter.Filter[MockBlockId] {
+	return filter.NewBloomFilter[MockBlockId](capacity, IdHash)
 }
 
 func AddRandomTree(store *MockStore, maxChildren int, maxDepth int, pCrosslink float64) MockBlockId {
@@ -108,11 +107,6 @@ type MockBlockId [32]byte
 func (id MockBlockId) String() string {
 	return base64.URLEncoding.EncodeToString(id[:])
 }
-
-// Iterator
-type MockBlockIdIterator = iterator.SliceIterator[MockBlockId]
-
-var _ iterator.Iterator[MockBlockId] = (*MockBlockIdIterator)(nil)
 
 // Block
 type MockBlock struct {
@@ -288,7 +282,7 @@ func (ch *BlockChannel) listen() error {
 
 type StatusMessage struct {
 	status BatchStatus
-	have   Filter[MockBlockId]
+	have   filter.Filter[MockBlockId]
 	want   []MockBlockId
 }
 
@@ -325,7 +319,7 @@ func NewMockStatusSender(channel chan<- StatusMessage, orchestrator Orchestrator
 	}
 }
 
-func (sn *MockStatusSender) SendStatus(have Filter[MockBlockId], want []MockBlockId) error {
+func (sn *MockStatusSender) SendStatus(have filter.Filter[MockBlockId], want []MockBlockId) error {
 	state := sn.orchestrator.GetState()
 	sn.channel <- StatusMessage{state, have, want}
 	return nil
@@ -404,7 +398,7 @@ func MockBatchTransfer(sender_store *MockStore, receiver_store *MockStore, root 
 	sender_session := NewSenderSession[MockBlockId, BatchStatus](
 		NewInstrumentedBlockStore[MockBlockId](sender_store, GLOBAL_STATS.WithContext("SenderStore")),
 		connection,
-		NewSynchronizedFilter(makeBloom(1024)),
+		filter.NewSynchronizedFilter(makeBloom(1024)),
 		NewInstrumentedOrchestrator[BatchStatus](NewBatchSendOrchestrator(), GLOBAL_STATS.WithContext("BatchSendOrchestrator")),
 	)
 
@@ -413,7 +407,7 @@ func MockBatchTransfer(sender_store *MockStore, receiver_store *MockStore, root 
 	receiver_session := NewReceiverSession[MockBlockId, BatchStatus](
 		NewInstrumentedBlockStore[MockBlockId](receiver_store, GLOBAL_STATS.WithContext("ReceiverStore")),
 		connection,
-		NewSimpleStatusAccumulator[MockBlockId](NewSynchronizedFilter(makeBloom(1024))),
+		NewSimpleStatusAccumulator[MockBlockId](filter.NewSynchronizedFilter(makeBloom(1024))),
 		NewInstrumentedOrchestrator[BatchStatus](NewBatchReceiveOrchestrator(), GLOBAL_STATS.WithContext("BatchReceiveOrchestrator")),
 	)
 

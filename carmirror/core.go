@@ -7,7 +7,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/exp/constraints"
 
-	. "github.com/fission-codes/go-car-mirror/filter"
+	"github.com/fission-codes/go-car-mirror/filter"
 )
 
 var log *zap.SugaredLogger
@@ -127,14 +127,14 @@ type BlockReceiver[I BlockId, F Flags] interface {
 // The key intuition of CAR Mirror is that status can be sent efficiently using a lossy filter.
 // The StatusSender will therefore usually batch reported information and send it in bulk to the ReceiverSession.
 type StatusSender[I BlockId] interface {
-	SendStatus(have Filter[I], want []I) error
+	SendStatus(have filter.Filter[I], want []I) error
 	Close() error
 }
 
 // StatusReceiver is responsible for receiving a status.
 type StatusReceiver[I BlockId, F Flags] interface {
 	StateReceiver[F]
-	HandleStatus(have Filter[I], want []I)
+	HandleStatus(have filter.Filter[I], want []I)
 }
 
 // StatusAccumulator is responsible for collecting status.
@@ -350,12 +350,12 @@ type SenderSession[
 	store        BlockStore[I]
 	connection   SenderConnection[F, I]
 	orchestrator Orchestrator[F]
-	filter       Filter[I]
+	filter       filter.Filter[I]
 	sent         sync.Map
 	pending      chan I
 }
 
-func NewSenderSession[I BlockId, F Flags](store BlockStore[I], connection SenderConnection[F, I], filter Filter[I], orchestrator Orchestrator[F]) *SenderSession[I, F] {
+func NewSenderSession[I BlockId, F Flags](store BlockStore[I], connection SenderConnection[F, I], filter filter.Filter[I], orchestrator Orchestrator[F]) *SenderSession[I, F] {
 	return &SenderSession[I, F]{
 		store,
 		connection,
@@ -417,7 +417,7 @@ func (ss *SenderSession[I, F]) Run() error {
 	return nil
 }
 
-func (ss *SenderSession[I, F]) HandleStatus(have Filter[I], want []I) {
+func (ss *SenderSession[I, F]) HandleStatus(have filter.Filter[I], want []I) {
 	if err := ss.orchestrator.Notify(BEGIN_RECEIVE); err != nil {
 		log.Errorw("SenderSession", "method", "HandleStatus", "error", err)
 	}
