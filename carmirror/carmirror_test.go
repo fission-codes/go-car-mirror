@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -109,12 +110,14 @@ var _ iterator.Iterator[MockBlockId] = (*MockBlockIdIterator)(nil)
 type MockBlock struct {
 	id    MockBlockId
 	links []MockBlockId
+	mutex sync.RWMutex
 }
 
 func NewMockBlock(id MockBlockId, links []MockBlockId) *MockBlock {
 	return &MockBlock{
 		id:    id,
 		links: links,
+		mutex: sync.RWMutex{},
 	}
 }
 
@@ -123,10 +126,16 @@ func (b *MockBlock) Id() MockBlockId {
 }
 
 func (b *MockBlock) Children() []MockBlockId {
+	b.mutex.RLock()
+	defer b.mutex.RUnlock()
+
 	return b.links
 }
 
 func (b *MockBlock) AddChild(id MockBlockId) error {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+
 	b.links = append(b.links, id)
 
 	return nil
@@ -137,29 +146,44 @@ var _ Block[MockBlockId] = (*MockBlock)(nil)
 // BlockStore
 type MockStore struct {
 	blocks map[MockBlockId]Block[MockBlockId]
+	mutex  sync.RWMutex
 }
 
 func NewMockStore() *MockStore {
 	return &MockStore{
 		blocks: make(map[MockBlockId]Block[MockBlockId]),
+		mutex:  sync.RWMutex{},
 	}
 }
 
 func (bs *MockStore) Get(id MockBlockId) (Block[MockBlockId], error) {
+	bs.mutex.RLock()
+	defer bs.mutex.RUnlock()
+
 	return bs.blocks[id], nil
 }
 
 func (bs *MockStore) Has(id MockBlockId) (bool, error) {
+	bs.mutex.RLock()
+	defer bs.mutex.RUnlock()
+
 	_, ok := bs.blocks[id]
 	return ok, nil
 }
 
 func (bs *MockStore) Remove(id MockBlockId) {
+	bs.mutex.Lock()
+	defer bs.mutex.Unlock()
+
 	delete(bs.blocks, id)
 }
 
 func (bs *MockStore) HasAll(root MockBlockId) bool {
 	var hasAllInternal = func(root MockBlockId) error {
+		// TODO: Is there a better place for this?  This is guarding all doHasAll calls as well as the blocks lookup here.
+		bs.mutex.RLock()
+		defer bs.mutex.RUnlock()
+
 		if b, ok := bs.blocks[root]; ok {
 			for _, child := range b.Children() {
 				if err := bs.doHasAll(child); err != nil {
@@ -190,6 +214,10 @@ func (bs *MockStore) doHasAll(root MockBlockId) error {
 func (bs *MockStore) All() (<-chan MockBlockId, error) {
 	// values := make([]*Block[MockBlockId], len(bs.blocks))
 	values := make(chan MockBlockId)
+
+	bs.mutex.RLock()
+	defer bs.mutex.RUnlock()
+
 	for k, _ := range bs.blocks {
 		values <- k
 	}
@@ -198,12 +226,19 @@ func (bs *MockStore) All() (<-chan MockBlockId, error) {
 
 func (bs *MockStore) Add(block Block[MockBlockId]) error {
 	id := block.Id()
+
+	bs.mutex.Lock()
+	defer bs.mutex.Unlock()
+
 	bs.blocks[id] = block
 
 	return nil
 }
 
 func (bs *MockStore) RandomBlock() (Block[MockBlockId], error) {
+	bs.mutex.RLock()
+	defer bs.mutex.RUnlock()
+
 	if len(bs.blocks) == 0 {
 		return nil, fmt.Errorf("No blocks in store")
 	}
