@@ -161,7 +161,7 @@ func Init(stats Stats, reporting Reporting) error {
 		GLOBAL_REPORTING = reporting
 		return nil
 	} else {
-		return errors.StatsAlreadyInitialized
+		return errors.ErrStatsAlreadyInitialized
 	}
 }
 
