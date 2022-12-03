@@ -1,6 +1,9 @@
 package carmirror
 
 import (
+	"bufio"
+	"encoding"
+	"encoding/json"
 	"sync"
 
 	"github.com/fission-codes/go-car-mirror/errors"
@@ -20,16 +23,24 @@ func init() {
 }
 
 // BlockId represents a unique identifier for a Block.
-// This interface only represents the identifier, not the Block.
-type BlockId comparable
+// This interface only represents the identifier, not the Block. The interface is chosen for compatibility
+// with ipfs/go-cid - noting that the go-cid is, for the moment, comparable
+type BlockId interface {
+	comparable
+	encoding.BinaryMarshaler
+	encoding.BinaryUnmarshaler
+	json.Marshaler
+	json.Unmarshaler
+}
 
 // Block is an immutable data block referenced by a unique ID.
 type Block[I BlockId] interface {
-	// TODO: Should I add an iterator type here?
-
+	// read block encoded with Write from a stream.
+	Read(*bufio.Reader) error
+	// write block to a stream. Should use the Car v1 format (length : varint, cid, bytes).
+	Write(*bufio.Writer) error
 	// Id returns the BlockId for the Block.
 	Id() I
-
 	// Children returns a list of `BlockId`s linked to from the Block.
 	Children() []I
 }

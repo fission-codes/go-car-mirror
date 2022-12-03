@@ -1,9 +1,13 @@
 package carmirror
 
 import (
+	"bufio"
 	"encoding/base64"
+	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"testing"
 	"time"
 
@@ -51,7 +55,7 @@ func RandId() [32]byte {
 
 func RandMockBlock() MockBlock {
 	id := RandId()
-	return *NewMockBlock(id, []MockBlockId{})
+	return *NewMockBlock(id, uint64(rand.Intn(10240)), []MockBlockId{})
 }
 
 func RandBool(p float64) bool {
@@ -68,7 +72,7 @@ func makeBloom(capacity uint) filter.Filter[MockBlockId] {
 
 func AddRandomTree(store *MockStore, maxChildren int, maxDepth int, pCrosslink float64) MockBlockId {
 	id := RandId()
-	block := NewMockBlock(id, []MockBlockId{})
+	block := NewMockBlock(id, uint64(rand.Intn(10240)), []MockBlockId{})
 
 	if maxDepth > 0 {
 		if RandBool(pCrosslink) && len(store.blocks) > 0 {
@@ -108,21 +112,84 @@ func (id MockBlockId) String() string {
 	return base64.URLEncoding.EncodeToString(id[:])
 }
 
+func (id MockBlockId) MarshalBinary() ([]byte, error) {
+	return id[:], nil
+}
+
+func (id MockBlockId) UnmarshalBinary(bytes []byte) error {
+	if len(bytes) < 32 {
+		return errors.New("bad size for id")
+	}
+	copy(id[:], bytes)
+	return nil
+}
+
+func (id MockBlockId) MarshalJSON() ([]byte, error) {
+	return json.Marshal(id)
+}
+
+func (id MockBlockId) UnmarshalJSON(bytes []byte) error {
+	return json.Unmarshal(bytes, &id)
+}
+
 // Block
 type MockBlock struct {
 	id    MockBlockId
 	links []MockBlockId
+	size  uint64
 }
 
-func NewMockBlock(id MockBlockId, links []MockBlockId) *MockBlock {
+func NewMockBlock(id MockBlockId, size uint64, links []MockBlockId) *MockBlock {
 	return &MockBlock{
 		id:    id,
 		links: links,
+		size:  size,
 	}
 }
 
 func (b *MockBlock) Id() MockBlockId {
 	return b.id
+}
+
+func (b *MockBlock) Read(reader *bufio.Reader) error {
+	var err error
+	if b.size, err = binary.ReadUvarint(reader); err != nil {
+		return err
+	}
+	var len int
+	if len, err = io.ReadFull(reader, b.id[:]); err != nil {
+		return err
+	}
+	var discarded int
+	if discarded, err = reader.Discard(int(b.size) - len); err != nil {
+		return err
+	}
+	if discarded != len {
+		return errors.New("Could not read enough data")
+	} else {
+		return nil
+	}
+}
+
+func (b *MockBlock) Write(writer *bufio.Writer) error {
+	var err error = nil
+	buf := make([]byte, binary.MaxVarintLen64)
+	sz := binary.PutUvarint(buf, b.size)
+	if _, err = writer.Write(buf[0:sz]); err != nil {
+		return err
+	}
+	if buf, err = b.id.MarshalBinary(); err != nil {
+		return err
+	}
+	var length int
+	if length, err = writer.Write(buf); err != nil {
+		return err
+	}
+	for i := 0; err == nil && i < int(b.size)-length; i++ {
+		err = writer.WriteByte(0)
+	}
+
+	return err
 }
 
 func (b *MockBlock) Children() []MockBlockId {
