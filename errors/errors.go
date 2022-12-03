@@ -2,5 +2,6 @@ package errors
 
 import "errors"
 
-var BlockNotFound = errors.New("block not found")
-var StatsAlreadyInitialized = errors.New("Stats already initialized")
+var ErrBlockNotFound = errors.New("block not found")
+var ErrStatsAlreadyInitialized = errors.New("stats already initialized")
+var ErrStateError = errors.New("unexpected state transition")
