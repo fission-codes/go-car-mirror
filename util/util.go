@@ -50,6 +50,7 @@ func (fs *SharedFlagSet[F]) Unset(flags F) {
 	fs.Update(flags, 0)
 }
 
+// Wait for all the flags in 'status' to be set
 func (fs *SharedFlagSet[F]) Wait(status F) {
 	fs.condvar.L.Lock()
 	for fs.flags.Load().(F)&status != status {
@@ -58,6 +59,7 @@ func (fs *SharedFlagSet[F]) Wait(status F) {
 	fs.condvar.L.Unlock()
 }
 
+// Wait for any change on the masked bits from the current value
 func (fs *SharedFlagSet[F]) WaitAny(mask F, current F) F {
 	fs.condvar.L.Lock()
 	defer fs.condvar.L.Unlock()
@@ -67,6 +69,7 @@ func (fs *SharedFlagSet[F]) WaitAny(mask F, current F) F {
 	return fs.flags.Load().(F)
 }
 
+// Wait for the masked bits to become exactly current value
 func (fs *SharedFlagSet[F]) WaitExact(mask F, current F) F {
 	fs.condvar.L.Lock()
 	defer fs.condvar.L.Unlock()
@@ -80,4 +83,10 @@ func (fs *SharedFlagSet[F]) Contains(flags F) bool {
 	fs.condvar.L.Lock()
 	defer fs.condvar.L.Unlock()
 	return fs.flags.Load().(F)&flags == flags
+}
+
+func (fs *SharedFlagSet[F]) ContainsAny(flags F) bool {
+	fs.condvar.L.Lock()
+	defer fs.condvar.L.Unlock()
+	return fs.flags.Load().(F)&flags != 0
 }
