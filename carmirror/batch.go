@@ -4,6 +4,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/fission-codes/go-car-mirror/errors"
 	"github.com/fission-codes/go-car-mirror/util"
 )
 
@@ -145,7 +146,11 @@ func (bso *BatchSendOrchestrator) Notify(event SessionEvent) error {
 	case BEGIN_SESSION:
 		bso.flags.Set(SENDER_READY)
 	case BEGIN_SEND:
-		bso.flags.Wait(SENDER_READY)
+		state := bso.flags.WaitAny(SENDER_READY|SENDER_CLOSED, 0)
+		if state&SENDER_CLOSED != 0 {
+			log.Errorf("Orchestrator waiting for SENDER_READY when SENDER_CLOSED seen")
+			return errors.ErrStateError
+		}
 	case END_RECEIVE:
 		bso.flags.Set(SENDER_READY)
 	case BEGIN_CLOSE:
@@ -157,6 +162,8 @@ func (bso *BatchSendOrchestrator) Notify(event SessionEvent) error {
 			bso.flags.Set(SENDER_CLOSED)
 		}
 	case END_SESSION:
+		bso.flags.Update(SENDER, SENDER_CLOSED)
+	case CANCEL:
 		bso.flags.Update(SENDER, SENDER_CLOSED)
 	}
 
@@ -194,13 +201,19 @@ func (bro *BatchReceiveOrchestrator) Notify(event SessionEvent) error {
 	case END_SESSION:
 		bro.flags.Update(RECEIVER_READY, RECEIVER_CLOSED)
 	case BEGIN_CHECK:
-		bro.flags.Wait(RECEIVER_CHECKING)
+		state := bro.flags.WaitAny(RECEIVER_CHECKING|RECEIVER_CLOSED, 0)
+		if state&RECEIVER_CLOSED != 0 {
+			log.Errorf("Orchestrator waiting for RECEIVER_CHECKING when RECEIVER_CLOSED seen")
+			return errors.ErrStateError
+		}
 	case BEGIN_SEND:
 		if bro.flags.Contains(SENDER_CLOSING) {
 			bro.flags.Set(RECEIVER_CLOSING)
 		}
 	case END_SEND:
 		bro.flags.Unset(RECEIVER_CHECKING)
+	case CANCEL:
+		bro.flags.Update(RECEIVER, RECEIVER_CLOSED)
 	}
 
 	return nil
@@ -217,5 +230,5 @@ func (bro *BatchReceiveOrchestrator) ReceiveState(batchStatus BatchStatus) error
 }
 
 func (bro *BatchReceiveOrchestrator) IsClosed() bool {
-	return bro.flags.Contains(SENDER_CLOSED)
+	return bro.flags.ContainsAny(SENDER_CLOSED | RECEIVER_CLOSED)
 }

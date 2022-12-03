@@ -8,6 +8,7 @@ import (
 	"golang.org/x/exp/constraints"
 
 	"github.com/fission-codes/go-car-mirror/filter"
+	"github.com/fission-codes/go-car-mirror/util"
 )
 
 var log *zap.SugaredLogger
@@ -94,7 +95,6 @@ func (bs *SynchronizedBlockStore[I]) Add(block Block[I]) error {
 	bs.mutex.Lock()
 	defer bs.mutex.Unlock()
 	return bs.store.Add(block)
-
 }
 
 type MutablePointerResolver[I BlockId] interface {
@@ -162,6 +162,7 @@ const (
 	END_RECEIVE
 	BEGIN_CHECK
 	END_CHECK
+	CANCEL
 )
 
 func (se SessionEvent) String() string {
@@ -194,6 +195,8 @@ func (se SessionEvent) String() string {
 		return "BEGIN_CHECK"
 	case END_CHECK:
 		return "END_CHECK"
+	case CANCEL:
+		return "CANCEL"
 	default:
 		return "<unknown>"
 	}
@@ -261,7 +264,7 @@ func (rs *ReceiverSession[I, F]) AccumulateStatus(id I) error {
 	// Get block and handle errors
 	block, err := rs.store.Get(id)
 
-	if err == errors.BlockNotFound {
+	if err == errors.ErrBlockNotFound {
 		return rs.accumulator.Want(id)
 	}
 
@@ -343,6 +346,10 @@ func (ss *ReceiverSession[I, F]) HandleState(state F) {
 	}
 }
 
+func (ss *ReceiverSession[I, F]) Cancel() error {
+	return ss.orchestrator.Notify(CANCEL)
+}
+
 type SenderSession[
 	I BlockId,
 	F Flags,
@@ -352,7 +359,7 @@ type SenderSession[
 	orchestrator Orchestrator[F]
 	filter       filter.Filter[I]
 	sent         sync.Map
-	pending      chan I
+	pending      *util.SynchronizedDeque[I]
 }
 
 func NewSenderSession[I BlockId, F Flags](store BlockStore[I], connection SenderConnection[F, I], filter filter.Filter[I], orchestrator Orchestrator[F]) *SenderSession[I, F] {
@@ -362,7 +369,7 @@ func NewSenderSession[I BlockId, F Flags](store BlockStore[I], connection Sender
 		orchestrator,
 		filter,
 		sync.Map{},
-		make(chan I, 1024),
+		util.NewSynchronizedDeque[I](util.NewArrayDeque[I](1024)),
 	}
 }
 
@@ -378,14 +385,14 @@ func (ss *SenderSession[I, F]) Run() error {
 			return err
 		}
 
-		if len(ss.pending) > 0 {
-			id := <-ss.pending
+		if ss.pending.Len() > 0 {
+			id := ss.pending.PollFront()
 			if _, ok := ss.sent.Load(id); !ok {
 				ss.sent.Store(id, true)
 
 				block, err := ss.store.Get(id)
 				if err != nil {
-					if err != errors.BlockNotFound {
+					if err != errors.ErrBlockNotFound {
 						return err
 					}
 				} else {
@@ -394,7 +401,9 @@ func (ss *SenderSession[I, F]) Run() error {
 					}
 					for _, child := range block.Children() {
 						if ss.filter.DoesNotContain(child) {
-							ss.pending <- child
+							if err := ss.pending.PushBack(child); err != nil {
+								return err
+							}
 						}
 					}
 				}
@@ -425,8 +434,9 @@ func (ss *SenderSession[I, F]) HandleStatus(have filter.Filter[I], want []I) {
 
 	ss.filter = ss.filter.AddAll(have)
 
+	log.Debugw("SenderSession", "method", "HandleStatus", "pending", ss.pending.Len())
 	for _, id := range want {
-		ss.pending <- id
+		ss.pending.PushFront(id) // send wants to the front of the queue
 	}
 }
 
@@ -441,10 +451,12 @@ func (ss *SenderSession[I, F]) Close() error {
 	return nil
 }
 
-func (ss *SenderSession[I, F]) Enqueue(id I) error {
-	ss.pending <- id
+func (ss *SenderSession[I, F]) Cancel() error {
+	return ss.orchestrator.Notify(CANCEL)
+}
 
-	return nil
+func (ss *SenderSession[I, F]) Enqueue(id I) error {
+	return ss.pending.PushBack(id)
 }
 
 func (ss *SenderSession[I, F]) HandleState(state F) {

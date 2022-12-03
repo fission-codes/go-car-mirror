@@ -71,7 +71,7 @@ func AddRandomTree(store *MockStore, maxChildren int, maxDepth int, pCrosslink f
 	block := NewMockBlock(id, []MockBlockId{})
 
 	if maxDepth > 0 {
-		if RandBool(pCrosslink) {
+		if RandBool(pCrosslink) && len(store.blocks) > 0 {
 			existingBlock, err := store.RandomBlock()
 			if err != nil {
 				panic(err)
@@ -150,8 +150,8 @@ func NewMockStore() *MockStore {
 
 func (bs *MockStore) Get(id MockBlockId) (Block[MockBlockId], error) {
 	block, ok := bs.blocks[id]
-	if !ok {
-		return nil, cmerrors.BlockNotFound
+	if !ok || block == nil {
+		return nil, cmerrors.ErrBlockNotFound
 	}
 
 	return block, nil
@@ -405,7 +405,7 @@ func MockBatchTransfer(sender_store *MockStore, receiver_store *MockStore, root 
 	log.Debugf("created sender_session")
 
 	receiver_session := NewReceiverSession[MockBlockId, BatchStatus](
-		NewInstrumentedBlockStore[MockBlockId](receiver_store, GLOBAL_STATS.WithContext("ReceiverStore")),
+		NewInstrumentedBlockStore[MockBlockId](NewSynchronizedBlockStore[MockBlockId](receiver_store), GLOBAL_STATS.WithContext("ReceiverStore")),
 		connection,
 		NewSimpleStatusAccumulator[MockBlockId](filter.NewSynchronizedFilter(makeBloom(1024))),
 		NewInstrumentedOrchestrator[BatchStatus](NewBatchReceiveOrchestrator(), GLOBAL_STATS.WithContext("BatchReceiveOrchestrator")),
@@ -441,6 +441,18 @@ func MockBatchTransfer(sender_store *MockStore, receiver_store *MockStore, root 
 		log.Debugf("status listener started")
 		err_chan <- connection.ListenStatus(NewInstrumentedStatusReceiver[MockBlockId, BatchStatus](sender_session, GLOBAL_STATS.WithContext("StatusListener")))
 		log.Debugf("status listener terminated")
+	}()
+
+	go func() {
+		log.Debugf("timeout started")
+		time.Sleep(5 * time.Second)
+		log.Debugf("timeout elapsed")
+		if !sender_session.orchestrator.IsClosed() {
+			sender_session.Cancel()
+		}
+		if !receiver_session.orchestrator.IsClosed() {
+			receiver_session.Cancel()
+		}
 	}()
 
 	for i := 0; i < 4; i++ {
@@ -500,6 +512,20 @@ func TestMockTransferSingleMissingBlockBatch(t *testing.T) {
 		t.Errorf("Could not find random block %v", err)
 	}
 	receiverStore.Remove(block.Id())
+	MockBatchTransfer(senderStore, receiverStore, root, 10)
+	if !receiverStore.HasAll(root) {
+		t.Errorf("Expected receiver store to have all nodes")
+	}
+}
+
+func TestMockTransferSingleMissingTreeBlockBatch(t *testing.T) {
+	InitLog()
+	InitDefault()
+	senderStore := NewMockStore()
+	AddRandomForest(senderStore, 10)
+	receiverStore := NewMockStore()
+	receiverStore.AddAll(senderStore)
+	root := AddRandomTree(senderStore, 10, 5, 0.1)
 	MockBatchTransfer(senderStore, receiverStore, root, 10)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
