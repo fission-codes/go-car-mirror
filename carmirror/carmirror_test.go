@@ -15,6 +15,7 @@ import (
 
 	cmerrors "github.com/fission-codes/go-car-mirror/errors"
 	"github.com/fission-codes/go-car-mirror/filter"
+	"github.com/fxamacker/cbor/v2"
 	"github.com/zeebo/xxh3"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -124,6 +125,23 @@ func (id MockBlockId) UnmarshalBinary(bytes []byte) error {
 	return nil
 }
 
+func (id MockBlockId) MarshalCBOR() ([]byte, error) {
+	if bytes, error := id.MarshalBinary(); error == nil {
+		return cbor.Marshal(bytes)
+	} else {
+		return nil, error
+	}
+}
+
+func (id MockBlockId) UnmarshalCBOR(bytes []byte) error {
+	var rawbytes []byte
+	if error := cbor.Unmarshal(bytes, &rawbytes); error == nil {
+		return id.UnmarshalBinary(rawbytes)
+	} else {
+		return error
+	}
+}
+
 func (id MockBlockId) MarshalJSON() ([]byte, error) {
 	return json.Marshal(id)
 }
@@ -151,27 +169,28 @@ func (b *MockBlock) Id() MockBlockId {
 	return b.id
 }
 
-func (b *MockBlock) Read(reader *bufio.Reader) error {
+func (b *MockBlock) Read(reader io.Reader) error {
 	var err error
-	if b.size, err = binary.ReadUvarint(reader); err != nil {
+	if b.size, err = binary.ReadUvarint(bufio.NewReader(reader)); err != nil {
 		return err
 	}
 	var len int
 	if len, err = io.ReadFull(reader, b.id[:]); err != nil {
 		return err
 	}
-	var discarded int
-	if discarded, err = reader.Discard(int(b.size) - len); err != nil {
+	var discarded int64
+
+	if discarded, err = io.CopyN(io.Discard, reader, int64(b.size)-int64(len)); err != nil {
 		return err
 	}
-	if discarded != len {
+	if discarded != int64(len) {
 		return errors.New("Could not read enough data")
 	} else {
 		return nil
 	}
 }
 
-func (b *MockBlock) Write(writer *bufio.Writer) error {
+func (b *MockBlock) Write(writer io.Writer) error {
 	var err error = nil
 	buf := make([]byte, binary.MaxVarintLen64)
 	sz := binary.PutUvarint(buf, b.size)
@@ -185,9 +204,10 @@ func (b *MockBlock) Write(writer *bufio.Writer) error {
 	if length, err = writer.Write(buf); err != nil {
 		return err
 	}
-	for i := 0; err == nil && i < int(b.size)-length; i++ {
-		err = writer.WriteByte(0)
-	}
+
+	// Deterministic seed; hopefully always generate same content from same id
+	source := rand.New(rand.NewSource(int64(binary.BigEndian.Uint64(b.id[0:8]) >> 1)))
+	_, err = io.CopyN(writer, source, int64(b.size)-int64(length))
 
 	return err
 }

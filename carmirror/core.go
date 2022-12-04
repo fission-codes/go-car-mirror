@@ -1,12 +1,13 @@
 package carmirror
 
 import (
-	"bufio"
 	"encoding"
 	"encoding/json"
+	"io"
 	"sync"
 
 	"github.com/fission-codes/go-car-mirror/errors"
+	"github.com/fxamacker/cbor/v2"
 	"go.uber.org/zap"
 	"golang.org/x/exp/constraints"
 
@@ -25,20 +26,31 @@ func init() {
 // BlockId represents a unique identifier for a Block.
 // This interface only represents the identifier, not the Block. The interface is chosen for compatibility
 // with ipfs/go-cid - noting that the go-cid is, for the moment, comparable
+// It's annoying that go-cid doesn't implement cbor.Marshaler/cbor.Unmarshaler because the binary
+// representation of a CID and the CBOR canonical representation are quite different:
+//
+// * [https://pkg.go.dev/github.com/ipfs/go-cid#Cast] - binary form of CID
+// * [https://ipld.io/specs/codecs/dag-cbor/spec/#links] - CBOR representation
+//
+// Unfortunately we intend to leverage the CAR v1 spec for compatibility, which (oddly, IMHO) specifies
+// using the CBOR form of the CID in the header and the raw byte form in the body. Thus, our interface here
+// needs to be able support both.
 type BlockId interface {
 	comparable
 	encoding.BinaryMarshaler
 	encoding.BinaryUnmarshaler
 	json.Marshaler
 	json.Unmarshaler
+	cbor.Marshaler
+	cbor.Unmarshaler
 }
 
 // Block is an immutable data block referenced by a unique ID.
 type Block[I BlockId] interface {
 	// read block encoded with Write from a stream.
-	Read(*bufio.Reader) error
+	Read(io.Reader) error
 	// write block to a stream. Should use the Car v1 format (length : varint, cid, bytes).
-	Write(*bufio.Writer) error
+	Write(io.Writer) error
 	// Id returns the BlockId for the Block.
 	Id() I
 	// Children returns a list of `BlockId`s linked to from the Block.
