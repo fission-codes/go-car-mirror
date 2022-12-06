@@ -156,8 +156,8 @@ func (bs *MockStore) All() (<-chan fixtures.MockBlockId, error) {
 	return values, nil
 }
 
-func (bs *MockStore) Add(raw_block RawBlock[fixtures.MockBlockId]) (Block[fixtures.MockBlockId], error) {
-	block, ok := raw_block.(*fixtures.MockBlock)
+func (bs *MockStore) Add(rawBlock RawBlock[fixtures.MockBlockId]) (Block[fixtures.MockBlockId], error) {
+	block, ok := rawBlock.(*fixtures.MockBlock)
 	if ok {
 		id := block.Id()
 		bs.blocks[id] = block

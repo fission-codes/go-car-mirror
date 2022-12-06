@@ -267,9 +267,9 @@ func (ibs *InstrumentedBlockStore[I]) All() (<-chan I, error) {
 
 }
 
-func (ibs *InstrumentedBlockStore[I]) Add(raw_block RawBlock[I]) (Block[I], error) {
-	ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Add", "id", raw_block.Id())
-	block, err := ibs.store.Add(raw_block)
+func (ibs *InstrumentedBlockStore[I]) Add(rawBlock RawBlock[I]) (Block[I], error) {
+	ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Add", "id", rawBlock.Id())
+	block, err := ibs.store.Add(rawBlock)
 	if err == nil {
 		ibs.stats.Log("Add.Ok")
 	} else {

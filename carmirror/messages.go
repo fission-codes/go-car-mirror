@@ -139,13 +139,13 @@ func (b *BlockWireFormat[T, R]) Size() int64 {
 	return int64(len(b.Data))
 }
 
-func CastBlockWireFormat[T BlockId, R BlockIdRef[T]](raw_block RawBlock[T]) *BlockWireFormat[T, R] {
-	block, ok := raw_block.(*BlockWireFormat[T, R])
+func CastBlockWireFormat[T BlockId, R BlockIdRef[T]](rawBlock RawBlock[T]) *BlockWireFormat[T, R] {
+	block, ok := rawBlock.(*BlockWireFormat[T, R])
 	if ok {
 		return block
 	} else {
-		id := raw_block.Id()
-		return &BlockWireFormat[T, R]{&id, raw_block.Bytes()}
+		id := rawBlock.Id()
+		return &BlockWireFormat[T, R]{&id, rawBlock.Bytes()}
 	}
 }
 
@@ -156,8 +156,8 @@ type Archive[T BlockId, R BlockIdRef[T]] struct {
 
 func (car *Archive[T, R]) Write(writer io.Writer) error {
 	if err := car.Header.Write(writer); err == nil {
-		for _, raw_block := range car.Blocks {
-			block := CastBlockWireFormat[T, R](raw_block)
+		for _, rawBlock := range car.Blocks {
+			block := CastBlockWireFormat[T, R](rawBlock)
 			if err = block.Write(writer); err != nil {
 				return err
 			}

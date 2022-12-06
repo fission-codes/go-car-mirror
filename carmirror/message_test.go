@@ -44,18 +44,18 @@ func TestArchiveHeaderWriteRead(t *testing.T) {
 func TestBlockWireFormatWriteRead(t *testing.T) {
 	buf := bytes.Buffer{}
 	block := fixtures.NewMockBlock(fixtures.RandId(), 10240)
-	raw_block := CastBlockWireFormat[fixtures.MockBlockId](block)
-	if err := raw_block.Write(&buf); err != nil {
+	rawBlock := CastBlockWireFormat[fixtures.MockBlockId](block)
+	if err := rawBlock.Write(&buf); err != nil {
 		t.Errorf("Problem writing block %v", err)
 	}
-	assertBytesEqual(block.Bytes(), raw_block.Bytes(), t)
+	assertBytesEqual(block.Bytes(), rawBlock.Bytes(), t)
 	copy := BlockWireFormat[fixtures.MockBlockId, *fixtures.MockBlockId]{}
 	if err := copy.Read(&buf); err != nil {
 		t.Errorf("error reading block %v", err)
 	}
-	if !BlockEqual[fixtures.MockBlockId](raw_block, &copy) {
-		t.Errorf("Blocks (%v, %v) not equal", raw_block.Id(), copy.Id())
-		assertBytesEqual(raw_block.Bytes(), copy.Bytes(), t)
+	if !BlockEqual[fixtures.MockBlockId](rawBlock, &copy) {
+		t.Errorf("Blocks (%v, %v) not equal", rawBlock.Id(), copy.Id())
+		assertBytesEqual(rawBlock.Bytes(), copy.Bytes(), t)
 	}
 }
 
