@@ -38,23 +38,30 @@ func init() {
 type BlockId interface {
 	comparable
 	encoding.BinaryMarshaler
-	encoding.BinaryUnmarshaler
 	json.Marshaler
-	json.Unmarshaler
 	cbor.Marshaler
+}
+
+type BlockIdRef[T BlockId] interface {
+	*T
+	encoding.BinaryUnmarshaler
+	json.Unmarshaler
 	cbor.Unmarshaler
+	Read(io.ByteReader) (int, error)
 }
 
 // Block is an immutable data block referenced by a unique ID.
 type Block[I BlockId] interface {
-	// read block encoded with Write from a stream.
-	Read(io.Reader) error
-	// write block to a stream. Should use the Car v1 format (length : varint, cid, bytes).
-	Write(io.Writer) error
+	// write block bytes to a stream
+	Write(io.Writer) (int64, error)
 	// Id returns the BlockId for the Block.
 	Id() I
 	// Children returns a list of `BlockId`s linked to from the Block.
 	Children() []I
+	// The block data
+	Bytes() []byte
+	// The size of the block
+	Size() int64
 }
 
 // ReadableBlockStore represents read operations for a store of blocks.
@@ -74,6 +81,9 @@ type BlockStore[I BlockId] interface {
 
 	// Add puts a given block to the blockstore.
 	Add(Block[I]) error
+
+	// read and store block by reading bytes from a stream
+	AddBytes(I, io.Reader) (Block[I], error)
 }
 
 type SynchronizedBlockStore[I BlockId] struct {
@@ -118,6 +128,12 @@ func (bs *SynchronizedBlockStore[I]) Add(block Block[I]) error {
 	bs.mutex.Lock()
 	defer bs.mutex.Unlock()
 	return bs.store.Add(block)
+}
+
+func (bs *SynchronizedBlockStore[I]) AddBytes(id I, bytes io.Reader) (Block[I], error) {
+	bs.mutex.Lock()
+	defer bs.mutex.Unlock()
+	return bs.store.AddBytes(id, bytes)
 }
 
 type MutablePointerResolver[I BlockId] interface {

@@ -2,6 +2,7 @@ package carmirror
 
 import (
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 
@@ -277,6 +278,19 @@ func (ibs *InstrumentedBlockStore[I]) Add(block Block[I]) error {
 		ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Add", "error", err)
 	}
 	return err
+}
+
+func (ibs *InstrumentedBlockStore[I]) AddBytes(id I, bytes io.Reader) (Block[I], error) {
+	ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "AddBytes", "id", id)
+	result, err := ibs.store.AddBytes(id, bytes)
+	if err == nil {
+		ibs.stats.Log("AddBytes.Ok")
+		ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "AddBytes", "result", result.Id())
+	} else {
+		ibs.stats.Log("AddBytes." + err.Error())
+		ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "AddBytes", "error", err)
+	}
+	return result, err
 }
 
 type InstrumentedBlockSender[I BlockId] struct {
