@@ -90,3 +90,10 @@ func (fs *SharedFlagSet[F]) ContainsAny(flags F) bool {
 	defer fs.condvar.L.Unlock()
 	return fs.flags.Load().(F)&flags != 0
 }
+
+func Min[T constraints.Ordered](a, b T) T {
+	if a < b {
+		return a
+	}
+	return b
+}

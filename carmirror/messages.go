@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
 	"io"
 
 	"github.com/fxamacker/cbor/v2"
@@ -25,8 +24,13 @@ func writeBufferWithPrefix(writer io.Writer, buf []byte) error {
 	return err
 }
 
-func readBufferWithPrefix(reader io.Reader) ([]byte, error) {
-	if size, err := binary.ReadUvarint(bufio.NewReader(reader)); err != nil {
+type ByteAndBlockReader interface {
+	io.Reader
+	io.ByteReader
+}
+
+func readBufferWithPrefix(reader ByteAndBlockReader) ([]byte, error) {
+	if size, err := binary.ReadUvarint(reader); err != nil {
 		return nil, err
 	} else {
 		buf := make([]byte, size)
@@ -35,38 +39,24 @@ func readBufferWithPrefix(reader io.Reader) ([]byte, error) {
 	}
 }
 
-type ArchiveHeader[T BlockId] struct {
+type ArchiveHeaderWireFormat[T BlockId] struct {
 	Version int
 	Roots   []T
 }
 
-func (ah *ArchiveHeader[T]) MarshalCBOR() ([]byte, error) {
-	return cbor.Marshal(ah)
-}
-
-func (ah *ArchiveHeader[T]) MarshalJSON() ([]byte, error) {
-	return json.Marshal(ah)
-}
-
-func (ah *ArchiveHeader[T]) UnmarshalCBOR(data []byte) error {
-	return cbor.Unmarshal(data, ah)
-}
-
-func (ah *ArchiveHeader[T]) UnmarshalJSON(data []byte) error {
-	return json.Unmarshal(data, ah)
-}
+type ArchiveHeader[T BlockId] ArchiveHeaderWireFormat[T] // Avoid recursion due to cbor marshalling falling back to using MarshalBinary
 
 func (ah *ArchiveHeader[T]) Write(writer io.Writer) error {
-	if buf, err := cbor.Marshal(ah); err == nil {
+	if buf, err := cbor.Marshal((*ArchiveHeaderWireFormat[T])(ah)); err == nil {
 		return writeBufferWithPrefix(writer, buf)
 	} else {
 		return err
 	}
 }
 
-func (ah *ArchiveHeader[T]) Read(reader io.Reader) error {
+func (ah *ArchiveHeader[T]) Read(reader ByteAndBlockReader) error {
 	if buf, err := readBufferWithPrefix(reader); err == nil {
-		return ah.UnmarshalCBOR(buf)
+		return cbor.Unmarshal(buf, (*ArchiveHeaderWireFormat[T])(ah))
 	} else {
 		return err
 	}
@@ -82,30 +72,92 @@ func (ah *ArchiveHeader[T]) UnmarshalBinary(data []byte) error {
 	return ah.Read(bytes.NewBuffer(data))
 }
 
-type Archive[T BlockId, B Block[T]] struct {
-	Header ArchiveHeader[T]
-	Blocks []B
+type BlockWireFormat[T BlockId, R BlockIdRef[T]] struct {
+	IdRef R      `json:"id"`
+	Data  []byte `json:"data"`
 }
 
-func (car *Archive[T, B]) MarshalCBOR() ([]byte, error) {
-	return cbor.Marshal(car)
+func (b *BlockWireFormat[T, R]) Write(writer io.Writer) error {
+	var (
+		err error
+		buf []byte
+	)
+
+	if buf, err = (*b.IdRef).MarshalBinary(); err != nil {
+		return err
+	}
+	if err = writeUvarint(writer, uint64(len(buf)+len(b.Data))); err != nil {
+		return err
+	}
+	if _, err = writer.Write(buf); err != nil {
+		return err
+	}
+	_, err = writer.Write(b.Data)
+	return err
 }
 
-func (car *Archive[T, B]) MarshalJSON() ([]byte, error) {
-	return json.Marshal(car)
+func (b *BlockWireFormat[T, R]) Read(reader ByteAndBlockReader) error {
+	var (
+		err   error
+		size  uint64
+		count int
+	)
+	if size, err = binary.ReadUvarint(reader); err != nil {
+		return err
+	}
+	reader = bufio.NewReader(io.LimitReader(reader, int64(size)))
+	if b.IdRef == nil {
+		b.IdRef = new(T)
+	}
+	if count, err = b.IdRef.Read(reader); err != nil {
+		return err
+	}
+	b.Data = make([]byte, int(size)-count)
+	_, err = io.ReadFull(reader, b.Data)
+	return err
 }
 
-func (car *Archive[T, B]) UnmarshalCBOR(bytes []byte) error {
-	return cbor.Unmarshal(bytes, car)
+func (b *BlockWireFormat[T, R]) UnmarshalBinary(data []byte) error {
+	return b.Read(bytes.NewBuffer(data))
 }
 
-func (car *Archive[T, B]) UnmarshalJSON(bytes []byte) error {
-	return json.Unmarshal(bytes, car)
+func (b *BlockWireFormat[T, R]) MarshalBinary() ([]byte, error) {
+	var buf bytes.Buffer
+	err := b.Write(&buf)
+	return buf.Bytes(), err
 }
 
-func (car *Archive[T, B]) Write(writer io.Writer) error {
+func (b *BlockWireFormat[T, R]) Id() T {
+	return *b.IdRef
+}
+
+func (b *BlockWireFormat[T, R]) Bytes() []byte {
+	return b.Data
+}
+
+func (b *BlockWireFormat[T, R]) Size() int64 {
+	return int64(len(b.Data))
+}
+
+func CastBlockWireFormat[T BlockId, R BlockIdRef[T]](raw_block RawBlock[T]) *BlockWireFormat[T, R] {
+	block, ok := raw_block.(*BlockWireFormat[T, R])
+	if ok {
+		return block
+	} else {
+		id := raw_block.Id()
+		return &BlockWireFormat[T, R]{&id, raw_block.Bytes()}
+	}
+}
+
+type Archive[T BlockId, R BlockIdRef[T]] struct {
+	Header ArchiveHeader[T] `json:"hdr"`
+	Blocks []RawBlock[T]    `json:"blocks"`
+}
+
+func (car *Archive[T, R]) Write(writer io.Writer) error {
 	if err := car.Header.Write(writer); err == nil {
-		for _, block := range car.Blocks {
+		for _, raw_block := range car.Blocks {
+			block := CastBlockWireFormat[T, R](raw_block)
 			if err = block.Write(writer); err != nil {
 				return err
 			}
@@ -116,69 +168,48 @@ func (car *Archive[T, B]) Write(writer io.Writer) error {
 	}
 }
 
-func (car *Archive[T, B]) Read(reader io.Reader) error {
-	if err := car.Header.Read(reader); err == nil {
-		var block B // TODO: this is kind of problematic - need a blockstore context
-		err = block.Read(reader)
-		for err == nil {
-			car.Blocks = append(car.Blocks, block)
-			// TODO: this might not work for all types? How do we force B to be a struct?
-			err = block.Read(reader)
+func (car *Archive[T, R]) Read(reader ByteAndBlockReader) error {
+	var err error
+	err = car.Header.Read(reader)
+	car.Blocks = car.Blocks[:0]
+	for err == nil {
+		block := BlockWireFormat[T, R]{}
+		if err = block.Read(reader); err == nil || err == io.EOF {
+			car.Blocks = append(car.Blocks, &block)
 		}
-		if err == io.EOF {
-			return nil
-		} else {
-			return err
-		}
-	} else {
-		return err
 	}
+	return err
 }
 
-func (car *Archive[T, B]) UnmarshalBinary(data []byte) error {
+func (car *Archive[T, R]) UnmarshalBinary(data []byte) error {
 	return car.Read(bytes.NewBuffer(data))
 }
 
-func (ah *Archive[T, B]) MarshalBinary() ([]byte, error) {
+func (ah *Archive[T, R]) MarshalBinary() ([]byte, error) {
 	var buf bytes.Buffer
 	err := ah.Write(&buf)
 	return buf.Bytes(), err
 }
 
-type BlocksMessage[T BlockId, B Block[T]] struct {
-	BK Archive[T, B]
+type BlocksMessage[T BlockId, R BlockIdRef[T], F Flags] struct {
+	Status F
+	Car    Archive[T, R]
 }
 
-func (msg *BlocksMessage[T, B]) MarshalCBOR() ([]byte, error) {
-	return cbor.Marshal(msg)
+func (msg *BlocksMessage[T, B, F]) Write(writer io.Writer) error {
+	return msg.Car.Write(writer)
 }
 
-func (msg *BlocksMessage[T, B]) MarshalJSON() ([]byte, error) {
-	return json.Marshal(msg)
+func (msg *BlocksMessage[T, B, F]) Read(reader ByteAndBlockReader) error {
+	return msg.Car.Read(reader)
 }
 
-func (msg *BlocksMessage[T, B]) UnmarshalCBOR(bytes []byte) error {
-	return cbor.Unmarshal(bytes, msg)
-}
-
-func (msg *BlocksMessage[T, B]) UnmarshalJSON(bytes []byte) error {
-	return json.Unmarshal(bytes, msg)
-}
-
-func (msg *BlocksMessage[T, B]) Write(writer io.Writer) error {
-	return msg.BK.Write(writer)
-}
-
-func (msg *BlocksMessage[T, B]) Read(reader io.Reader) error {
-	return msg.BK.Read(reader)
-}
-
-func (ah *BlocksMessage[T, B]) MarshalBinary() ([]byte, error) {
+func (ah *BlocksMessage[T, B, F]) MarshalBinary() ([]byte, error) {
 	var buf bytes.Buffer
 	err := ah.Write(&buf)
 	return buf.Bytes(), err
 }
 
-func (msg *BlocksMessage[T, B]) UnmarshalBinary(data []byte) error {
+func (msg *BlocksMessage[T, B, F]) UnmarshalBinary(data []byte) error {
 	return msg.Read(bytes.NewBuffer(data))
 }

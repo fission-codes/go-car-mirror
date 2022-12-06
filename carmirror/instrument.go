@@ -267,16 +267,16 @@ func (ibs *InstrumentedBlockStore[I]) All() (<-chan I, error) {
 
 }
 
-func (ibs *InstrumentedBlockStore[I]) Add(block Block[I]) error {
-	ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Add", "id", block.Id())
-	err := ibs.store.Add(block)
+func (ibs *InstrumentedBlockStore[I]) Add(raw_block RawBlock[I]) (Block[I], error) {
+	ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Add", "id", raw_block.Id())
+	block, err := ibs.store.Add(raw_block)
 	if err == nil {
 		ibs.stats.Log("Add.Ok")
 	} else {
 		ibs.stats.Log("Add." + err.Error())
 		ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Add", "error", err)
 	}
-	return err
+	return block, err
 }
 
 type InstrumentedBlockSender[I BlockId] struct {
@@ -291,7 +291,7 @@ func NewInstrumentedBlockSender[I BlockId](sender BlockSender[I], stats Stats) *
 	}
 }
 
-func (ibs *InstrumentedBlockSender[I]) SendBlock(block Block[I]) error {
+func (ibs *InstrumentedBlockSender[I]) SendBlock(block RawBlock[I]) error {
 	ibs.stats.Logger().Debugw("InstrumentedBlockSender", "method", "SendBlock", "id", block.Id())
 	err := ibs.sender.SendBlock(block)
 	if err == nil {

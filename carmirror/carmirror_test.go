@@ -1,13 +1,8 @@
 package carmirror
 
 import (
-	"bufio"
-	"encoding/base64"
-	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"testing"
 	"time"
 
@@ -15,7 +10,7 @@ import (
 
 	cmerrors "github.com/fission-codes/go-car-mirror/errors"
 	"github.com/fission-codes/go-car-mirror/filter"
-	"github.com/fxamacker/cbor/v2"
+	"github.com/fission-codes/go-car-mirror/fixtures"
 	"github.com/zeebo/xxh3"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -47,33 +42,21 @@ func TestAntiEvergreen(t *testing.T) {
 	}
 }
 
-func RandId() [32]byte {
-	// id := make([]byte, 32)
-	var id [32]byte
-	rand.Read(id[:])
-	return id
-}
-
-func RandMockBlock() MockBlock {
-	id := RandId()
-	return *NewMockBlock(id, uint64(rand.Intn(10240)), []MockBlockId{})
-}
-
 func RandBool(p float64) bool {
 	return rand.Float64() < p
 }
 
-func IdHash(id MockBlockId, seed uint64) uint64 {
+func IdHash(id fixtures.MockBlockId, seed uint64) uint64 {
 	return xxh3.HashSeed(id[:], seed)
 }
 
-func makeBloom(capacity uint) filter.Filter[MockBlockId] {
+func makeBloom(capacity uint) filter.Filter[fixtures.MockBlockId] {
 	return filter.NewBloomFilter(capacity, IdHash)
 }
 
-func AddRandomTree(store *MockStore, maxChildren int, maxDepth int, pCrosslink float64) MockBlockId {
-	id := RandId()
-	block := NewMockBlock(id, uint64(rand.Intn(10240)), []MockBlockId{})
+func AddRandomTree(store *MockStore, maxChildren int, maxDepth int, pCrosslink float64) fixtures.MockBlockId {
+	id := fixtures.RandId()
+	block := fixtures.NewMockBlock(id, rand.Int63n(10240))
 
 	if maxDepth > 0 {
 		if RandBool(pCrosslink) && len(store.blocks) > 0 {
@@ -98,144 +81,26 @@ func AddRandomTree(store *MockStore, maxChildren int, maxDepth int, pCrosslink f
 	return id
 }
 
-func AddRandomForest(store *MockStore, rootCount int) []MockBlockId {
-	roots := make([]MockBlockId, rootCount)
+func AddRandomForest(store *MockStore, rootCount int) []fixtures.MockBlockId {
+	roots := make([]fixtures.MockBlockId, rootCount)
 	for i := 0; i < rootCount; i++ {
 		roots[i] = AddRandomTree(store, 10, 5, 0.05)
 	}
 	return roots
 }
 
-// BlockId
-type MockBlockId [32]byte
-
-func (id MockBlockId) String() string {
-	return base64.URLEncoding.EncodeToString(id[:])
-}
-
-func (id MockBlockId) MarshalBinary() ([]byte, error) {
-	return id[:], nil
-}
-
-func (id MockBlockId) UnmarshalBinary(bytes []byte) error {
-	if len(bytes) < 32 {
-		return errors.New("bad size for id")
-	}
-	copy(id[:], bytes)
-	return nil
-}
-
-func (id MockBlockId) MarshalCBOR() ([]byte, error) {
-	if bytes, error := id.MarshalBinary(); error == nil {
-		return cbor.Marshal(bytes)
-	} else {
-		return nil, error
-	}
-}
-
-func (id MockBlockId) UnmarshalCBOR(bytes []byte) error {
-	var rawbytes []byte
-	if error := cbor.Unmarshal(bytes, &rawbytes); error == nil {
-		return id.UnmarshalBinary(rawbytes)
-	} else {
-		return error
-	}
-}
-
-func (id MockBlockId) MarshalJSON() ([]byte, error) {
-	return json.Marshal(id)
-}
-
-func (id MockBlockId) UnmarshalJSON(bytes []byte) error {
-	return json.Unmarshal(bytes, &id)
-}
-
-// Block
-type MockBlock struct {
-	id    MockBlockId
-	links []MockBlockId
-	size  uint64
-}
-
-func NewMockBlock(id MockBlockId, size uint64, links []MockBlockId) *MockBlock {
-	return &MockBlock{
-		id:    id,
-		links: links,
-		size:  size,
-	}
-}
-
-func (b *MockBlock) Id() MockBlockId {
-	return b.id
-}
-
-func (b *MockBlock) Read(reader io.Reader) error {
-	var err error
-	if b.size, err = binary.ReadUvarint(bufio.NewReader(reader)); err != nil {
-		return err
-	}
-	var len int
-	if len, err = io.ReadFull(reader, b.id[:]); err != nil {
-		return err
-	}
-	var discarded int64
-
-	if discarded, err = io.CopyN(io.Discard, reader, int64(b.size)-int64(len)); err != nil {
-		return err
-	}
-	if discarded != int64(len) {
-		return errors.New("Could not read enough data")
-	} else {
-		return nil
-	}
-}
-
-func (b *MockBlock) Write(writer io.Writer) error {
-	var err error = nil
-	buf := make([]byte, binary.MaxVarintLen64)
-	sz := binary.PutUvarint(buf, b.size)
-	if _, err = writer.Write(buf[0:sz]); err != nil {
-		return err
-	}
-	if buf, err = b.id.MarshalBinary(); err != nil {
-		return err
-	}
-	var length int
-	if length, err = writer.Write(buf); err != nil {
-		return err
-	}
-
-	// Deterministic seed; hopefully always generate same content from same id
-	source := rand.New(rand.NewSource(int64(binary.BigEndian.Uint64(b.id[0:8]) >> 1)))
-	_, err = io.CopyN(writer, source, int64(b.size)-int64(length))
-
-	return err
-}
-
-func (b *MockBlock) Children() []MockBlockId {
-	return b.links
-}
-
-func (b *MockBlock) AddChild(id MockBlockId) error {
-	b.links = append(b.links, id)
-
-	return nil
-}
-
-var _ Block[MockBlockId] = (*MockBlock)(nil)
-
 // BlockStore
 type MockStore struct {
-	blocks map[MockBlockId]Block[MockBlockId]
+	blocks map[fixtures.MockBlockId]Block[fixtures.MockBlockId]
 }
 
 func NewMockStore() *MockStore {
 	return &MockStore{
-		blocks: make(map[MockBlockId]Block[MockBlockId]),
+		blocks: make(map[fixtures.MockBlockId]Block[fixtures.MockBlockId]),
 	}
 }
 
-func (bs *MockStore) Get(id MockBlockId) (Block[MockBlockId], error) {
+func (bs *MockStore) Get(id fixtures.MockBlockId) (Block[fixtures.MockBlockId], error) {
 	block, ok := bs.blocks[id]
 	if !ok || block == nil {
 		return nil, cmerrors.ErrBlockNotFound
@@ -244,17 +109,17 @@ func (bs *MockStore) Get(id MockBlockId) (Block[MockBlockId], error) {
 	return block, nil
 }
 
-func (bs *MockStore) Has(id MockBlockId) (bool, error) {
+func (bs *MockStore) Has(id fixtures.MockBlockId) (bool, error) {
 	_, ok := bs.blocks[id]
 	return ok, nil
 }
 
-func (bs *MockStore) Remove(id MockBlockId) {
+func (bs *MockStore) Remove(id fixtures.MockBlockId) {
 	delete(bs.blocks, id)
 }
 
-func (bs *MockStore) HasAll(root MockBlockId) bool {
-	var hasAllInternal = func(root MockBlockId) error {
+func (bs *MockStore) HasAll(root fixtures.MockBlockId) bool {
+	var hasAllInternal = func(root fixtures.MockBlockId) error {
 		if b, ok := bs.blocks[root]; ok {
 			for _, child := range b.Children() {
 				if err := bs.doHasAll(child); err != nil {
@@ -269,7 +134,7 @@ func (bs *MockStore) HasAll(root MockBlockId) bool {
 	return hasAllInternal(root) == nil
 }
 
-func (bs *MockStore) doHasAll(root MockBlockId) error {
+func (bs *MockStore) doHasAll(root fixtures.MockBlockId) error {
 	if b, ok := bs.blocks[root]; ok {
 		for _, child := range b.Children() {
 			if err := bs.doHasAll(child); err != nil {
@@ -282,27 +147,31 @@ func (bs *MockStore) doHasAll(root MockBlockId) error {
 	}
 }
 
-func (bs *MockStore) All() (<-chan MockBlockId, error) {
-	values := make(chan MockBlockId, len(bs.blocks))
-	for k := range bs.blocks {
-		values <- k
+func (bs *MockStore) All() (<-chan fixtures.MockBlockId, error) {
+	values := make(chan fixtures.MockBlockId, len(bs.blocks))
+	for _, v := range bs.blocks {
+		values <- v.Id()
 	}
 	close(values)
 	return values, nil
 }
 
-func (bs *MockStore) Add(block Block[MockBlockId]) error {
-	id := block.Id()
-	bs.blocks[id] = block
-
-	return nil
+func (bs *MockStore) Add(raw_block RawBlock[fixtures.MockBlockId]) (Block[fixtures.MockBlockId], error) {
+	block, ok := raw_block.(*fixtures.MockBlock)
+	if ok {
+		id := block.Id()
+		bs.blocks[id] = block
+		return block, nil
+	} else {
+		return nil, errors.New("MockStore can only store MockBlocks")
+	}
 }
 
-func (bs *MockStore) AddAll(store BlockStore[MockBlockId]) error {
+func (bs *MockStore) AddAll(store BlockStore[fixtures.MockBlockId]) error {
 	if blocks, err := store.All(); err == nil {
 		for id := range blocks {
 			if block, err := store.Get(id); err == nil {
-				err = bs.Add(block)
+				_, err = bs.Add(block)
 				if err != nil {
 					return err
 				}
@@ -316,7 +185,7 @@ func (bs *MockStore) AddAll(store BlockStore[MockBlockId]) error {
 	}
 }
 
-func (bs *MockStore) RandomBlock() (Block[MockBlockId], error) {
+func (bs *MockStore) RandomBlock() (Block[fixtures.MockBlockId], error) {
 	if len(bs.blocks) == 0 {
 		return nil, fmt.Errorf("No blocks in store")
 	}
@@ -334,15 +203,15 @@ func (bs *MockStore) RandomBlock() (Block[MockBlockId], error) {
 
 type BlockMessage struct {
 	status BatchStatus
-	blocks []Block[MockBlockId]
+	blocks []RawBlock[fixtures.MockBlockId]
 }
 
 type BlockChannel struct {
 	channel  chan BlockMessage
-	receiver BatchBlockReceiver[MockBlockId]
+	receiver BatchBlockReceiver[fixtures.MockBlockId]
 }
 
-func (ch *BlockChannel) SendList(status BatchStatus, blocks []Block[MockBlockId]) error {
+func (ch *BlockChannel) SendList(status BatchStatus, blocks []RawBlock[fixtures.MockBlockId]) error {
 	ch.channel <- BlockMessage{status, blocks}
 	return nil
 }
@@ -352,7 +221,7 @@ func (ch *BlockChannel) Close() error {
 	return nil
 }
 
-func (ch *BlockChannel) SetBlockListener(receiver BatchBlockReceiver[MockBlockId]) {
+func (ch *BlockChannel) SetBlockListener(receiver BatchBlockReceiver[fixtures.MockBlockId]) {
 	ch.receiver = receiver
 }
 
@@ -369,16 +238,16 @@ func (ch *BlockChannel) listen() error {
 
 type StatusMessage struct {
 	status BatchStatus
-	have   filter.Filter[MockBlockId]
-	want   []MockBlockId
+	have   filter.Filter[fixtures.MockBlockId]
+	want   []fixtures.MockBlockId
 }
 
 type MockStatusReceiver struct {
 	channel        <-chan StatusMessage
-	statusReceiver StatusReceiver[MockBlockId, BatchStatus]
+	statusReceiver StatusReceiver[fixtures.MockBlockId, BatchStatus]
 }
 
-func (ch *MockStatusReceiver) SetStatusListener(receiver StatusReceiver[MockBlockId, BatchStatus]) {
+func (ch *MockStatusReceiver) SetStatusListener(receiver StatusReceiver[fixtures.MockBlockId, BatchStatus]) {
 	ch.statusReceiver = receiver
 }
 
@@ -406,7 +275,7 @@ func NewMockStatusSender(channel chan<- StatusMessage, orchestrator Orchestrator
 	}
 }
 
-func (sn *MockStatusSender) SendStatus(have filter.Filter[MockBlockId], want []MockBlockId) error {
+func (sn *MockStatusSender) SendStatus(have filter.Filter[fixtures.MockBlockId], want []fixtures.MockBlockId) error {
 	state := sn.orchestrator.State()
 	sn.channel <- StatusMessage{state, have, want}
 	return nil
@@ -442,26 +311,26 @@ func NewMockConnection(maxBatchSize uint) *MockConnection {
 	}
 }
 
-func (conn *MockConnection) OpenBlockSender(orchestrator Orchestrator[BatchStatus]) BlockSender[MockBlockId] {
-	return NewInstrumentedBlockSender[MockBlockId](
-		NewSimpleBatchBlockSender[MockBlockId](&conn.batchBlockChannel, orchestrator, uint32(conn.maxBatchSize)),
+func (conn *MockConnection) OpenBlockSender(orchestrator Orchestrator[BatchStatus]) BlockSender[fixtures.MockBlockId] {
+	return NewInstrumentedBlockSender[fixtures.MockBlockId](
+		NewSimpleBatchBlockSender[fixtures.MockBlockId](&conn.batchBlockChannel, orchestrator, uint32(conn.maxBatchSize)),
 		GLOBAL_STATS.WithContext("MockBlockSender"),
 	)
 }
 
-func (conn *MockConnection) OpenStatusSender(orchestrator Orchestrator[BatchStatus]) StatusSender[MockBlockId] {
-	return NewInstrumentedStatusSender[MockBlockId](
+func (conn *MockConnection) OpenStatusSender(orchestrator Orchestrator[BatchStatus]) StatusSender[fixtures.MockBlockId] {
+	return NewInstrumentedStatusSender[fixtures.MockBlockId](
 		NewMockStatusSender(conn.statusChannel, orchestrator),
 		GLOBAL_STATS.WithContext("MockStatusSender"),
 	)
 }
 
-func (conn *MockConnection) ListenStatus(sender StatusReceiver[MockBlockId, BatchStatus]) error {
+func (conn *MockConnection) ListenStatus(sender StatusReceiver[fixtures.MockBlockId, BatchStatus]) error {
 	conn.statusReceiver.SetStatusListener(sender)
 	return conn.statusReceiver.listen()
 }
 
-func (conn *MockConnection) ListenBlocks(receiver BlockReceiver[MockBlockId, BatchStatus]) error {
+func (conn *MockConnection) ListenBlocks(receiver BlockReceiver[fixtures.MockBlockId, BatchStatus]) error {
 	conn.batchBlockChannel.SetBlockListener(NewSimpleBatchBlockReceiver(receiver))
 	return conn.batchBlockChannel.listen()
 }
@@ -475,15 +344,15 @@ func (conn *MockConnection) ListenBlocks(receiver BlockReceiver[MockBlockId, Bat
 
 // Filter
 
-func MockBatchTransfer(sender_store *MockStore, receiver_store *MockStore, root MockBlockId, max_batch_size uint) error {
+func MockBatchTransfer(sender_store *MockStore, receiver_store *MockStore, root fixtures.MockBlockId, max_batch_size uint) error {
 
 	snapshotBefore := GLOBAL_REPORTING.Snapshot()
 	log = zap.S()
 
 	connection := NewMockConnection(max_batch_size)
 
-	sender_session := NewSenderSession[MockBlockId, BatchStatus](
-		NewInstrumentedBlockStore[MockBlockId](sender_store, GLOBAL_STATS.WithContext("SenderStore")),
+	sender_session := NewSenderSession[fixtures.MockBlockId, BatchStatus](
+		NewInstrumentedBlockStore[fixtures.MockBlockId](sender_store, GLOBAL_STATS.WithContext("SenderStore")),
 		connection,
 		filter.NewSynchronizedFilter(makeBloom(1024)),
 		NewInstrumentedOrchestrator[BatchStatus](NewBatchSendOrchestrator(), GLOBAL_STATS.WithContext("BatchSendOrchestrator")),
@@ -491,10 +360,10 @@ func MockBatchTransfer(sender_store *MockStore, receiver_store *MockStore, root 
 
 	log.Debugf("created sender_session")
 
-	receiver_session := NewReceiverSession[MockBlockId, BatchStatus](
-		NewInstrumentedBlockStore[MockBlockId](NewSynchronizedBlockStore[MockBlockId](receiver_store), GLOBAL_STATS.WithContext("ReceiverStore")),
+	receiver_session := NewReceiverSession[fixtures.MockBlockId, BatchStatus](
+		NewInstrumentedBlockStore[fixtures.MockBlockId](NewSynchronizedBlockStore[fixtures.MockBlockId](receiver_store), GLOBAL_STATS.WithContext("ReceiverStore")),
 		connection,
-		NewSimpleStatusAccumulator[MockBlockId](filter.NewSynchronizedFilter(makeBloom(1024))),
+		NewSimpleStatusAccumulator[fixtures.MockBlockId](filter.NewSynchronizedFilter(makeBloom(1024))),
 		NewInstrumentedOrchestrator[BatchStatus](NewBatchReceiveOrchestrator(), GLOBAL_STATS.WithContext("BatchReceiveOrchestrator")),
 	)
 
@@ -526,7 +395,7 @@ func MockBatchTransfer(sender_store *MockStore, receiver_store *MockStore, root 
 
 	go func() {
 		log.Debugf("status listener started")
-		err_chan <- connection.ListenStatus(NewInstrumentedStatusReceiver[MockBlockId, BatchStatus](sender_session, GLOBAL_STATS.WithContext("StatusListener")))
+		err_chan <- connection.ListenStatus(NewInstrumentedStatusReceiver[fixtures.MockBlockId, BatchStatus](sender_session, GLOBAL_STATS.WithContext("StatusListener")))
 		log.Debugf("status listener terminated")
 	}()
 

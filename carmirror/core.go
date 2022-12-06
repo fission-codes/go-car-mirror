@@ -10,6 +10,7 @@ import (
 	"github.com/fxamacker/cbor/v2"
 	"go.uber.org/zap"
 	"golang.org/x/exp/constraints"
+	"golang.org/x/exp/slices"
 
 	"github.com/fission-codes/go-car-mirror/filter"
 	"github.com/fission-codes/go-car-mirror/util"
@@ -38,22 +39,36 @@ func init() {
 type BlockId interface {
 	comparable
 	encoding.BinaryMarshaler
-	encoding.BinaryUnmarshaler
 	json.Marshaler
-	json.Unmarshaler
 	cbor.Marshaler
-	cbor.Unmarshaler
+	String() string
 }
 
-// Block is an immutable data block referenced by a unique ID.
-type Block[I BlockId] interface {
-	// read block encoded with Write from a stream.
-	Read(io.Reader) error
-	// write block to a stream. Should use the Car v1 format (length : varint, cid, bytes).
-	Write(io.Writer) error
+type BlockIdRef[T BlockId] interface {
+	*T
+	encoding.BinaryUnmarshaler
+	json.Unmarshaler
+	cbor.Unmarshaler
+	Read(io.ByteReader) (int, error)
+}
+
+// Represents a raw block before any association with a blockstore
+type RawBlock[I BlockId] interface {
 	// Id returns the BlockId for the Block.
 	Id() I
-	// Children returns a list of `BlockId`s linked to from the Block.
+	// get the raw block bytes
+	Bytes() []byte
+	// The size of the block
+	Size() int64
+}
+
+func BlockEqual[I BlockId](a RawBlock[I], b RawBlock[I]) bool {
+	return a.Id() == b.Id() && slices.Equal(a.Bytes(), b.Bytes())
+}
+
+// Block is an immutable data block referenced by a unique ID. It may reference other blocks by Id
+type Block[I BlockId] interface {
+	RawBlock[I]
 	Children() []I
 }
 
@@ -73,7 +88,7 @@ type BlockStore[I BlockId] interface {
 	ReadableBlockStore[I]
 
 	// Add puts a given block to the blockstore.
-	Add(Block[I]) error
+	Add(RawBlock[I]) (Block[I], error)
 }
 
 type SynchronizedBlockStore[I BlockId] struct {
@@ -114,7 +129,7 @@ func (bs *SynchronizedBlockStore[I]) All() (<-chan I, error) {
 	}
 }
 
-func (bs *SynchronizedBlockStore[I]) Add(block Block[I]) error {
+func (bs *SynchronizedBlockStore[I]) Add(block RawBlock[I]) (Block[I], error) {
 	bs.mutex.Lock()
 	defer bs.mutex.Unlock()
 	return bs.store.Add(block)
@@ -128,7 +143,7 @@ type MutablePointerResolver[I BlockId] interface {
 // BlockSender is responsible for sending blocks - immediately and asynchronously, or via a buffer.
 // The details are up to the implementor.
 type BlockSender[I BlockId] interface {
-	SendBlock(block Block[I]) error
+	SendBlock(block RawBlock[I]) error
 	Flush() error
 	Close() error
 }
@@ -143,7 +158,7 @@ type StateReceiver[F Flags] interface {
 type BlockReceiver[I BlockId, F Flags] interface {
 	StateReceiver[F]
 	// HandleBlock is called on receipt of a new block.
-	HandleBlock(block Block[I])
+	HandleBlock(block RawBlock[I])
 }
 
 // StatusSender is responsible for sending status.
@@ -308,11 +323,12 @@ func (rs *ReceiverSession[I, F]) AccumulateStatus(id I) error {
 	return nil
 }
 
-func (rs *ReceiverSession[I, F]) HandleBlock(block Block[I]) {
+func (rs *ReceiverSession[I, F]) HandleBlock(raw_block RawBlock[I]) {
 	rs.orchestrator.Notify(BEGIN_RECEIVE)
 	defer rs.orchestrator.Notify(END_RECEIVE)
 
-	if err := rs.store.Add(block); err != nil {
+	block, err := rs.store.Add(raw_block)
+	if err != nil {
 		log.Debugf("Failed to add block to store. err = %v", err)
 	}
 
