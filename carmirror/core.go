@@ -323,11 +323,11 @@ func (rs *ReceiverSession[I, F]) AccumulateStatus(id I) error {
 	return nil
 }
 
-func (rs *ReceiverSession[I, F]) HandleBlock(raw_block RawBlock[I]) {
+func (rs *ReceiverSession[I, F]) HandleBlock(rawBlock RawBlock[I]) {
 	rs.orchestrator.Notify(BEGIN_RECEIVE)
 	defer rs.orchestrator.Notify(END_RECEIVE)
 
-	block, err := rs.store.Add(raw_block)
+	block, err := rs.store.Add(rawBlock)
 	if err != nil {
 		log.Debugf("Failed to add block to store. err = %v", err)
 	}
