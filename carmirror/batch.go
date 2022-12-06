@@ -53,11 +53,11 @@ func (bs BatchStatus) String() string {
 }
 
 type BatchBlockReceiver[I BlockId] interface {
-	HandleList(BatchStatus, []Block[I]) error
+	HandleList(BatchStatus, []RawBlock[I]) error
 }
 
 type BatchBlockSender[I BlockId] interface {
-	SendList(BatchStatus, []Block[I]) error
+	SendList(BatchStatus, []RawBlock[I]) error
 	Close() error
 }
 
@@ -72,7 +72,7 @@ func NewSimpleBatchBlockReceiver[I BlockId](rs BlockReceiver[I, BatchStatus]) *S
 	}
 }
 
-func (sbbr *SimpleBatchBlockReceiver[I]) HandleList(flags BatchStatus, list []Block[I]) error {
+func (sbbr *SimpleBatchBlockReceiver[I]) HandleList(flags BatchStatus, list []RawBlock[I]) error {
 	for _, block := range list {
 		sbbr.session.HandleBlock(block)
 	}
@@ -84,7 +84,7 @@ func (sbbr *SimpleBatchBlockReceiver[I]) HandleList(flags BatchStatus, list []Bl
 
 type SimpleBatchBlockSender[I BlockId] struct {
 	orchestrator Orchestrator[BatchStatus]
-	list         []Block[I]
+	list         []RawBlock[I]
 	listMutex    sync.Mutex
 	sender       BatchBlockSender[I]
 	maxBatchSize uint32
@@ -93,13 +93,13 @@ type SimpleBatchBlockSender[I BlockId] struct {
 func NewSimpleBatchBlockSender[I BlockId](sender BatchBlockSender[I], orchestrator Orchestrator[BatchStatus], maxBatchSize uint32) *SimpleBatchBlockSender[I] {
 	return &SimpleBatchBlockSender[I]{
 		orchestrator: orchestrator,
-		list:         make([]Block[I], 0, maxBatchSize),
+		list:         make([]RawBlock[I], 0, maxBatchSize),
 		sender:       sender,
 		maxBatchSize: maxBatchSize,
 	}
 }
 
-func (sbbs *SimpleBatchBlockSender[I]) SendBlock(block Block[I]) error {
+func (sbbs *SimpleBatchBlockSender[I]) SendBlock(block RawBlock[I]) error {
 	sbbs.listMutex.Lock()
 	sbbs.list = append(sbbs.list, block)
 	sbbs.listMutex.Unlock()

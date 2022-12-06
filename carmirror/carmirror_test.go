@@ -3,7 +3,6 @@ package carmirror
 import (
 	"errors"
 	"fmt"
-	"io"
 	"testing"
 	"time"
 
@@ -157,28 +156,22 @@ func (bs *MockStore) All() (<-chan fixtures.MockBlockId, error) {
 	return values, nil
 }
 
-func (bs *MockStore) Add(block Block[fixtures.MockBlockId]) error {
-	id := block.Id()
-	bs.blocks[id] = block
-
-	return nil
-}
-
-func (bs *MockStore) AddBytes(id fixtures.MockBlockId, bytes io.Reader) (Block[fixtures.MockBlockId], error) {
-	size, err := io.Copy(io.Discard, bytes)
-	if err != io.EOF {
-		return nil, err
+func (bs *MockStore) Add(raw_block RawBlock[fixtures.MockBlockId]) (Block[fixtures.MockBlockId], error) {
+	block, ok := raw_block.(*fixtures.MockBlock)
+	if ok {
+		id := block.Id()
+		bs.blocks[id] = block
+		return block, nil
+	} else {
+		return nil, errors.New("MockStore can only store MockBlocks")
 	}
-	block := fixtures.NewMockBlock(id, size)
-	bs.blocks[id] = block
-	return block, nil
 }
 
 func (bs *MockStore) AddAll(store BlockStore[fixtures.MockBlockId]) error {
 	if blocks, err := store.All(); err == nil {
 		for id := range blocks {
 			if block, err := store.Get(id); err == nil {
-				err = bs.Add(block)
+				_, err = bs.Add(block)
 				if err != nil {
 					return err
 				}
@@ -210,7 +203,7 @@ func (bs *MockStore) RandomBlock() (Block[fixtures.MockBlockId], error) {
 
 type BlockMessage struct {
 	status BatchStatus
-	blocks []Block[fixtures.MockBlockId]
+	blocks []RawBlock[fixtures.MockBlockId]
 }
 
 type BlockChannel struct {
@@ -218,7 +211,7 @@ type BlockChannel struct {
 	receiver BatchBlockReceiver[fixtures.MockBlockId]
 }
 
-func (ch *BlockChannel) SendList(status BatchStatus, blocks []Block[fixtures.MockBlockId]) error {
+func (ch *BlockChannel) SendList(status BatchStatus, blocks []RawBlock[fixtures.MockBlockId]) error {
 	ch.channel <- BlockMessage{status, blocks}
 	return nil
 }

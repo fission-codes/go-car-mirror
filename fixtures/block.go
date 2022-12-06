@@ -104,16 +104,16 @@ func (b *MockBlock) Id() MockBlockId {
 	return b.id
 }
 
-func (b *MockBlock) Write(writer io.Writer) (int64, error) {
-	// Deterministic seed; hopefully always generate same content from same id
-	source := rand.New(rand.NewSource(int64(binary.BigEndian.Uint64(b.id[0:8]) >> 1)))
-	return io.CopyN(writer, source, b.size)
-
-}
-
 func (b *MockBlock) Bytes() []byte {
 	var buf bytes.Buffer
-	b.Write(&buf)
+	source := rand.New(rand.NewSource(int64(binary.BigEndian.Uint64(b.id[0:8]) >> 1)))
+	count, err := io.CopyN(&buf, source, b.size)
+	if err != nil {
+		panic(err)
+	}
+	if count != b.size {
+		panic("couldn't write enough bytes")
+	}
 	return buf.Bytes()
 }
 

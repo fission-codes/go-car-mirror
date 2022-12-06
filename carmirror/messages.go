@@ -3,7 +3,6 @@ package carmirror
 import (
 	"bufio"
 	"bytes"
-	"encoding"
 	"encoding/binary"
 	"io"
 
@@ -15,15 +14,6 @@ func writeUvarint(writer io.Writer, v uint64) error {
 	sz := binary.PutUvarint(buf, v)
 	_, err := writer.Write(buf[0:sz])
 	return err
-}
-
-func writeBinary[T encoding.BinaryMarshaler](writer io.Writer, v T) (int, error) {
-	if bytes, err := v.MarshalBinary(); err != nil {
-		return len(bytes), err
-	} else {
-		wrtn, err := writer.Write(bytes)
-		return wrtn, err
-	}
 }
 
 func writeBufferWithPrefix(writer io.Writer, buf []byte) error {
@@ -83,8 +73,8 @@ func (ah *ArchiveHeader[T]) UnmarshalBinary(data []byte) error {
 }
 
 type BlockWireFormat[T BlockId, R BlockIdRef[T]] struct {
-	Id   R      `json:"id"`
-	Data []byte `json:"data"`
+	IdRef R      `json:"id"`
+	Data  []byte `json:"data"`
 }
 
 func (b *BlockWireFormat[T, R]) Write(writer io.Writer) error {
@@ -93,7 +83,7 @@ func (b *BlockWireFormat[T, R]) Write(writer io.Writer) error {
 		buf []byte
 	)
 
-	if buf, err = (*b.Id).MarshalBinary(); err != nil {
+	if buf, err = (*b.IdRef).MarshalBinary(); err != nil {
 		return err
 	}
 	if err = writeUvarint(writer, uint64(len(buf)+len(b.Data))); err != nil {
@@ -116,14 +106,14 @@ func (b *BlockWireFormat[T, R]) Read(reader ByteAndBlockReader) error {
 		return err
 	}
 	reader = bufio.NewReader(io.LimitReader(reader, int64(size)))
-	if b.Id == nil {
-		b.Id = new(T)
+	if b.IdRef == nil {
+		b.IdRef = new(T)
 	}
-	if count, err = b.Id.Read(reader); err != nil {
+	if count, err = b.IdRef.Read(reader); err != nil {
 		return err
 	}
 	b.Data = make([]byte, int(size)-count)
-	_, err = reader.Read(b.Data)
+	_, err = io.ReadFull(reader, b.Data)
 	return err
 }
 
@@ -137,14 +127,37 @@ func (b *BlockWireFormat[T, R]) MarshalBinary() ([]byte, error) {
 	return buf.Bytes(), err
 }
 
+func (b *BlockWireFormat[T, R]) Id() T {
+	return *b.IdRef
+}
+
+func (b *BlockWireFormat[T, R]) Bytes() []byte {
+	return b.Data
+}
+
+func (b *BlockWireFormat[T, R]) Size() int64 {
+	return int64(len(b.Data))
+}
+
+func CastBlockWireFormat[T BlockId, R BlockIdRef[T]](raw_block RawBlock[T]) *BlockWireFormat[T, R] {
+	block, ok := raw_block.(*BlockWireFormat[T, R])
+	if ok {
+		return block
+	} else {
+		id := raw_block.Id()
+		return &BlockWireFormat[T, R]{&id, raw_block.Bytes()}
+	}
+}
+
 type Archive[T BlockId, R BlockIdRef[T]] struct {
-	Header ArchiveHeader[T]        `json:"hdr"`
-	Blocks []BlockWireFormat[T, R] `json:"blocks"`
+	Header ArchiveHeader[T] `json:"hdr"`
+	Blocks []RawBlock[T]    `json:"blocks"`
 }
 
 func (car *Archive[T, R]) Write(writer io.Writer) error {
 	if err := car.Header.Write(writer); err == nil {
-		for _, block := range car.Blocks {
+		for _, raw_block := range car.Blocks {
+			block := CastBlockWireFormat[T, R](raw_block)
 			if err = block.Write(writer); err != nil {
 				return err
 			}
@@ -162,7 +175,7 @@ func (car *Archive[T, R]) Read(reader ByteAndBlockReader) error {
 	for err == nil {
 		block := BlockWireFormat[T, R]{}
 		if err = block.Read(reader); err == nil || err == io.EOF {
-			car.Blocks = append(car.Blocks, block)
+			car.Blocks = append(car.Blocks, &block)
 		}
 	}
 	return err
@@ -178,109 +191,25 @@ func (ah *Archive[T, R]) MarshalBinary() ([]byte, error) {
 	return buf.Bytes(), err
 }
 
-func (car *Archive[T, R]) Thin(store BlockStore[T]) *ThinArchive[T, R] {
-	blocks := make([]Block[T], len(car.Blocks))
-	var err error
-	for i, block := range car.Blocks {
-		if blocks[i], err = store.AddBytes(*block.Id, bytes.NewReader(block.Data)); err != nil {
-			panic(err)
-		}
-	}
-	return &ThinArchive[T, R]{car.Header, blocks}
+type BlocksMessage[T BlockId, R BlockIdRef[T], F Flags] struct {
+	Status F
+	Car    Archive[T, R]
 }
 
-type ThinArchive[T BlockId, R BlockIdRef[T]] struct {
-	Header ArchiveHeader[T] `json:"hdr"`
-	Blocks []Block[T]       `json:"blocks"`
-}
-
-func (car *ThinArchive[T, R]) Write(writer io.Writer) error {
-	if err := car.Header.Write(writer); err == nil {
-		for _, block := range car.Blocks {
-			idAsBytes, err := block.Id().MarshalBinary()
-			if err != nil {
-				return err
-			}
-			err = writeUvarint(writer, uint64(block.Size()+int64(len(idAsBytes))))
-			if err != nil {
-				return err
-			}
-			_, err = writer.Write(idAsBytes)
-			if err != nil {
-				return err
-			}
-			_, err = block.Write(writer)
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	} else {
-		return err
-	}
-}
-
-func (car *ThinArchive[T, R]) Read(store BlockStore[T], reader ByteAndBlockReader) error {
-	var err error
-	err = car.Header.Read(reader)
-	car.Blocks = car.Blocks[:0]
-	for err == nil {
-		var size uint64
-		if size, err = binary.ReadUvarint(reader); err == nil {
-			return err
-		}
-		blockreader := bufio.NewReader(io.LimitReader(reader, int64(size)))
-		var id R
-		if _, err = id.Read(blockreader); err != nil {
-			return err
-		}
-		var block Block[T]
-		if block, err = store.AddBytes(*id, blockreader); err == nil {
-			car.Blocks = append(car.Blocks, block)
-		}
-	}
-	return err
-}
-
-func (car *ThinArchive[T, R]) Fat() *Archive[T, R] {
-	blocks := make([]BlockWireFormat[T, R], len(car.Blocks))
-	for i, block := range car.Blocks {
-		id := block.Id()
-		blocks[i] = BlockWireFormat[T, R]{&id, block.Bytes()}
-	}
-	return &Archive[T, R]{car.Header, blocks}
-}
-
-type BlocksMessage[T BlockId, R BlockIdRef[T]] struct {
-	Car Archive[T, R]
-}
-
-func (msg *BlocksMessage[T, B]) Write(writer io.Writer) error {
+func (msg *BlocksMessage[T, B, F]) Write(writer io.Writer) error {
 	return msg.Car.Write(writer)
 }
 
-func (msg *BlocksMessage[T, B]) Read(reader ByteAndBlockReader) error {
+func (msg *BlocksMessage[T, B, F]) Read(reader ByteAndBlockReader) error {
 	return msg.Car.Read(reader)
 }
 
-func (ah *BlocksMessage[T, B]) MarshalBinary() ([]byte, error) {
+func (ah *BlocksMessage[T, B, F]) MarshalBinary() ([]byte, error) {
 	var buf bytes.Buffer
 	err := ah.Write(&buf)
 	return buf.Bytes(), err
 }
 
-func (msg *BlocksMessage[T, B]) UnmarshalBinary(data []byte) error {
+func (msg *BlocksMessage[T, B, F]) UnmarshalBinary(data []byte) error {
 	return msg.Read(bytes.NewBuffer(data))
-}
-
-type ThinBlocksMessage[T BlockId, R BlockIdRef[T]] struct {
-	Car ThinArchive[T, R]
-}
-
-func (msg *ThinBlocksMessage[T, B]) Write(writer io.Writer) error {
-	return msg.Car.Write(writer)
-}
-
-func (msg *ThinBlocksMessage[T, B]) Read(store BlockStore[T], reader ByteAndBlockReader) error {
-	return msg.Car.Read(store, reader)
 }

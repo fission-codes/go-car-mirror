@@ -2,6 +2,8 @@ package fixtures
 
 import (
 	"testing"
+
+	"golang.org/x/exp/slices"
 )
 
 func TestMockIdToJson(t *testing.T) {
@@ -49,5 +51,20 @@ func TestMockIdToBinary(t *testing.T) {
 		}
 	} else {
 		t.Errorf("Error marshalling Id, %v", err)
+	}
+}
+
+func TestMockBlockStableBytes(t *testing.T) {
+	block := NewMockBlock(RandId(), 1024)
+	if !slices.Equal(block.Bytes(), block.Bytes()) {
+		t.Errorf("Unstable byte array, size 1024")
+	}
+	block = NewMockBlock(RandId(), 10240)
+	if !slices.Equal(block.Bytes(), block.Bytes()) {
+		t.Errorf("Unstable byte array, size 10240")
+	}
+	block = NewMockBlock(RandId(), 102400)
+	if !slices.Equal(block.Bytes(), block.Bytes()) {
+		t.Errorf("Unstable byte array, size 102400")
 	}
 }
