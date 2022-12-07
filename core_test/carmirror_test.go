@@ -9,7 +9,7 @@ import (
 
 	. "github.com/fission-codes/go-car-mirror/carmirror"
 	"github.com/fission-codes/go-car-mirror/filter"
-	"github.com/fission-codes/go-car-mirror/fixtures"
+	mock "github.com/fission-codes/go-car-mirror/fixtures"
 	"github.com/fission-codes/go-car-mirror/messages"
 	"github.com/zeebo/xxh3"
 	"go.uber.org/zap"
@@ -28,8 +28,8 @@ func init() {
 var ErrReceiverNotSet error = errors.New("receiver not set")
 
 func TestAntiEvergreen(t *testing.T) {
-	senderStore := fixtures.NewMockStore()
-	root := fixtures.AddRandomTree(senderStore, 5, 5, 0.0)
+	senderStore := mock.NewStore()
+	root := mock.AddRandomTree(senderStore, 5, 5, 0.0)
 
 	randomBlock, err := senderStore.RandomBlock()
 	if err != nil {
@@ -47,25 +47,25 @@ func TestAntiEvergreen(t *testing.T) {
 	}
 }
 
-func IdHash(id fixtures.MockBlockId, seed uint64) uint64 {
+func IdHash(id mock.BlockId, seed uint64) uint64 {
 	return xxh3.HashSeed(id[:], seed)
 }
 
-func makeBloom(capacity uint) filter.Filter[fixtures.MockBlockId] {
+func makeBloom(capacity uint) filter.Filter[mock.BlockId] {
 	return filter.NewBloomFilter(capacity, IdHash)
 }
 
 type BlockMessage struct {
 	status BatchStatus
-	blocks []RawBlock[fixtures.MockBlockId]
+	blocks []RawBlock[mock.BlockId]
 }
 
 type BlockChannel struct {
 	channel  chan BlockMessage
-	receiver BatchBlockReceiver[fixtures.MockBlockId]
+	receiver BatchBlockReceiver[mock.BlockId]
 }
 
-func (ch *BlockChannel) SendList(status BatchStatus, blocks []RawBlock[fixtures.MockBlockId]) error {
+func (ch *BlockChannel) SendList(status BatchStatus, blocks []RawBlock[mock.BlockId]) error {
 	ch.channel <- BlockMessage{status, blocks}
 	return nil
 }
@@ -75,7 +75,7 @@ func (ch *BlockChannel) Close() error {
 	return nil
 }
 
-func (ch *BlockChannel) SetBlockListener(receiver BatchBlockReceiver[fixtures.MockBlockId]) {
+func (ch *BlockChannel) SetBlockListener(receiver BatchBlockReceiver[mock.BlockId]) {
 	ch.receiver = receiver
 }
 
@@ -90,14 +90,14 @@ func (ch *BlockChannel) listen() error {
 	return err
 }
 
-type MockStatusMessage messages.StatusMessage[fixtures.MockBlockId, *fixtures.MockBlockId, filter.Filter[fixtures.MockBlockId], BatchStatus]
+type MockStatusMessage messages.StatusMessage[mock.BlockId, *mock.BlockId, filter.Filter[mock.BlockId], BatchStatus]
 
 type MockStatusReceiver struct {
 	channel        <-chan MockStatusMessage
-	statusReceiver StatusReceiver[fixtures.MockBlockId, BatchStatus]
+	statusReceiver StatusReceiver[mock.BlockId, BatchStatus]
 }
 
-func (ch *MockStatusReceiver) SetStatusListener(receiver StatusReceiver[fixtures.MockBlockId, BatchStatus]) {
+func (ch *MockStatusReceiver) SetStatusListener(receiver StatusReceiver[mock.BlockId, BatchStatus]) {
 	ch.statusReceiver = receiver
 }
 
@@ -125,7 +125,7 @@ func NewMockStatusSender(channel chan<- MockStatusMessage, orchestrator Orchestr
 	}
 }
 
-func (sn *MockStatusSender) SendStatus(have filter.Filter[fixtures.MockBlockId], want []fixtures.MockBlockId) error {
+func (sn *MockStatusSender) SendStatus(have filter.Filter[mock.BlockId], want []mock.BlockId) error {
 	state := sn.orchestrator.State()
 	sn.channel <- MockStatusMessage{state, have, want}
 	return nil
@@ -161,26 +161,26 @@ func NewMockConnection(maxBatchSize uint) *MockConnection {
 	}
 }
 
-func (conn *MockConnection) OpenBlockSender(orchestrator Orchestrator[BatchStatus]) BlockSender[fixtures.MockBlockId] {
-	return NewInstrumentedBlockSender[fixtures.MockBlockId](
-		NewSimpleBatchBlockSender[fixtures.MockBlockId](&conn.batchBlockChannel, orchestrator, uint32(conn.maxBatchSize)),
+func (conn *MockConnection) OpenBlockSender(orchestrator Orchestrator[BatchStatus]) BlockSender[mock.BlockId] {
+	return NewInstrumentedBlockSender[mock.BlockId](
+		NewSimpleBatchBlockSender[mock.BlockId](&conn.batchBlockChannel, orchestrator, uint32(conn.maxBatchSize)),
 		GLOBAL_STATS.WithContext("MockBlockSender"),
 	)
 }
 
-func (conn *MockConnection) OpenStatusSender(orchestrator Orchestrator[BatchStatus]) StatusSender[fixtures.MockBlockId] {
-	return NewInstrumentedStatusSender[fixtures.MockBlockId](
+func (conn *MockConnection) OpenStatusSender(orchestrator Orchestrator[BatchStatus]) StatusSender[mock.BlockId] {
+	return NewInstrumentedStatusSender[mock.BlockId](
 		NewMockStatusSender(conn.statusChannel, orchestrator),
 		GLOBAL_STATS.WithContext("MockStatusSender"),
 	)
 }
 
-func (conn *MockConnection) ListenStatus(sender StatusReceiver[fixtures.MockBlockId, BatchStatus]) error {
+func (conn *MockConnection) ListenStatus(sender StatusReceiver[mock.BlockId, BatchStatus]) error {
 	conn.statusReceiver.SetStatusListener(sender)
 	return conn.statusReceiver.listen()
 }
 
-func (conn *MockConnection) ListenBlocks(receiver BlockReceiver[fixtures.MockBlockId, BatchStatus]) error {
+func (conn *MockConnection) ListenBlocks(receiver BlockReceiver[mock.BlockId, BatchStatus]) error {
 	conn.batchBlockChannel.SetBlockListener(NewSimpleBatchBlockReceiver(receiver))
 	return conn.batchBlockChannel.listen()
 }
@@ -194,15 +194,15 @@ func (conn *MockConnection) ListenBlocks(receiver BlockReceiver[fixtures.MockBlo
 
 // Filter
 
-func MockBatchTransfer(sender_store *fixtures.MockStore, receiver_store *fixtures.MockStore, root fixtures.MockBlockId, max_batch_size uint) error {
+func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, root mock.BlockId, max_batch_size uint) error {
 
 	snapshotBefore := GLOBAL_REPORTING.Snapshot()
 	log = zap.S()
 
 	connection := NewMockConnection(max_batch_size)
 
-	sender_session := NewSenderSession[fixtures.MockBlockId, BatchStatus](
-		NewInstrumentedBlockStore[fixtures.MockBlockId](sender_store, GLOBAL_STATS.WithContext("SenderStore")),
+	sender_session := NewSenderSession[mock.BlockId, BatchStatus](
+		NewInstrumentedBlockStore[mock.BlockId](sender_store, GLOBAL_STATS.WithContext("SenderStore")),
 		connection,
 		filter.NewSynchronizedFilter(makeBloom(1024)),
 		NewInstrumentedOrchestrator[BatchStatus](NewBatchSendOrchestrator(), GLOBAL_STATS.WithContext("BatchSendOrchestrator")),
@@ -210,10 +210,10 @@ func MockBatchTransfer(sender_store *fixtures.MockStore, receiver_store *fixture
 
 	log.Debugf("created sender_session")
 
-	receiver_session := NewReceiverSession[fixtures.MockBlockId, BatchStatus](
-		NewInstrumentedBlockStore[fixtures.MockBlockId](NewSynchronizedBlockStore[fixtures.MockBlockId](receiver_store), GLOBAL_STATS.WithContext("ReceiverStore")),
+	receiver_session := NewReceiverSession[mock.BlockId, BatchStatus](
+		NewInstrumentedBlockStore[mock.BlockId](NewSynchronizedBlockStore[mock.BlockId](receiver_store), GLOBAL_STATS.WithContext("ReceiverStore")),
 		connection,
-		NewSimpleStatusAccumulator[fixtures.MockBlockId](filter.NewSynchronizedFilter(makeBloom(1024))),
+		NewSimpleStatusAccumulator[mock.BlockId](filter.NewSynchronizedFilter(makeBloom(1024))),
 		NewInstrumentedOrchestrator[BatchStatus](NewBatchReceiveOrchestrator(), GLOBAL_STATS.WithContext("BatchReceiveOrchestrator")),
 	)
 
@@ -245,7 +245,7 @@ func MockBatchTransfer(sender_store *fixtures.MockStore, receiver_store *fixture
 
 	go func() {
 		log.Debugf("status listener started")
-		err_chan <- connection.ListenStatus(NewInstrumentedStatusReceiver[fixtures.MockBlockId, BatchStatus](sender_session, GLOBAL_STATS.WithContext("StatusListener")))
+		err_chan <- connection.ListenStatus(NewInstrumentedStatusReceiver[mock.BlockId, BatchStatus](sender_session, GLOBAL_STATS.WithContext("StatusListener")))
 		log.Debugf("status listener terminated")
 	}()
 
@@ -285,9 +285,9 @@ func InitLog() {
 func TestMockTransferToEmptyStoreSingleBatch(t *testing.T) {
 	InitLog()
 	InitDefault()
-	senderStore := fixtures.NewMockStore()
-	root := fixtures.AddRandomTree(senderStore, 5, 5, 0.0)
-	receiverStore := fixtures.NewMockStore()
+	senderStore := mock.NewStore()
+	root := mock.AddRandomTree(senderStore, 5, 5, 0.0)
+	receiverStore := mock.NewStore()
 	MockBatchTransfer(senderStore, receiverStore, root, 5000)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
@@ -297,9 +297,9 @@ func TestMockTransferToEmptyStoreSingleBatch(t *testing.T) {
 func TestMockTransferToEmptyStoreMultiBatch(t *testing.T) {
 	InitLog()
 	InitDefault()
-	senderStore := fixtures.NewMockStore()
-	root := fixtures.AddRandomTree(senderStore, 5, 5, 0.0)
-	receiverStore := fixtures.NewMockStore()
+	senderStore := mock.NewStore()
+	root := mock.AddRandomTree(senderStore, 5, 5, 0.0)
+	receiverStore := mock.NewStore()
 	MockBatchTransfer(senderStore, receiverStore, root, 10)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
@@ -309,9 +309,9 @@ func TestMockTransferToEmptyStoreMultiBatch(t *testing.T) {
 func TestMockTransferSingleMissingBlockBatch(t *testing.T) {
 	InitLog()
 	InitDefault()
-	senderStore := fixtures.NewMockStore()
-	root := fixtures.AddRandomTree(senderStore, 5, 5, 0.0)
-	receiverStore := fixtures.NewMockStore()
+	senderStore := mock.NewStore()
+	root := mock.AddRandomTree(senderStore, 5, 5, 0.0)
+	receiverStore := mock.NewStore()
 	receiverStore.AddAll(senderStore)
 	block, err := receiverStore.RandomBlock()
 	if err != nil {
@@ -327,11 +327,11 @@ func TestMockTransferSingleMissingBlockBatch(t *testing.T) {
 func TestMockTransferSingleMissingTreeBlockBatch(t *testing.T) {
 	InitLog()
 	InitDefault()
-	senderStore := fixtures.NewMockStore()
-	fixtures.AddRandomForest(senderStore, 10)
-	receiverStore := fixtures.NewMockStore()
+	senderStore := mock.NewStore()
+	mock.AddRandomForest(senderStore, 10)
+	receiverStore := mock.NewStore()
 	receiverStore.AddAll(senderStore)
-	root := fixtures.AddRandomTree(senderStore, 10, 5, 0.1)
+	root := mock.AddRandomTree(senderStore, 10, 5, 0.1)
 	MockBatchTransfer(senderStore, receiverStore, root, 10)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")

@@ -16,29 +16,29 @@ import (
 	"github.com/fxamacker/cbor/v2"
 )
 
-func RandId() MockBlockId {
-	var id MockBlockId
+func RandId() BlockId {
+	var id BlockId
 	rand.Read(id[:])
 	return id
 }
 
-func RandMockBlock() *MockBlock {
+func RandMockBlock() *Block {
 	id := RandId()
-	return NewMockBlock(id, int64(rand.Intn(10240)))
+	return NewBlock(id, int64(rand.Intn(10240)))
 }
 
 // BlockId
-type MockBlockId [32]byte
+type BlockId [32]byte
 
-func (id MockBlockId) String() string {
+func (id BlockId) String() string {
 	return base64.URLEncoding.EncodeToString(id[:])
 }
 
-func (id MockBlockId) MarshalBinary() ([]byte, error) {
+func (id BlockId) MarshalBinary() ([]byte, error) {
 	return id[:], nil
 }
 
-func (id *MockBlockId) UnmarshalBinary(bytes []byte) error {
+func (id *BlockId) UnmarshalBinary(bytes []byte) error {
 	if len(bytes) < 32 {
 		return errors.New("bad size for id")
 	}
@@ -46,7 +46,7 @@ func (id *MockBlockId) UnmarshalBinary(bytes []byte) error {
 	return nil
 }
 
-func (id MockBlockId) MarshalCBOR() ([]byte, error) {
+func (id BlockId) MarshalCBOR() ([]byte, error) {
 	if bytes, error := id.MarshalBinary(); error == nil {
 		return cbor.Marshal(bytes)
 	} else {
@@ -54,7 +54,7 @@ func (id MockBlockId) MarshalCBOR() ([]byte, error) {
 	}
 }
 
-func (id *MockBlockId) UnmarshalCBOR(bytes []byte) error {
+func (id *BlockId) UnmarshalCBOR(bytes []byte) error {
 	var rawbytes []byte
 	if error := cbor.Unmarshal(bytes, &rawbytes); error == nil {
 		return id.UnmarshalBinary(rawbytes)
@@ -67,11 +67,11 @@ type MockIdJsonFormat struct {
 	Id []byte `json:"id"`
 }
 
-func (id MockBlockId) MarshalJSON() ([]byte, error) {
+func (id BlockId) MarshalJSON() ([]byte, error) {
 	return json.Marshal(MockIdJsonFormat{Id: id[:]})
 }
 
-func (id *MockBlockId) UnmarshalJSON(bytes []byte) error {
+func (id *BlockId) UnmarshalJSON(bytes []byte) error {
 	var data MockIdJsonFormat
 	if err := json.Unmarshal(bytes, &data); err == nil {
 		copy(id[:], data.Id)
@@ -81,7 +81,7 @@ func (id *MockBlockId) UnmarshalJSON(bytes []byte) error {
 	}
 }
 
-func (id *MockBlockId) Read(reader io.ByteReader) (int, error) {
+func (id *BlockId) Read(reader io.ByteReader) (int, error) {
 	var err error
 	for i := 0; i < 32 && err == nil; i++ {
 		id[i], err = reader.ReadByte()
@@ -90,25 +90,25 @@ func (id *MockBlockId) Read(reader io.ByteReader) (int, error) {
 }
 
 // Block
-type MockBlock struct {
-	id    MockBlockId
-	links []MockBlockId
+type Block struct {
+	id    BlockId
+	links []BlockId
 	size  int64
 }
 
-func NewMockBlock(id MockBlockId, size int64) *MockBlock {
-	return &MockBlock{
+func NewBlock(id BlockId, size int64) *Block {
+	return &Block{
 		id:    id,
-		links: make([]MockBlockId, 0, 10),
+		links: make([]BlockId, 0, 10),
 		size:  size,
 	}
 }
 
-func (b *MockBlock) Id() MockBlockId {
+func (b *Block) Id() BlockId {
 	return b.id
 }
 
-func (b *MockBlock) Bytes() []byte {
+func (b *Block) Bytes() []byte {
 	var buf bytes.Buffer
 	source := rand.New(rand.NewSource(int64(binary.BigEndian.Uint64(b.id[0:8]) >> 1)))
 	count, err := io.CopyN(&buf, source, b.size)
@@ -121,23 +121,23 @@ func (b *MockBlock) Bytes() []byte {
 	return buf.Bytes()
 }
 
-func (b *MockBlock) Size() int64 {
+func (b *Block) Size() int64 {
 	return b.size
 }
 
-func (b *MockBlock) Children() []MockBlockId {
+func (b *Block) Children() []BlockId {
 	return b.links
 }
 
-func (b *MockBlock) AddChild(id MockBlockId) error {
+func (b *Block) AddChild(id BlockId) error {
 	b.links = append(b.links, id)
 
 	return nil
 }
 
-func AddRandomTree(store *MockStore, maxChildren int, maxDepth int, pCrosslink float64) MockBlockId {
+func AddRandomTree(store *Store, maxChildren int, maxDepth int, pCrosslink float64) BlockId {
 	id := RandId()
-	block := NewMockBlock(id, rand.Int63n(10240))
+	block := NewBlock(id, rand.Int63n(10240))
 
 	if maxDepth > 0 {
 		if RandBool(pCrosslink) && len(store.blocks) > 0 {
@@ -162,8 +162,8 @@ func AddRandomTree(store *MockStore, maxChildren int, maxDepth int, pCrosslink f
 	return id
 }
 
-func AddRandomForest(store *MockStore, rootCount int) []MockBlockId {
-	roots := make([]MockBlockId, rootCount)
+func AddRandomForest(store *Store, rootCount int) []BlockId {
+	roots := make([]BlockId, rootCount)
 	for i := 0; i < rootCount; i++ {
 		roots[i] = AddRandomTree(store, 10, 5, 0.05)
 	}
@@ -171,17 +171,17 @@ func AddRandomForest(store *MockStore, rootCount int) []MockBlockId {
 }
 
 // BlockStore
-type MockStore struct {
-	blocks map[MockBlockId]core.Block[MockBlockId]
+type Store struct {
+	blocks map[BlockId]core.Block[BlockId]
 }
 
-func NewMockStore() *MockStore {
-	return &MockStore{
-		blocks: make(map[MockBlockId]core.Block[MockBlockId]),
+func NewStore() *Store {
+	return &Store{
+		blocks: make(map[BlockId]core.Block[BlockId]),
 	}
 }
 
-func (bs *MockStore) Get(id MockBlockId) (core.Block[MockBlockId], error) {
+func (bs *Store) Get(id BlockId) (core.Block[BlockId], error) {
 	block, ok := bs.blocks[id]
 	if !ok || block == nil {
 		return nil, cmerrors.ErrBlockNotFound
@@ -190,17 +190,17 @@ func (bs *MockStore) Get(id MockBlockId) (core.Block[MockBlockId], error) {
 	return block, nil
 }
 
-func (bs *MockStore) Has(id MockBlockId) (bool, error) {
+func (bs *Store) Has(id BlockId) (bool, error) {
 	_, ok := bs.blocks[id]
 	return ok, nil
 }
 
-func (bs *MockStore) Remove(id MockBlockId) {
+func (bs *Store) Remove(id BlockId) {
 	delete(bs.blocks, id)
 }
 
-func (bs *MockStore) HasAll(root MockBlockId) bool {
-	var hasAllInternal = func(root MockBlockId) error {
+func (bs *Store) HasAll(root BlockId) bool {
+	var hasAllInternal = func(root BlockId) error {
 		if b, ok := bs.blocks[root]; ok {
 			for _, child := range b.Children() {
 				if err := bs.doHasAll(child); err != nil {
@@ -209,13 +209,13 @@ func (bs *MockStore) HasAll(root MockBlockId) bool {
 			}
 			return nil
 		} else {
-			return fmt.Errorf("Missing block %x", root)
+			return fmt.Errorf("missing block %x", root)
 		}
 	}
 	return hasAllInternal(root) == nil
 }
 
-func (bs *MockStore) doHasAll(root MockBlockId) error {
+func (bs *Store) doHasAll(root BlockId) error {
 	if b, ok := bs.blocks[root]; ok {
 		for _, child := range b.Children() {
 			if err := bs.doHasAll(child); err != nil {
@@ -224,12 +224,12 @@ func (bs *MockStore) doHasAll(root MockBlockId) error {
 		}
 		return nil
 	} else {
-		return fmt.Errorf("Missing block %x", root)
+		return fmt.Errorf("missing block %x", root)
 	}
 }
 
-func (bs *MockStore) All() (<-chan MockBlockId, error) {
-	values := make(chan MockBlockId, len(bs.blocks))
+func (bs *Store) All() (<-chan BlockId, error) {
+	values := make(chan BlockId, len(bs.blocks))
 	for _, v := range bs.blocks {
 		values <- v.Id()
 	}
@@ -237,8 +237,8 @@ func (bs *MockStore) All() (<-chan MockBlockId, error) {
 	return values, nil
 }
 
-func (bs *MockStore) Add(rawBlock core.RawBlock[MockBlockId]) (core.Block[MockBlockId], error) {
-	block, ok := rawBlock.(*MockBlock)
+func (bs *Store) Add(rawBlock core.RawBlock[BlockId]) (core.Block[BlockId], error) {
+	block, ok := rawBlock.(*Block)
 	if ok {
 		id := block.Id()
 		bs.blocks[id] = block
@@ -248,7 +248,7 @@ func (bs *MockStore) Add(rawBlock core.RawBlock[MockBlockId]) (core.Block[MockBl
 	}
 }
 
-func (bs *MockStore) AddAll(store core.BlockStore[MockBlockId]) error {
+func (bs *Store) AddAll(store core.BlockStore[BlockId]) error {
 	if blocks, err := store.All(); err == nil {
 		for id := range blocks {
 			if block, err := store.Get(id); err == nil {
@@ -266,9 +266,9 @@ func (bs *MockStore) AddAll(store core.BlockStore[MockBlockId]) error {
 	}
 }
 
-func (bs *MockStore) RandomBlock() (core.Block[MockBlockId], error) {
+func (bs *Store) RandomBlock() (core.Block[BlockId], error) {
 	if len(bs.blocks) == 0 {
-		return nil, fmt.Errorf("No blocks in store")
+		return nil, fmt.Errorf("no blocks in store")
 	}
 
 	i := rand.Intn(len(bs.blocks))
@@ -279,7 +279,7 @@ func (bs *MockStore) RandomBlock() (core.Block[MockBlockId], error) {
 		i--
 	}
 
-	return nil, fmt.Errorf("This should never happen")
+	return nil, fmt.Errorf("this should never happen")
 }
 
 func RandBool(p float64) bool {
