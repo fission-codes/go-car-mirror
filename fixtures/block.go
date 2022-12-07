@@ -12,28 +12,37 @@ import (
 
 	core "github.com/fission-codes/go-car-mirror/carmirror"
 	cmerrors "github.com/fission-codes/go-car-mirror/errors"
+	"github.com/fission-codes/go-car-mirror/util"
+	"golang.org/x/exp/slices"
 
 	"github.com/fxamacker/cbor/v2"
 )
 
+const BLOCK_ID_SIZE = 32
+
+// Defines a simple block 256-bit BlockId
+type BlockId [BLOCK_ID_SIZE]byte
+
+// Generate a random block Id
 func RandId() BlockId {
 	var id BlockId
 	rand.Read(id[:])
 	return id
 }
 
+// Generate a random block up to 10k bytes in length
+// Does not allocate memory for the byte array
 func RandMockBlock() *Block {
 	id := RandId()
 	return NewBlock(id, int64(rand.Intn(10240)))
 }
 
-// BlockId
-type BlockId [32]byte
-
+// Returns a URL-encoded base 64 string
 func (id BlockId) String() string {
 	return base64.URLEncoding.EncodeToString(id[:])
 }
 
+// Gets the data for this block as a byte array
 func (id BlockId) MarshalBinary() ([]byte, error) {
 	return id[:], nil
 }
@@ -110,19 +119,49 @@ func (b *Block) Id() BlockId {
 
 func (b *Block) Bytes() []byte {
 	var buf bytes.Buffer
+	if err := binary.Write(&buf, binary.BigEndian, uint16(len(b.links))); err != nil {
+		panic(err)
+	}
+	if err := binary.Write(&buf, binary.BigEndian, b.links); err != nil {
+		panic(err)
+	}
+	remaining_bytes := b.Size() - 2 - int64(len(b.links))*BLOCK_ID_SIZE
 	source := rand.New(rand.NewSource(int64(binary.BigEndian.Uint64(b.id[0:8]) >> 1)))
-	count, err := io.CopyN(&buf, source, b.size)
+	count, err := io.CopyN(&buf, source, remaining_bytes)
 	if err != nil {
 		panic(err)
 	}
-	if count != b.size {
+	if count != remaining_bytes {
 		panic("couldn't write enough bytes")
 	}
 	return buf.Bytes()
 }
 
+// private function used by BlockStore
+func (b *Block) setBytes(data []byte) error {
+	var reader = bytes.NewBuffer(data)
+	var lenLinks uint16
+	if err := binary.Read(reader, binary.BigEndian, &lenLinks); err != nil {
+		return err
+	}
+	b.links = make([]BlockId, lenLinks)
+	if err := binary.Read(reader, binary.BigEndian, &b.links); err != nil {
+		return err
+	}
+	// now check remaining bytes
+	source := rand.New(rand.NewSource(int64(binary.BigEndian.Uint64(b.id[0:8]) >> 1)))
+	remainder := reader.Bytes()
+	random := make([]byte, len(remainder))
+	source.Read(random)
+	if !slices.Equal(remainder, random) {
+		return errors.New("tried to set bytes incompatible with Id")
+	} else {
+		return nil
+	}
+}
+
 func (b *Block) Size() int64 {
-	return b.size
+	return util.Max(b.size, int64(len(b.links))*BLOCK_ID_SIZE+2)
 }
 
 func (b *Block) Children() []BlockId {
@@ -131,7 +170,6 @@ func (b *Block) Children() []BlockId {
 
 func (b *Block) AddChild(id BlockId) error {
 	b.links = append(b.links, id)
-
 	return nil
 }
 
@@ -239,13 +277,13 @@ func (bs *Store) All() (<-chan BlockId, error) {
 
 func (bs *Store) Add(rawBlock core.RawBlock[BlockId]) (core.Block[BlockId], error) {
 	block, ok := rawBlock.(*Block)
-	if ok {
-		id := block.Id()
-		bs.blocks[id] = block
-		return block, nil
-	} else {
-		return nil, errors.New("MockStore can only store MockBlocks")
+	if !ok {
+		block = NewBlock(rawBlock.Id(), rawBlock.Size())
+		block.setBytes(rawBlock.Bytes())
 	}
+	id := block.Id()
+	bs.blocks[id] = block
+	return block, nil
 }
 
 func (bs *Store) AddAll(store core.BlockStore[BlockId]) error {

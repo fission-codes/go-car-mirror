@@ -68,3 +68,39 @@ func TestMockBlockStableBytes(t *testing.T) {
 		t.Errorf("Unstable byte array, size 102400")
 	}
 }
+
+func TestMockBlockRoundTripLinks(t *testing.T) {
+	block := NewBlock(RandId(), 10240)
+	block.AddChild(RandId())
+	block.AddChild(RandId())
+	block.AddChild(RandId())
+	copy := NewBlock(block.Id(), block.Size())
+	copy.setBytes(block.Bytes())
+	if len(copy.Children()) != 3 {
+		t.Errorf("Copy does not have the correct number of links")
+	}
+	if !slices.Equal(block.Children(), copy.Children()) {
+		t.Errorf("Copy does not have the same set of links")
+	}
+}
+
+func TestMockBlockRoundTripLinksOnlyBlock(t *testing.T) {
+	block := NewBlock(RandId(), 0)
+	block.AddChild(RandId())
+	block.AddChild(RandId())
+	block.AddChild(RandId())
+	if block.Size() <= 0 {
+		t.Errorf("Block size should be > 0")
+	}
+	copy := NewBlock(block.Id(), 0)
+	copy.setBytes(block.Bytes())
+	if copy.Size() != block.Size() {
+		t.Errorf("Copy size should be the same")
+	}
+	if len(copy.Children()) != 3 {
+		t.Errorf("Copy does not have the correct number of links")
+	}
+	if !slices.Equal(block.Children(), copy.Children()) {
+		t.Errorf("Copy does not have the same set of links")
+	}
+}
