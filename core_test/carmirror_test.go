@@ -319,5 +319,6 @@ func TestMockTransferSingleMissingTreeBlockBatch(t *testing.T) {
 	MockBatchTransfer(senderStore, receiverStore, root, 10)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
+		receiverStore.Dump(root, log, "")
 	}
 }
