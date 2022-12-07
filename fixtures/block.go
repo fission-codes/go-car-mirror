@@ -186,7 +186,7 @@ func AddRandomTree(store *Store, maxChildren int, maxDepth int, pCrosslink float
 			block.AddChild(existingBlock.Id())
 		} else {
 			// gen rand num children
-			children := rand.Intn(maxChildren)
+			children := rand.Intn(maxChildren/3) + rand.Intn(maxChildren/3) + rand.Intn(maxChildren/3) // makes number of children cluster around average
 			for child := 0; child < children; child++ {
 				childMinDepth := maxDepth / 2
 				childMaxDepth := rand.Intn(maxDepth-childMinDepth) + childMinDepth
