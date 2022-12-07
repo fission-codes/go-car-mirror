@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/fission-codes/go-car-mirror/carmirror"
-	"github.com/fission-codes/go-car-mirror/fixtures"
+	mock "github.com/fission-codes/go-car-mirror/fixtures"
 	"github.com/fission-codes/go-car-mirror/util"
 	"golang.org/x/exp/slices"
 )
@@ -27,13 +27,13 @@ func assertBytesEqual(a []byte, b []byte, t *testing.T) {
 
 func TestArchiveHeaderWriteRead(t *testing.T) {
 	buf := bytes.Buffer{}
-	header := ArchiveHeader[fixtures.MockBlockId]{1, make([]fixtures.MockBlockId, 0)}
-	header.Roots = append(header.Roots, fixtures.RandId())
-	header.Roots = append(header.Roots, fixtures.RandId())
+	header := ArchiveHeader[mock.BlockId]{1, make([]mock.BlockId, 0)}
+	header.Roots = append(header.Roots, mock.RandId())
+	header.Roots = append(header.Roots, mock.RandId())
 	if err := header.Write(&buf); err != nil {
 		t.Errorf("Error writing header, %v", err)
 	}
-	header2 := ArchiveHeader[fixtures.MockBlockId]{}
+	header2 := ArchiveHeader[mock.BlockId]{}
 	if err := header2.Read(&buf); err != nil {
 		t.Errorf("Error reading header, %v", err)
 	}
@@ -44,17 +44,17 @@ func TestArchiveHeaderWriteRead(t *testing.T) {
 
 func TestBlockWireFormatWriteRead(t *testing.T) {
 	buf := bytes.Buffer{}
-	block := fixtures.NewMockBlock(fixtures.RandId(), 10240)
-	rawBlock := CastBlockWireFormat[fixtures.MockBlockId](block)
+	block := mock.NewBlock(mock.RandId(), 10240)
+	rawBlock := CastBlockWireFormat[mock.BlockId](block)
 	if err := rawBlock.Write(&buf); err != nil {
 		t.Errorf("Problem writing block %v", err)
 	}
 	assertBytesEqual(block.Bytes(), rawBlock.Bytes(), t)
-	copy := BlockWireFormat[fixtures.MockBlockId, *fixtures.MockBlockId]{}
+	copy := BlockWireFormat[mock.BlockId, *mock.BlockId]{}
 	if err := copy.Read(&buf); err != nil {
 		t.Errorf("error reading block %v", err)
 	}
-	if !carmirror.BlockEqual[fixtures.MockBlockId](rawBlock, &copy) {
+	if !carmirror.BlockEqual[mock.BlockId](rawBlock, &copy) {
 		t.Errorf("Blocks (%v, %v) not equal", rawBlock.Id(), copy.Id())
 		assertBytesEqual(rawBlock.Bytes(), copy.Bytes(), t)
 	}
@@ -62,13 +62,13 @@ func TestBlockWireFormatWriteRead(t *testing.T) {
 
 func TestArchiveWriteRead(t *testing.T) {
 	buf := bytes.Buffer{}
-	blocks := make([]carmirror.RawBlock[fixtures.MockBlockId], 2)
-	blocks[0] = fixtures.RandMockBlock()
-	blocks[1] = fixtures.RandMockBlock()
-	roots := make([]fixtures.MockBlockId, 2)
+	blocks := make([]carmirror.RawBlock[mock.BlockId], 2)
+	blocks[0] = mock.RandMockBlock()
+	blocks[1] = mock.RandMockBlock()
+	roots := make([]mock.BlockId, 2)
 	roots[0] = blocks[0].Id()
 	roots[1] = blocks[1].Id()
-	archive := Archive[fixtures.MockBlockId, *fixtures.MockBlockId]{}
+	archive := Archive[mock.BlockId, *mock.BlockId]{}
 	archive.Header.Version = 1
 	archive.Header.Roots = roots
 	archive.Blocks = blocks
@@ -76,7 +76,7 @@ func TestArchiveWriteRead(t *testing.T) {
 	if err := archive.Write(&buf); err != nil {
 		t.Errorf("Error writing archive, %v", err)
 	}
-	archive2 := Archive[fixtures.MockBlockId, *fixtures.MockBlockId]{}
+	archive2 := Archive[mock.BlockId, *mock.BlockId]{}
 	if err := archive2.Read(&buf); err != io.EOF {
 		t.Errorf("Error reading archive, %v", err)
 	}
