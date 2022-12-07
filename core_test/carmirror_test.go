@@ -20,9 +20,11 @@ var log *zap.SugaredLogger
 
 func init() {
 	rand.Seed(time.Now().UnixNano())
-	logger, _ := zap.NewProduction()
-	defer logger.Sync() // flushes buffer, if any
-	log = logger.Sugar()
+	config := zap.NewDevelopmentConfig()
+	config.Level.SetLevel(zapcore.InfoLevel)
+	zap.ReplaceGlobals(zap.Must(config.Build()))
+	log = zap.S()
+	InitDefault()
 }
 
 var ErrReceiverNotSet error = errors.New("receiver not set")
@@ -197,8 +199,6 @@ func (conn *MockConnection) ListenBlocks(receiver BlockReceiver[mock.BlockId, Ba
 func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, root mock.BlockId, max_batch_size uint) error {
 
 	snapshotBefore := GLOBAL_REPORTING.Snapshot()
-	log = zap.S()
-
 	connection := NewMockConnection(max_batch_size)
 
 	sender_session := NewSenderSession[mock.BlockId, BatchStatus](
@@ -251,7 +251,7 @@ func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, roo
 
 	go func() {
 		log.Debugf("timeout started")
-		time.Sleep(5 * time.Second)
+		time.Sleep(10 * time.Second)
 		log.Debugf("timeout elapsed")
 		if !sender_session.IsClosed() {
 			sender_session.Cancel()
@@ -261,12 +261,11 @@ func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, roo
 		}
 	}()
 
-	for i := 0; i < 4; i++ {
-		err := <-err_chan
+	var err error
+
+	for i := 0; i < 4 && err == nil; i++ {
+		err = <-err_chan
 		log.Debugf("goroutine terminated with %v", err)
-		if err != nil {
-			return err
-		}
 	}
 
 	snapshotAfter := GLOBAL_REPORTING.Snapshot()
@@ -275,16 +274,7 @@ func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, roo
 	return nil
 }
 
-func InitLog() {
-	config := zap.NewDevelopmentConfig()
-	config.Level.SetLevel(zapcore.DebugLevel)
-	zap.ReplaceGlobals(zap.Must(config.Build()))
-	InitDefault()
-}
-
 func TestMockTransferToEmptyStoreSingleBatch(t *testing.T) {
-	InitLog()
-	InitDefault()
 	senderStore := mock.NewStore()
 	root := mock.AddRandomTree(senderStore, 5, 5, 0.0)
 	receiverStore := mock.NewStore()
@@ -295,8 +285,6 @@ func TestMockTransferToEmptyStoreSingleBatch(t *testing.T) {
 }
 
 func TestMockTransferToEmptyStoreMultiBatch(t *testing.T) {
-	InitLog()
-	InitDefault()
 	senderStore := mock.NewStore()
 	root := mock.AddRandomTree(senderStore, 5, 5, 0.0)
 	receiverStore := mock.NewStore()
@@ -307,8 +295,6 @@ func TestMockTransferToEmptyStoreMultiBatch(t *testing.T) {
 }
 
 func TestMockTransferSingleMissingBlockBatch(t *testing.T) {
-	InitLog()
-	InitDefault()
 	senderStore := mock.NewStore()
 	root := mock.AddRandomTree(senderStore, 5, 5, 0.0)
 	receiverStore := mock.NewStore()
@@ -325,13 +311,11 @@ func TestMockTransferSingleMissingBlockBatch(t *testing.T) {
 }
 
 func TestMockTransferSingleMissingTreeBlockBatch(t *testing.T) {
-	InitLog()
-	InitDefault()
 	senderStore := mock.NewStore()
 	mock.AddRandomForest(senderStore, 10)
 	receiverStore := mock.NewStore()
 	receiverStore.AddAll(senderStore)
-	root := mock.AddRandomTree(senderStore, 10, 5, 0.1)
+	root := mock.AddRandomTree(senderStore, 12, 5, 0.1)
 	MockBatchTransfer(senderStore, receiverStore, root, 10)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
