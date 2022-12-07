@@ -236,14 +236,10 @@ func (ch *BlockChannel) listen() error {
 	return err
 }
 
-type StatusMessage struct {
-	status BatchStatus
-	have   filter.Filter[fixtures.MockBlockId]
-	want   []fixtures.MockBlockId
-}
+type MockStatusMessage StatusMessage[fixtures.MockBlockId, *fixtures.MockBlockId, filter.Filter[fixtures.MockBlockId], BatchStatus]
 
 type MockStatusReceiver struct {
-	channel        <-chan StatusMessage
+	channel        <-chan MockStatusMessage
 	statusReceiver StatusReceiver[fixtures.MockBlockId, BatchStatus]
 }
 
@@ -257,18 +253,18 @@ func (ch *MockStatusReceiver) listen() error {
 		if ch.statusReceiver == nil {
 			return ErrReceiverNotSet
 		}
-		ch.statusReceiver.HandleStatus(result.have, result.want)
-		ch.statusReceiver.HandleState(result.status)
+		ch.statusReceiver.HandleStatus(result.Have, result.Want)
+		ch.statusReceiver.HandleState(result.Status)
 	}
 	return err
 }
 
 type MockStatusSender struct {
-	channel      chan<- StatusMessage
+	channel      chan<- MockStatusMessage
 	orchestrator Orchestrator[BatchStatus]
 }
 
-func NewMockStatusSender(channel chan<- StatusMessage, orchestrator Orchestrator[BatchStatus]) *MockStatusSender {
+func NewMockStatusSender(channel chan<- MockStatusMessage, orchestrator Orchestrator[BatchStatus]) *MockStatusSender {
 	return &MockStatusSender{
 		channel,
 		orchestrator,
@@ -277,7 +273,7 @@ func NewMockStatusSender(channel chan<- StatusMessage, orchestrator Orchestrator
 
 func (sn *MockStatusSender) SendStatus(have filter.Filter[fixtures.MockBlockId], want []fixtures.MockBlockId) error {
 	state := sn.orchestrator.State()
-	sn.channel <- StatusMessage{state, have, want}
+	sn.channel <- MockStatusMessage{state, have, want}
 	return nil
 }
 
@@ -289,13 +285,13 @@ func (sn *MockStatusSender) Close() error {
 type MockConnection struct {
 	batchBlockChannel BlockChannel
 	statusReceiver    MockStatusReceiver
-	statusChannel     chan StatusMessage
+	statusChannel     chan MockStatusMessage
 	maxBatchSize      uint
 }
 
 func NewMockConnection(maxBatchSize uint) *MockConnection {
 
-	statusChannel := make(chan StatusMessage, 1024)
+	statusChannel := make(chan MockStatusMessage, 1024)
 
 	return &MockConnection{
 		BlockChannel{

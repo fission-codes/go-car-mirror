@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"io"
 
+	"github.com/fission-codes/go-car-mirror/filter"
 	"github.com/fxamacker/cbor/v2"
 )
 
@@ -204,12 +205,39 @@ func (msg *BlocksMessage[T, B, F]) Read(reader ByteAndBlockReader) error {
 	return msg.Car.Read(reader)
 }
 
-func (ah *BlocksMessage[T, B, F]) MarshalBinary() ([]byte, error) {
+func (msg *BlocksMessage[T, B, F]) MarshalBinary() ([]byte, error) {
 	var buf bytes.Buffer
-	err := ah.Write(&buf)
+	err := msg.Write(&buf)
 	return buf.Bytes(), err
 }
 
 func (msg *BlocksMessage[T, B, F]) UnmarshalBinary(data []byte) error {
+	return msg.Read(bytes.NewBuffer(data))
+}
+
+// TODO: is ~uint32 the right choice here?
+type StatusMessage[I BlockId, R BlockIdRef[I], F filter.Filter[I], S ~uint32] struct {
+	Status S
+	Have   filter.Filter[I]
+	Want   []I
+}
+
+func (msg *StatusMessage[I, R, F, S]) Write(writer io.Writer) error {
+	// TODO
+	return nil
+}
+
+func (msg *StatusMessage[I, R, F, S]) Read(reader ByteAndBlockReader) error {
+	// TODO
+	return nil
+}
+
+func (msg *StatusMessage[I, R, F, S]) MarshalBinary() ([]byte, error) {
+	var buf bytes.Buffer
+	err := msg.Write(&buf)
+	return buf.Bytes(), err
+}
+
+func (msg *StatusMessage[I, R, F, S]) UnmarshalBinary(data []byte) error {
 	return msg.Read(bytes.NewBuffer(data))
 }
