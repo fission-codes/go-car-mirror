@@ -1,4 +1,4 @@
-package carmirror
+package core_test
 
 import (
 	"errors"
@@ -8,16 +8,23 @@ import (
 
 	"math/rand"
 
+	. "github.com/fission-codes/go-car-mirror/carmirror"
 	cmerrors "github.com/fission-codes/go-car-mirror/errors"
 	"github.com/fission-codes/go-car-mirror/filter"
 	"github.com/fission-codes/go-car-mirror/fixtures"
+	"github.com/fission-codes/go-car-mirror/messages"
 	"github.com/zeebo/xxh3"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
+var log *zap.SugaredLogger
+
 func init() {
 	rand.Seed(time.Now().UnixNano())
+	logger, _ := zap.NewProduction()
+	defer logger.Sync() // flushes buffer, if any
+	log = logger.Sugar()
 }
 
 var ErrReceiverNotSet error = errors.New("receiver not set")
@@ -236,7 +243,7 @@ func (ch *BlockChannel) listen() error {
 	return err
 }
 
-type MockStatusMessage StatusMessage[fixtures.MockBlockId, *fixtures.MockBlockId, filter.Filter[fixtures.MockBlockId], BatchStatus]
+type MockStatusMessage messages.StatusMessage[fixtures.MockBlockId, *fixtures.MockBlockId, filter.Filter[fixtures.MockBlockId], BatchStatus]
 
 type MockStatusReceiver struct {
 	channel        <-chan MockStatusMessage
@@ -399,10 +406,10 @@ func MockBatchTransfer(sender_store *MockStore, receiver_store *MockStore, root 
 		log.Debugf("timeout started")
 		time.Sleep(5 * time.Second)
 		log.Debugf("timeout elapsed")
-		if !sender_session.orchestrator.IsClosed() {
+		if !sender_session.IsClosed() {
 			sender_session.Cancel()
 		}
-		if !receiver_session.orchestrator.IsClosed() {
+		if !receiver_session.IsClosed() {
 			receiver_session.Cancel()
 		}
 	}()

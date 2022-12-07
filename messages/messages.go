@@ -1,4 +1,4 @@
-package carmirror
+package messages
 
 import (
 	"bufio"
@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"io"
 
+	"github.com/fission-codes/go-car-mirror/carmirror"
 	"github.com/fission-codes/go-car-mirror/filter"
 	"github.com/fxamacker/cbor/v2"
 )
@@ -40,12 +41,12 @@ func readBufferWithPrefix(reader ByteAndBlockReader) ([]byte, error) {
 	}
 }
 
-type ArchiveHeaderWireFormat[T BlockId] struct {
+type ArchiveHeaderWireFormat[T carmirror.BlockId] struct {
 	Version int
 	Roots   []T
 }
 
-type ArchiveHeader[T BlockId] ArchiveHeaderWireFormat[T] // Avoid recursion due to cbor marshalling falling back to using MarshalBinary
+type ArchiveHeader[T carmirror.BlockId] ArchiveHeaderWireFormat[T] // Avoid recursion due to cbor marshalling falling back to using MarshalBinary
 
 func (ah *ArchiveHeader[T]) Write(writer io.Writer) error {
 	if buf, err := cbor.Marshal((*ArchiveHeaderWireFormat[T])(ah)); err == nil {
@@ -73,7 +74,7 @@ func (ah *ArchiveHeader[T]) UnmarshalBinary(data []byte) error {
 	return ah.Read(bytes.NewBuffer(data))
 }
 
-type BlockWireFormat[T BlockId, R BlockIdRef[T]] struct {
+type BlockWireFormat[T carmirror.BlockId, R carmirror.BlockIdRef[T]] struct {
 	IdRef R      `json:"id"`
 	Data  []byte `json:"data"`
 }
@@ -140,7 +141,7 @@ func (b *BlockWireFormat[T, R]) Size() int64 {
 	return int64(len(b.Data))
 }
 
-func CastBlockWireFormat[T BlockId, R BlockIdRef[T]](rawBlock RawBlock[T]) *BlockWireFormat[T, R] {
+func CastBlockWireFormat[T carmirror.BlockId, R carmirror.BlockIdRef[T]](rawBlock carmirror.RawBlock[T]) *BlockWireFormat[T, R] {
 	block, ok := rawBlock.(*BlockWireFormat[T, R])
 	if ok {
 		return block
@@ -150,9 +151,9 @@ func CastBlockWireFormat[T BlockId, R BlockIdRef[T]](rawBlock RawBlock[T]) *Bloc
 	}
 }
 
-type Archive[T BlockId, R BlockIdRef[T]] struct {
-	Header ArchiveHeader[T] `json:"hdr"`
-	Blocks []RawBlock[T]    `json:"blocks"`
+type Archive[T carmirror.BlockId, R carmirror.BlockIdRef[T]] struct {
+	Header ArchiveHeader[T]        `json:"hdr"`
+	Blocks []carmirror.RawBlock[T] `json:"blocks"`
 }
 
 func (car *Archive[T, R]) Write(writer io.Writer) error {
@@ -192,7 +193,7 @@ func (ah *Archive[T, R]) MarshalBinary() ([]byte, error) {
 	return buf.Bytes(), err
 }
 
-type BlocksMessage[T BlockId, R BlockIdRef[T], F Flags] struct {
+type BlocksMessage[T carmirror.BlockId, R carmirror.BlockIdRef[T], F carmirror.Flags] struct {
 	Status F
 	Car    Archive[T, R]
 }
@@ -216,7 +217,7 @@ func (msg *BlocksMessage[T, B, F]) UnmarshalBinary(data []byte) error {
 }
 
 // TODO: is ~uint32 the right choice here?
-type StatusMessage[I BlockId, R BlockIdRef[I], F filter.Filter[I], S ~uint32] struct {
+type StatusMessage[I carmirror.BlockId, R carmirror.BlockIdRef[I], F filter.Filter[I], S ~uint32] struct {
 	Status S
 	Have   filter.Filter[I]
 	Want   []I

@@ -389,6 +389,10 @@ func (ss *ReceiverSession[I, F]) Cancel() error {
 	return ss.orchestrator.Notify(CANCEL)
 }
 
+func (rs *ReceiverSession[I, F]) IsClosed() bool {
+	return rs.orchestrator.IsClosed()
+}
+
 type SenderSession[
 	I BlockId,
 	F Flags,
@@ -503,4 +507,8 @@ func (ss *SenderSession[I, F]) HandleState(state F) {
 	if err != nil {
 		log.Errorw("SenderSession", "method", "HandleState", "error", err)
 	}
+}
+
+func (ss *SenderSession[I, F]) IsClosed() bool {
+	return ss.orchestrator.IsClosed()
 }
