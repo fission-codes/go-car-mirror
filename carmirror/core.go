@@ -19,9 +19,7 @@ import (
 var log *zap.SugaredLogger
 
 func init() {
-	logger, _ := zap.NewProduction()
-	defer logger.Sync() // flushes buffer, if any
-	log = logger.Sugar()
+	log = zap.S()
 }
 
 // BlockId represents a unique identifier for a Block.
