@@ -1,4 +1,4 @@
-package carmirror
+package messages
 
 import (
 	"bytes"
@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/fission-codes/go-car-mirror/carmirror"
 	"github.com/fission-codes/go-car-mirror/fixtures"
 	"github.com/fission-codes/go-car-mirror/util"
 	"golang.org/x/exp/slices"
@@ -53,7 +54,7 @@ func TestBlockWireFormatWriteRead(t *testing.T) {
 	if err := copy.Read(&buf); err != nil {
 		t.Errorf("error reading block %v", err)
 	}
-	if !BlockEqual[fixtures.MockBlockId](rawBlock, &copy) {
+	if !carmirror.BlockEqual[fixtures.MockBlockId](rawBlock, &copy) {
 		t.Errorf("Blocks (%v, %v) not equal", rawBlock.Id(), copy.Id())
 		assertBytesEqual(rawBlock.Bytes(), copy.Bytes(), t)
 	}
@@ -61,7 +62,7 @@ func TestBlockWireFormatWriteRead(t *testing.T) {
 
 func TestArchiveWriteRead(t *testing.T) {
 	buf := bytes.Buffer{}
-	blocks := make([]RawBlock[fixtures.MockBlockId], 2)
+	blocks := make([]carmirror.RawBlock[fixtures.MockBlockId], 2)
 	blocks[0] = fixtures.RandMockBlock()
 	blocks[1] = fixtures.RandMockBlock()
 	roots := make([]fixtures.MockBlockId, 2)
