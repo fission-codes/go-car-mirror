@@ -13,11 +13,11 @@ func TestStateDiagram(t *testing.T) {
 	observedLogger := zap.New(observedZapCore)
 
 	d := OpenStateDiagram("test", observedLogger.Sugar())
-	d.WriteStateChange("event1", "state1", "state2")
-	d.WriteStateChange("event2", "state2", "state3")
-	d.WriteStateChange("event3", "state3", "state4")
+	d.LogTransition("state1", "state2", "event1")
+	d.LogTransition("state2", "state3", "event2")
+	d.LogTransition("state3", "state4", "event3")
 	// Duplicate line, which should be ignored
-	d.WriteStateChange("event3", "state3", "state4")
+	d.LogTransition("state3", "state4", "event3")
 	d.Close()
 
 	// 6 lines - 1 for opening, 1 for stateDiagram-v2, 3 for state changes, 1 for closing

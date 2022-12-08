@@ -44,7 +44,7 @@ func (d *StateDiagram) LogEnd() {
 	d.log.With("event", "END").Infof("```")
 }
 
-func (d *StateDiagram) WriteStateChange(event string, fromState string, toState string) {
+func (d *StateDiagram) LogTransition(event string, fromState string, toState string) {
 	line := fmt.Sprintf("  %s --> %s: %s", fromState, toState, event)
 	d.mutex.RLock()
 	if _, ok := d.linesMap[line]; ok {

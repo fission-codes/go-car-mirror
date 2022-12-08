@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/fission-codes/go-car-mirror/errors"
+	"github.com/fission-codes/go-car-mirror/mermaid"
 	"github.com/fission-codes/go-car-mirror/util"
 )
 
@@ -132,16 +133,22 @@ func (sbbs *SimpleBatchBlockSender[I]) Flush() error {
 
 // BatchSendOrchestrator
 type BatchSendOrchestrator struct {
-	flags util.SharedFlagSet[BatchStatus]
+	flags        util.SharedFlagSet[BatchStatus]
+	stateDiagram *mermaid.StateDiagram
 }
 
 func NewBatchSendOrchestrator() *BatchSendOrchestrator {
-	return &BatchSendOrchestrator{
-		flags: *util.NewSharedFlagSet(BatchStatus(0)),
+	bso := &BatchSendOrchestrator{
+		flags:        *util.NewSharedFlagSet(BatchStatus(0)),
+		stateDiagram: mermaid.OpenStateDiagram("BatchSendOrchestrator", log),
 	}
+
+	return bso
 }
 
 func (bso *BatchSendOrchestrator) Notify(event SessionEvent) error {
+	fromState := bso.State()
+
 	switch event {
 	case BEGIN_SESSION:
 		bso.flags.Set(SENDER_READY)
@@ -167,6 +174,9 @@ func (bso *BatchSendOrchestrator) Notify(event SessionEvent) error {
 		bso.flags.Update(SENDER, SENDER_CLOSED)
 	}
 
+	toState := bso.State()
+	bso.stateDiagram.LogTransition(fromState.String(), toState.String(), event.String())
+
 	return nil
 }
 
@@ -175,7 +185,11 @@ func (bso *BatchSendOrchestrator) State() BatchStatus {
 }
 
 func (bso *BatchSendOrchestrator) ReceiveState(batchStatus BatchStatus) error {
+	fromState := bso.State()
 	bso.flags.Update(RECEIVER, batchStatus)
+	toState := bso.State()
+	bso.stateDiagram.LogTransition(fromState.String(), toState.String(), batchStatus.String())
+
 	return nil
 }
 
@@ -186,15 +200,19 @@ func (bso *BatchSendOrchestrator) IsClosed() bool {
 // BatchReceiveOrchestrator
 type BatchReceiveOrchestrator struct {
 	flags util.SharedFlagSet[BatchStatus]
+	state *mermaid.StateDiagram
 }
 
 func NewBatchReceiveOrchestrator() *BatchReceiveOrchestrator {
 	return &BatchReceiveOrchestrator{
 		flags: *util.NewSharedFlagSet(BatchStatus(0)),
+		state: mermaid.OpenStateDiagram("BatchReceiveOrchestrator", log),
 	}
 }
 
 func (bro *BatchReceiveOrchestrator) Notify(event SessionEvent) error {
+	fromState := bro.State()
+
 	switch event {
 	case BEGIN_SESSION:
 		bro.flags.Set(RECEIVER_READY)
@@ -216,6 +234,9 @@ func (bro *BatchReceiveOrchestrator) Notify(event SessionEvent) error {
 		bro.flags.Update(RECEIVER, RECEIVER_CLOSED)
 	}
 
+	toState := bro.State()
+	bro.state.LogTransition(fromState.String(), toState.String(), event.String())
+
 	return nil
 }
 
@@ -225,7 +246,10 @@ func (bro *BatchReceiveOrchestrator) State() BatchStatus {
 
 func (bro *BatchReceiveOrchestrator) ReceiveState(batchStatus BatchStatus) error {
 	// Slight hack here to allow ReceiverChecking to be updated by SimpleBatchBlockReceiver
+	fromState := bro.State()
 	bro.flags.Update(SENDER|RECEIVER_CHECKING, batchStatus)
+	toState := bro.State()
+	bro.state.LogTransition(fromState.String(), toState.String(), batchStatus.String())
 	return nil
 }
 
