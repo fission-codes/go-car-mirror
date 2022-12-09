@@ -2,6 +2,7 @@ package carmirror
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -85,8 +86,10 @@ func (snap *Snapshot) Filter(prefix string) *Snapshot {
 }
 
 func (snap *Snapshot) Write(log *zap.SugaredLogger) {
-	for key, value := range snap.values {
-		log.Infow("snapshot", "event", key, "count", value)
+	keys := maps.Keys(snap.values)
+	sort.Strings(keys)
+	for _, key := range keys {
+		log.Infow("snapshot", "event", key, "count", snap.values[key])
 	}
 }
 
@@ -186,7 +189,7 @@ func (io *InstrumentedOrchestrator[F, O]) Notify(event SessionEvent) error {
 	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "Notify", "event", event, "state", io.orchestrator.State())
 	io.stats.Log(event.String())
 	err := io.orchestrator.Notify(event)
-	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "Notify", "result", err, "state", io.orchestrator.State())
+	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "Notify", "event", event, "result", err, "state", io.orchestrator.State())
 	return err
 }
 

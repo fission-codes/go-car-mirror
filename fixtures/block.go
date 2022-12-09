@@ -13,6 +13,7 @@ import (
 	core "github.com/fission-codes/go-car-mirror/carmirror"
 	cmerrors "github.com/fission-codes/go-car-mirror/errors"
 	"github.com/fission-codes/go-car-mirror/util"
+	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
 
 	"github.com/fxamacker/cbor/v2"
@@ -186,7 +187,7 @@ func AddRandomTree(store *Store, maxChildren int, maxDepth int, pCrosslink float
 			block.AddChild(existingBlock.Id())
 		} else {
 			// gen rand num children
-			children := rand.Intn(maxChildren)
+			children := rand.Intn(maxChildren/3) + rand.Intn(maxChildren/3) + rand.Intn(maxChildren/3) // makes number of children cluster around average
 			for child := 0; child < children; child++ {
 				childMinDepth := maxDepth / 2
 				childMaxDepth := rand.Intn(maxDepth-childMinDepth) + childMinDepth
@@ -223,6 +224,21 @@ func (bs *Store) Get(id BlockId) (core.Block[BlockId], error) {
 	block, ok := bs.blocks[id]
 	if !ok || block == nil {
 		return nil, cmerrors.ErrBlockNotFound
+	}
+
+	return block, nil
+}
+
+func (bs *Store) Dump(id BlockId, log *zap.SugaredLogger, spacer string) (core.Block[BlockId], error) {
+	block, ok := bs.blocks[id]
+	if ok {
+		log.Info(fmt.Sprintf("%s%s", spacer, id.String()))
+		child_spacer := spacer + "  "
+		for _, child := range block.Children() {
+			bs.Dump(child, log, child_spacer)
+		}
+	} else {
+		log.Info(fmt.Sprintf("%s<not present>", spacer))
 	}
 
 	return block, nil

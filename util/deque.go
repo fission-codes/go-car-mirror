@@ -1,6 +1,7 @@
 package util
 
 import (
+	"container/list"
 	"errors"
 	"sync"
 )
@@ -23,15 +24,17 @@ type Deque[T any] interface {
 
 type ArrayDeque[T any] struct {
 	data  []T
-	front int
-	back  int
+	head  int
+	tail  int
+	empty bool
 }
 
 func NewArrayDeque[T any](capacity int) *ArrayDeque[T] {
 	return &ArrayDeque[T]{
 		make([]T, capacity),
-		capacity - 1,
 		0,
+		0,
+		true,
 	}
 }
 
@@ -56,38 +59,56 @@ func (dq *ArrayDeque[T]) inc(index int) int {
 }
 
 func (dq *ArrayDeque[T]) Back() *T {
-	return &dq.data[dq.dec(dq.back)]
+	if dq.empty {
+		return nil
+	} else {
+		return &dq.data[dq.dec(dq.tail)]
+	}
 }
 
 func (dq *ArrayDeque[T]) Front() *T {
-	return &dq.data[dq.inc(dq.front)]
+	if dq.empty {
+		return nil
+	} else {
+		return &dq.data[dq.head]
+	}
 }
 
 func (dq *ArrayDeque[T]) Len() int {
-	if dq.front > dq.back {
-		return len(dq.data) - dq.front + dq.back - 1
+
+	if dq.head > dq.tail {
+		return len(dq.data) - dq.head + dq.tail
+	} else if dq.head < dq.tail {
+		return dq.tail - dq.head
 	} else {
-		return dq.back - dq.front - 1
+		if dq.empty {
+			return 0
+		} else {
+			return len(dq.data)
+		}
 	}
 }
 
 func (dq *ArrayDeque[T]) PushBack(v T) error {
-	capacity := len(dq.data)
-	if dq.Len() == capacity {
+	if dq.head == dq.tail && !dq.empty {
 		return ErrListFull
 	} else {
-		dq.data[dq.back] = v
-		dq.back = dq.inc(dq.back)
+		dq.data[dq.tail] = v
+		dq.tail = dq.inc(dq.tail)
+		dq.empty = false
 		return nil
 	}
 }
 
 func (dq *ArrayDeque[T]) PopBack() (T, error) {
-	if dq.Len() == 0 {
+	if dq.empty {
 		return *new(T), ErrListEmpty
 	} else {
-		dq.back = dq.dec(dq.back)
-		return dq.data[dq.back], nil
+		dq.tail = dq.dec(dq.tail)
+		if dq.head == dq.tail {
+			dq.empty = true
+		}
+		return dq.data[dq.tail], nil
 	}
 }
 
@@ -96,18 +117,23 @@ func (dq *ArrayDeque[T]) PushFront(v T) error {
 	if dq.Len() == capacity {
 		return ErrListFull
 	} else {
-		dq.data[dq.front] = v
-		dq.front = dq.dec(dq.front)
+		dq.head = dq.dec(dq.head)
+		dq.data[dq.head] = v
+		dq.empty = false
 		return nil
 	}
 }
 
 func (dq *ArrayDeque[T]) PopFront() (T, error) {
-	if dq.Len() == 0 {
+	if dq.empty {
 		return *new(T), ErrListEmpty
 	} else {
-		dq.front = dq.inc(dq.front)
-		return dq.data[dq.front], nil
+		result := dq.data[dq.head]
+		dq.head = dq.inc(dq.head)
+		if dq.head == dq.tail {
+			dq.empty = true
+		}
+		return result, nil
 	}
 }
 
@@ -202,4 +228,155 @@ func (dq *SynchronizedDeque[T]) PollFront() T {
 		panic(err)
 	}
 	return res
+}
+
+type ListDeque[T any] struct {
+	list list.List
+}
+
+func NewListDeque[T any]() *ListDeque[T] {
+	return &ListDeque[T]{
+		list.List{},
+	}
+}
+
+func (dq *ListDeque[T]) Capacity() int {
+	return -1
+}
+
+func (dq *ListDeque[T]) Back() *T {
+	if element, ok := dq.list.Back().Value.(T); ok {
+		return &element
+	} else {
+		panic("wrong type for list member")
+	}
+}
+
+func (dq *ListDeque[T]) Front() *T {
+	if element, ok := dq.list.Front().Value.(T); ok {
+		return &element
+	} else {
+		panic("wrong type for list member")
+	}
+}
+
+func (dq *ListDeque[T]) Len() int {
+	return dq.list.Len()
+}
+
+func (dq *ListDeque[T]) PushBack(v T) error {
+	dq.list.PushBack(v)
+	return nil
+}
+
+func (dq *ListDeque[T]) PopBack() (T, error) {
+	back := dq.list.Back()
+	if back == nil {
+		return *new(T), ErrListEmpty
+	}
+	dq.list.Remove(back)
+	if result, ok := back.Value.(T); ok {
+		return result, nil
+	} else {
+		panic("wrong type for list member")
+	}
+}
+
+func (dq *ListDeque[T]) PushFront(v T) error {
+	dq.list.PushFront(v)
+	return nil
+}
+
+func (dq *ListDeque[T]) PopFront() (T, error) {
+	front := dq.list.Front()
+	if front == nil {
+		return *new(T), ErrListEmpty
+	}
+	dq.list.Remove(front)
+	if result, ok := front.Value.(T); ok {
+		return result, nil
+	} else {
+		panic("wrong type for list member")
+	}
+}
+
+type BlocksDeque[T any] struct {
+	blocks    ListDeque[*ArrayDeque[T]]
+	blocksize int
+}
+
+func NewBlocksDeque[T any](blocksize int) *BlocksDeque[T] {
+	result := &BlocksDeque[T]{
+		*NewListDeque[*ArrayDeque[T]](),
+		blocksize,
+	}
+	result.blocks.PushFront(NewArrayDeque[T](blocksize))
+	return result
+}
+
+func (dq *BlocksDeque[T]) Capacity() int {
+	return -1
+}
+
+func (dq *BlocksDeque[T]) frontBlock() *ArrayDeque[T] {
+	return *dq.blocks.Front()
+}
+
+func (dq *BlocksDeque[T]) backBlock() *ArrayDeque[T] {
+	return *dq.blocks.Back()
+}
+
+func (dq *BlocksDeque[T]) Back() *T {
+	return dq.backBlock().Back()
+}
+
+func (dq *BlocksDeque[T]) Front() *T {
+	return dq.frontBlock().Front()
+}
+
+func (dq *BlocksDeque[T]) Len() int {
+	if dq.blocks.Len() == 1 {
+		return dq.frontBlock().Len()
+	}
+	return dq.frontBlock().Len() + dq.backBlock().Len() + dq.blocksize*(dq.blocks.Len()-2)
+}
+
+func (dq *BlocksDeque[T]) PushBack(v T) error {
+	if err := dq.backBlock().PushBack(v); err == ErrListFull {
+		dq.blocks.PushBack(NewArrayDeque[T](dq.blocksize))
+		return dq.backBlock().PushBack(v)
+	} else {
+		return err
+	}
+}
+
+func (dq *BlocksDeque[T]) PopBack() (T, error) {
+	if result, err := dq.backBlock().PopBack(); err != nil {
+		return result, err
+	} else {
+		if dq.backBlock().empty && dq.blocks.Len() > 1 {
+			_, err = dq.blocks.PopBack()
+		}
+		return result, err
+	}
+}
+
+func (dq *BlocksDeque[T]) PushFront(v T) error {
+	if err := dq.frontBlock().PushFront(v); err == ErrListFull {
+		dq.blocks.PushFront(NewArrayDeque[T](dq.blocksize))
+		return dq.frontBlock().PushFront(v)
+	} else {
+		return err
+	}
+}
+
+func (dq *BlocksDeque[T]) PopFront() (T, error) {
+	if result, err := dq.frontBlock().PopFront(); err != nil {
+		return result, err
+	} else {
+		if dq.frontBlock().empty && dq.blocks.Len() > 1 {
+			_, err = dq.blocks.PopFront()
+		}
+		return result, err
+	}
 }

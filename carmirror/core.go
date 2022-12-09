@@ -16,14 +16,6 @@ import (
 	"github.com/fission-codes/go-car-mirror/util"
 )
 
-var log *zap.SugaredLogger
-
-func init() {
-	logger, _ := zap.NewProduction()
-	defer logger.Sync() // flushes buffer, if any
-	log = logger.Sugar()
-}
-
 // BlockId represents a unique identifier for a Block.
 // This interface only represents the identifier, not the Block. The interface is chosen for compatibility
 // with ipfs/go-cid - noting that the go-cid is, for the moment, comparable
@@ -279,6 +271,7 @@ type ReceiverSession[
 	orchestrator Orchestrator[F]
 	store        BlockStore[I]
 	pending      chan Block[I]
+	log          *zap.SugaredLogger
 	// pending      map[I]bool
 	// pendingMutex sync.RWMutex
 }
@@ -295,6 +288,7 @@ func NewReceiverSession[I BlockId, F Flags](
 		orchestrator,
 		store,
 		make(chan Block[I], 1024),
+		zap.S(),
 	}
 }
 
@@ -329,11 +323,11 @@ func (rs *ReceiverSession[I, F]) HandleBlock(rawBlock RawBlock[I]) {
 
 	block, err := rs.store.Add(rawBlock)
 	if err != nil {
-		log.Debugf("Failed to add block to store. err = %v", err)
+		rs.log.Debugf("Failed to add block to store. err = %v", err)
 	}
 
 	if err := rs.accumulator.Receive(block.Id()); err != nil {
-		log.Debugf("Failed to receive block. err = %v", err)
+		rs.log.Debugf("Failed to receive block. err = %v", err)
 	}
 
 	rs.pending <- block
@@ -381,7 +375,7 @@ func (rs *ReceiverSession[I, F]) Run() error {
 func (ss *ReceiverSession[I, F]) HandleState(state F) {
 	err := ss.orchestrator.ReceiveState(state)
 	if err != nil {
-		log.Errorw("ReceiverSession", "method", "HandleState", "error", err)
+		ss.log.Errorw("ReceiverSession", "method", "HandleState", "error", err)
 	}
 }
 
@@ -403,6 +397,7 @@ type SenderSession[
 	filter       filter.Filter[I]
 	sent         sync.Map
 	pending      *util.SynchronizedDeque[I]
+	log          *zap.SugaredLogger
 }
 
 func NewSenderSession[I BlockId, F Flags](store BlockStore[I], connection SenderConnection[F, I], filter filter.Filter[I], orchestrator Orchestrator[F]) *SenderSession[I, F] {
@@ -412,7 +407,8 @@ func NewSenderSession[I BlockId, F Flags](store BlockStore[I], connection Sender
 		orchestrator,
 		filter,
 		sync.Map{},
-		util.NewSynchronizedDeque[I](util.NewArrayDeque[I](1024)),
+		util.NewSynchronizedDeque[I](util.NewBlocksDeque[I](1024)),
+		zap.S(),
 	}
 }
 
@@ -471,16 +467,17 @@ func (ss *SenderSession[I, F]) Run() error {
 
 func (ss *SenderSession[I, F]) HandleStatus(have filter.Filter[I], want []I) {
 	if err := ss.orchestrator.Notify(BEGIN_RECEIVE); err != nil {
-		log.Errorw("SenderSession", "method", "HandleStatus", "error", err)
+		ss.log.Errorw("SenderSession", "method", "HandleStatus", "error", err)
 	}
 	defer ss.orchestrator.Notify(END_RECEIVE)
-
+	ss.log.Debugw("SenderSession", "method", "HandleStatus", "pending", ss.pending.Len(), "filter", ss.filter.Count())
 	ss.filter = ss.filter.AddAll(have)
-
-	log.Debugw("SenderSession", "method", "HandleStatus", "pending", ss.pending.Len())
+	ss.log.Debugw("SenderSession", "method", "HandleStatus", "filter", ss.filter.Count())
+	ss.filter.Dump(ss.log, "SenderSession filter - ")
 	for _, id := range want {
 		ss.pending.PushFront(id) // send wants to the front of the queue
 	}
+	ss.log.Debugw("SenderSession", "method", "HandleStatus", "pending", ss.pending.Len())
 }
 
 func (ss *SenderSession[I, F]) Close() error {
@@ -505,7 +502,7 @@ func (ss *SenderSession[I, F]) Enqueue(id I) error {
 func (ss *SenderSession[I, F]) HandleState(state F) {
 	err := ss.orchestrator.ReceiveState(state)
 	if err != nil {
-		log.Errorw("SenderSession", "method", "HandleState", "error", err)
+		ss.log.Errorw("SenderSession", "method", "HandleState", "error", err)
 	}
 }
 

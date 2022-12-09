@@ -4,13 +4,21 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"sync"
 
 	"github.com/fission-codes/go-bloom"
 	cbor "github.com/fxamacker/cbor/v2"
+	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 )
+
+var log *zap.SugaredLogger
+
+func init() {
+	log = zap.S()
+}
 
 // Filter is anything similar to a bloom filter that can efficiently (and without perfect accuracy) keep track of a list of `BlockId`s.
 type Filter[K comparable] interface {
@@ -31,6 +39,8 @@ type Filter[K comparable] interface {
 	TryAddAll(other Filter[K]) error
 	// Add All will create a new filter if necessary to accomodate the merge
 	AddAll(other Filter[K]) Filter[K]
+	// Dump filter data to log with the given prefix (may be quite slow, multiple lines)
+	Dump(*zap.SugaredLogger, string)
 }
 
 type FilterWireFormat[K comparable] struct {
@@ -109,6 +119,7 @@ func (cf *CompoundFilter[K]) GetSparser() Side {
 }
 
 func (cf *CompoundFilter[K]) TryAddAll(other Filter[K]) error {
+	other = desynchronize(other)
 	// Try to add to the sparser of the two sides. If this fails,
 	// try adding to the other side. If this fails, try adding on
 	// on the less sparse side
@@ -130,6 +141,7 @@ func (cf *CompoundFilter[K]) TryAddAll(other Filter[K]) error {
 }
 
 func (cf *CompoundFilter[K]) AddAll(other Filter[K]) Filter[K] {
+	other = desynchronize(other)
 	ocf, ok := other.(*CompoundFilter[K])
 	if ok {
 		return cf.AddAll(ocf.SideA).AddAll(ocf.SideB)
@@ -219,6 +231,13 @@ func (cf *CompoundFilter[K]) MarshalCBOR() ([]byte, error) {
 	return cbor.Marshal(wireFormat)
 }
 
+func (cf *CompoundFilter[K]) Dump(log *zap.SugaredLogger, prefix string) {
+	log.Debugf("%sCompoundFilter {", prefix)
+	cf.SideA.Dump(log, prefix+"  ")
+	cf.SideB.Dump(log, prefix+"  ")
+	log.Debugf("%s}", prefix)
+}
+
 type CompoundFilterWireFormat[K comparable] struct {
 	SideA *FilterWireFormat[K] `json:"a"`
 	SideB *FilterWireFormat[K] `json:"b"`
@@ -240,6 +259,8 @@ func NewBloomFilter[K comparable](capacity uint, function bloom.HashFunction[K])
 	bitCount, hashCount := bloom.EstimateParameters(uint64(capacity), bloom.EstimateFPP(uint64(capacity)))
 	filter, _ := bloom.NewFilter(bitCount, hashCount, function)
 
+	log.Debugw("BloomFilter", "method", "NewBloomFilter", "bitCount", bitCount, "hashCount", hashCount)
+
 	return &BloomFilter[K]{
 		filter:       filter,
 		capacity:     int(capacity),
@@ -251,6 +272,8 @@ func NewBloomFilter[K comparable](capacity uint, function bloom.HashFunction[K])
 // Create a bloom filter from a prepopulated byte array and related low-level information including the hash function
 func NewBloomFilterFromBytes[K comparable](bytes []byte, bitCount uint64, hashCount uint64, function bloom.HashFunction[K]) *BloomFilter[K] {
 	filter := bloom.NewFilterFromBloomBytes[K](bitCount, hashCount, bytes, function)
+
+	log.Debugw("BloomFilter", "method", "NewBloomFilterFromBytes", "bitCount", bitCount, "hashCount", hashCount)
 
 	return &BloomFilter[K]{
 		filter:       filter,
@@ -313,8 +336,10 @@ func (f *BloomFilter[K]) DoesNotContain(id K) bool {
 }
 
 func (f *BloomFilter[K]) TryAddAll(other Filter[K]) error {
+	other = desynchronize(other)
 	obf, ok := other.(*BloomFilter[K])
 	if ok {
+		log.Debugw("BloomFilter", "method", "TryAddAll", "other.bitCount", obf.filter.BitCount(), "hashCount", obf.filter.HashCount())
 		if f.capacity < f.count+obf.count {
 			working_bloom := f.filter.Copy()
 			err := working_bloom.Union(obf.filter)
@@ -334,6 +359,9 @@ func (f *BloomFilter[K]) TryAddAll(other Filter[K]) error {
 			}
 			f.count = int(f.filter.EstimateEntries())
 		}
+		log.Debugw("BloomFilter", "method", "TryAddAll", "result", nil)
+		return nil
+	} else if _, ok := other.(*EmptyFilter[K]); ok {
 		return nil
 	} else {
 		return ErrIncompatibleFilter
@@ -341,13 +369,18 @@ func (f *BloomFilter[K]) TryAddAll(other Filter[K]) error {
 }
 
 func (f *BloomFilter[K]) AddAll(other Filter[K]) Filter[K] {
+	other = desynchronize(other)
 	err := f.TryAddAll(other)
 	if err == nil {
 		return f
 	} else {
-		return &CompoundFilter[K]{
-			SideA: f,
-			SideB: other.Copy(),
+		if ocf, ok := other.(*CompoundFilter[K]); ok {
+			return ocf.Copy().AddAll(f)
+		} else {
+			return &CompoundFilter[K]{
+				SideA: f,
+				SideB: other.Copy(),
+			}
 		}
 	}
 }
@@ -435,6 +468,10 @@ func (bf *BloomFilter[K]) MarshalCBOR() ([]byte, error) {
 	}
 }
 
+func (bf *BloomFilter[K]) Dump(log *zap.SugaredLogger, prefix string) {
+	log.Debugw(fmt.Sprintf("%sBloomFilter", prefix), "capacity", bf.capacity, "count", bf.count, "size", bf.filter.BitCount())
+}
+
 // A thread-safe Filter which wraps a regular Filter with a mutex.
 type SynchronizedFilter[K comparable] struct {
 	filter Filter[K]
@@ -478,10 +515,14 @@ func (rf *SynchronizedFilter[K]) Clear() Filter[K] {
 	return rf
 }
 
-func (rf *SynchronizedFilter[K]) Copy() Filter[K] {
+func (rf *SynchronizedFilter[K]) UnsynchronizedCopy() Filter[K] {
 	rf.lock.Lock()
 	defer rf.lock.Unlock()
-	return &SynchronizedFilter[K]{filter: rf.filter.Copy(), lock: sync.RWMutex{}}
+	return rf.filter.Copy()
+}
+
+func (rf *SynchronizedFilter[K]) Copy() Filter[K] {
+	return &SynchronizedFilter[K]{filter: rf.UnsynchronizedCopy(), lock: sync.RWMutex{}}
 }
 
 func (rf *SynchronizedFilter[K]) Capacity() int {
@@ -542,6 +583,22 @@ func (sf *SynchronizedFilter[K]) MarshalCBOR() ([]byte, error) {
 	return cbor.Marshal(NewFilterWireFormat(sf.filter))
 }
 
+func (sf *SynchronizedFilter[K]) Dump(log *zap.SugaredLogger, prefix string) {
+	sf.lock.RLock()
+	defer sf.lock.RUnlock()
+	log.Debugf("%sSynchronizedFilter {", prefix)
+	sf.filter.Dump(log, prefix+"  ")
+	log.Debugf("%s}", prefix)
+}
+
+func desynchronize[K comparable](filter Filter[K]) Filter[K] {
+	if sf, ok := filter.(*SynchronizedFilter[K]); ok {
+		return sf.UnsynchronizedCopy()
+	} else {
+		return filter
+	}
+}
+
 // PerfectFilter is a Filter implementation which uses and underlying map - mainly for testing
 type PerfectFilter[K comparable] struct {
 	filter map[K]bool
@@ -556,6 +613,7 @@ func (pf *PerfectFilter[K]) DoesNotContain(id K) bool {
 }
 
 func (pf *PerfectFilter[K]) TryAddAll(other Filter[K]) error {
+	other = desynchronize(other)
 	opf, ok := other.(*PerfectFilter[K])
 	if ok {
 		for k := range opf.filter {
@@ -568,6 +626,7 @@ func (pf *PerfectFilter[K]) TryAddAll(other Filter[K]) error {
 }
 
 func (pf *PerfectFilter[K]) AddAll(other Filter[K]) Filter[K] {
+	other = desynchronize(other)
 	err := pf.TryAddAll(other)
 	if err == nil {
 		return pf
@@ -646,6 +705,10 @@ func (pf *PerfectFilter[K]) MarshalCBOR() ([]byte, error) {
 	return cbor.Marshal(maps.Keys(pf.filter))
 }
 
+func (pf *PerfectFilter[K]) Dump(log *zap.SugaredLogger, prefix string) {
+	log.Debugw(fmt.Sprintf("%sPerfectFilter", prefix), "length", len(pf.filter))
+}
+
 // EmptyFilter represents a filter which contains no entries. An allocator is provided which is used to create a new filter if necessary.
 type EmptyFilter[K comparable] struct {
 	allocator func() Filter[K] `json:"-"`
@@ -690,4 +753,8 @@ func (ef *EmptyFilter[K]) Count() int {
 func (ef *EmptyFilter[K]) Equal(other Filter[K]) bool {
 	_, ok := other.(*EmptyFilter[K])
 	return ok
+}
+
+func (ef *EmptyFilter[K]) Dump(log *zap.SugaredLogger, prefix string) {
+	log.Debugf("%sEmptyFilter", prefix)
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/fission-codes/go-car-mirror/errors"
 	"github.com/fission-codes/go-car-mirror/util"
+	"go.uber.org/zap"
 )
 
 type BatchStatus uint32
@@ -133,11 +134,13 @@ func (sbbs *SimpleBatchBlockSender[I]) Flush() error {
 // BatchSendOrchestrator
 type BatchSendOrchestrator struct {
 	flags util.SharedFlagSet[BatchStatus]
+	log   *zap.SugaredLogger
 }
 
 func NewBatchSendOrchestrator() *BatchSendOrchestrator {
 	return &BatchSendOrchestrator{
 		flags: *util.NewSharedFlagSet(BatchStatus(0)),
+		log:   zap.S(),
 	}
 }
 
@@ -148,7 +151,7 @@ func (bso *BatchSendOrchestrator) Notify(event SessionEvent) error {
 	case BEGIN_SEND:
 		state := bso.flags.WaitAny(SENDER_READY|SENDER_CLOSED, 0)
 		if state&SENDER_CLOSED != 0 {
-			log.Errorf("Orchestrator waiting for SENDER_READY when SENDER_CLOSED seen")
+			bso.log.Errorf("Orchestrator waiting for SENDER_READY when SENDER_CLOSED seen")
 			return errors.ErrStateError
 		}
 	case END_RECEIVE:
@@ -186,11 +189,13 @@ func (bso *BatchSendOrchestrator) IsClosed() bool {
 // BatchReceiveOrchestrator
 type BatchReceiveOrchestrator struct {
 	flags util.SharedFlagSet[BatchStatus]
+	log   *zap.SugaredLogger
 }
 
 func NewBatchReceiveOrchestrator() *BatchReceiveOrchestrator {
 	return &BatchReceiveOrchestrator{
 		flags: *util.NewSharedFlagSet(BatchStatus(0)),
+		log:   zap.S(),
 	}
 }
 
@@ -203,7 +208,7 @@ func (bro *BatchReceiveOrchestrator) Notify(event SessionEvent) error {
 	case BEGIN_CHECK:
 		state := bro.flags.WaitAny(RECEIVER_CHECKING|RECEIVER_CLOSED, 0)
 		if state&RECEIVER_CLOSED != 0 {
-			log.Errorf("Orchestrator waiting for RECEIVER_CHECKING when RECEIVER_CLOSED seen")
+			bro.log.Errorf("Orchestrator waiting for RECEIVER_CHECKING when RECEIVER_CLOSED seen")
 			return errors.ErrStateError
 		}
 	case BEGIN_SEND:
