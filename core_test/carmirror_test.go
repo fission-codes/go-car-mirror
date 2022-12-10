@@ -103,10 +103,10 @@ func (ch *BlockChannel) listen() error {
 	return err
 }
 
-type MockStatusMessage messages.StatusMessage[mock.BlockId, *mock.BlockId, filter.Filter[mock.BlockId], BatchStatus]
+type MockStatusMessage = messages.StatusMessage[mock.BlockId, *mock.BlockId, BatchStatus]
 
 type MockStatusReceiver struct {
-	channel        <-chan MockStatusMessage
+	channel        <-chan *MockStatusMessage
 	statusReceiver StatusReceiver[mock.BlockId, BatchStatus]
 }
 
@@ -120,18 +120,18 @@ func (ch *MockStatusReceiver) listen() error {
 		if ch.statusReceiver == nil {
 			return ErrReceiverNotSet
 		}
-		ch.statusReceiver.HandleStatus(result.Have, result.Want)
+		ch.statusReceiver.HandleStatus(result.Have.Any(), result.Want)
 		ch.statusReceiver.HandleState(result.Status)
 	}
 	return err
 }
 
 type MockStatusSender struct {
-	channel      chan<- MockStatusMessage
+	channel      chan<- *MockStatusMessage
 	orchestrator Orchestrator[BatchStatus]
 }
 
-func NewMockStatusSender(channel chan<- MockStatusMessage, orchestrator Orchestrator[BatchStatus]) *MockStatusSender {
+func NewMockStatusSender(channel chan<- *MockStatusMessage, orchestrator Orchestrator[BatchStatus]) *MockStatusSender {
 	return &MockStatusSender{
 		channel,
 		orchestrator,
@@ -140,7 +140,7 @@ func NewMockStatusSender(channel chan<- MockStatusMessage, orchestrator Orchestr
 
 func (sn *MockStatusSender) SendStatus(have filter.Filter[mock.BlockId], want []mock.BlockId) error {
 	state := sn.orchestrator.State()
-	sn.channel <- MockStatusMessage{state, have.Copy(), want}
+	sn.channel <- messages.NewStatusMessage(state, have.Copy(), want) // TODO: remove copy when we use serialization
 	return nil
 }
 
@@ -152,13 +152,13 @@ func (sn *MockStatusSender) Close() error {
 type MockConnection struct {
 	batchBlockChannel BlockChannel
 	statusReceiver    MockStatusReceiver
-	statusChannel     chan MockStatusMessage
+	statusChannel     chan *MockStatusMessage
 	maxBatchSize      uint
 }
 
 func NewMockConnection(maxBatchSize uint, rate int64, latency int64) *MockConnection {
 
-	statusChannel := make(chan MockStatusMessage, 1024)
+	statusChannel := make(chan *MockStatusMessage, 1024)
 
 	return &MockConnection{
 		BlockChannel{
@@ -289,7 +289,7 @@ func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, roo
 
 func TestMockTransferToEmptyStoreSingleBatchNoDelay(t *testing.T) {
 	senderStore := mock.NewStore()
-	root := mock.AddRandomTree(senderStore, 5, 5, 0.0)
+	root := mock.AddRandomTree(senderStore, 10, 5, 0.0)
 	receiverStore := mock.NewStore()
 	MockBatchTransfer(senderStore, receiverStore, root, 5000, 0, 0)
 	if !receiverStore.HasAll(root) {
@@ -299,7 +299,7 @@ func TestMockTransferToEmptyStoreSingleBatchNoDelay(t *testing.T) {
 
 func TestMockTransferToEmptyStoreSingleBatch(t *testing.T) {
 	senderStore := mock.NewStore()
-	root := mock.AddRandomTree(senderStore, 5, 5, 0.0)
+	root := mock.AddRandomTree(senderStore, 10, 5, 0.0)
 	receiverStore := mock.NewStore()
 	MockBatchTransfer(senderStore, receiverStore, root, 5000, GBIT_SECOND, TYPICAL_LATENCY)
 	if !receiverStore.HasAll(root) {
@@ -309,9 +309,9 @@ func TestMockTransferToEmptyStoreSingleBatch(t *testing.T) {
 
 func TestMockTransferToEmptyStoreMultiBatchNoDelay(t *testing.T) {
 	senderStore := mock.NewStore()
-	root := mock.AddRandomTree(senderStore, 5, 5, 0.0)
+	root := mock.AddRandomTree(senderStore, 10, 5, 0.0)
 	receiverStore := mock.NewStore()
-	MockBatchTransfer(senderStore, receiverStore, root, 10, 0, 0)
+	MockBatchTransfer(senderStore, receiverStore, root, 50, 0, 0)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
 	}
@@ -319,7 +319,7 @@ func TestMockTransferToEmptyStoreMultiBatchNoDelay(t *testing.T) {
 
 func TestMockTransferToEmptyStoreMultiBatch(t *testing.T) {
 	senderStore := mock.NewStore()
-	root := mock.AddRandomTree(senderStore, 5, 5, 0.0)
+	root := mock.AddRandomTree(senderStore, 10, 5, 0.0)
 	receiverStore := mock.NewStore()
 	MockBatchTransfer(senderStore, receiverStore, root, 10, GBIT_SECOND, TYPICAL_LATENCY)
 	if !receiverStore.HasAll(root) {
@@ -329,7 +329,7 @@ func TestMockTransferToEmptyStoreMultiBatch(t *testing.T) {
 
 func TestMockTransferSingleMissingBlockBatchNoDelay(t *testing.T) {
 	senderStore := mock.NewStore()
-	root := mock.AddRandomTree(senderStore, 5, 5, 0.0)
+	root := mock.AddRandomTree(senderStore, 10, 5, 0.0)
 	receiverStore := mock.NewStore()
 	receiverStore.AddAll(senderStore)
 	block, err := receiverStore.RandomBlock()
@@ -345,7 +345,7 @@ func TestMockTransferSingleMissingBlockBatchNoDelay(t *testing.T) {
 
 func TestMockTransferSingleMissingBlockBatch(t *testing.T) {
 	senderStore := mock.NewStore()
-	root := mock.AddRandomTree(senderStore, 5, 5, 0.0)
+	root := mock.AddRandomTree(senderStore, 10, 5, 0.0)
 	receiverStore := mock.NewStore()
 	receiverStore.AddAll(senderStore)
 	block, err := receiverStore.RandomBlock()
