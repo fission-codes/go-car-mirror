@@ -13,6 +13,7 @@ import (
 	core "github.com/fission-codes/go-car-mirror/carmirror"
 	cmerrors "github.com/fission-codes/go-car-mirror/errors"
 	"github.com/fission-codes/go-car-mirror/util"
+	"github.com/zeebo/xxh3"
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
 
@@ -338,4 +339,8 @@ func (bs *Store) RandomBlock() (core.Block[BlockId], error) {
 
 func RandBool(p float64) bool {
 	return rand.Float64() < p
+}
+
+func XX3HashBlockId(id BlockId, seed uint64) uint64 {
+	return xxh3.HashSeed(id[:], seed)
 }
