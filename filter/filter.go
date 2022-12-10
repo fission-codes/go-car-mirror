@@ -50,7 +50,7 @@ type FilterWireFormat[K comparable] struct {
 	PF *PerfectFilter[K]  `json:"pf,omitempty"`
 }
 
-func (wf *FilterWireFormat[K]) any() Filter[K] {
+func (wf *FilterWireFormat[K]) Any() Filter[K] {
 	if wf.BL != nil {
 		return wf.BL
 	}
@@ -199,8 +199,8 @@ func (cf *CompoundFilter[K]) UnmarshalJSON(bytes []byte) error {
 	var wireFormat CompoundFilterWireFormat[K] = CompoundFilterWireFormat[K]{}
 	err := json.Unmarshal(bytes, &wireFormat)
 	if err == nil {
-		cf.SideA = wireFormat.SideA.any()
-		cf.SideB = wireFormat.SideB.any()
+		cf.SideA = wireFormat.SideA.Any()
+		cf.SideB = wireFormat.SideB.Any()
 	}
 	return err
 }
@@ -209,8 +209,8 @@ func (cf *CompoundFilter[K]) UnmarshalCBOR(bytes []byte) error {
 	var wireFormat CompoundFilterWireFormat[K] = CompoundFilterWireFormat[K]{}
 	err := cbor.Unmarshal(bytes, &wireFormat)
 	if err == nil {
-		cf.SideA = wireFormat.SideA.any()
-		cf.SideB = wireFormat.SideB.any()
+		cf.SideA = wireFormat.SideA.Any()
+		cf.SideB = wireFormat.SideB.Any()
 	}
 	return err
 }
@@ -555,7 +555,7 @@ func (sf *SynchronizedFilter[K]) UnmarshalJSON(bytes []byte) error {
 	if err == nil {
 		sf.lock.Lock()
 		defer sf.lock.Unlock()
-		sf.filter = wireFormat.any()
+		sf.filter = wireFormat.Any()
 	}
 	return err
 }
@@ -566,7 +566,7 @@ func (sf *SynchronizedFilter[K]) UnmarshalCBOR(bytes []byte) error {
 	if err == nil {
 		sf.lock.Lock()
 		defer sf.lock.Unlock()
-		sf.filter = wireFormat.any()
+		sf.filter = wireFormat.Any()
 	}
 	return err
 }
