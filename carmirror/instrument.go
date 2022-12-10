@@ -108,7 +108,7 @@ func NewDefaultStatsAndReporting() *DefaultStatsAndReporting {
 	return &DefaultStatsAndReporting{
 		mutex:  sync.RWMutex{},
 		values: make(map[string]uint64),
-		logger: zap.S(),
+		logger: &log.SugaredLogger,
 	}
 }
 
