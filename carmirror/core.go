@@ -270,7 +270,7 @@ type ReceiverSession[
 	connection   ReceiverConnection[F, I]
 	orchestrator Orchestrator[F]
 	store        BlockStore[I]
-	pending      chan Block[I]
+	pending      *util.SynchronizedDeque[Block[I]]
 	log          *zap.SugaredLogger
 	// pending      map[I]bool
 	// pendingMutex sync.RWMutex
@@ -287,7 +287,7 @@ func NewReceiverSession[I BlockId, F Flags](
 		connection,
 		orchestrator,
 		store,
-		make(chan Block[I], 1024),
+		util.NewSynchronizedDeque[Block[I]](util.NewBlocksDeque[Block[I]](2048)),
 		zap.S(),
 	}
 }
@@ -330,7 +330,7 @@ func (rs *ReceiverSession[I, F]) HandleBlock(rawBlock RawBlock[I]) {
 		rs.log.Debugf("Failed to receive block. err = %v", err)
 	}
 
-	rs.pending <- block
+	rs.pending.PushBack(block)
 }
 
 func (rs *ReceiverSession[I, F]) Run() error {
@@ -347,8 +347,8 @@ func (rs *ReceiverSession[I, F]) Run() error {
 		rs.orchestrator.Notify(BEGIN_CHECK)
 
 		// TODO: Any concerns with hangs here if nothing in pending?  Need goroutines?
-		if len(rs.pending) > 0 {
-			block := <-rs.pending
+		if rs.pending.Len() > 0 {
+			block := rs.pending.PollFront()
 
 			for _, child := range block.Children() {
 				if err := rs.AccumulateStatus(child); err != nil {
