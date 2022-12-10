@@ -60,6 +60,25 @@ func TestBlockWireFormatWriteRead(t *testing.T) {
 	}
 }
 
+func compareBlocks(a []carmirror.RawBlock[mock.BlockId], b []carmirror.RawBlock[mock.BlockId], t *testing.T) {
+	if len(a) != len(b) {
+		t.Errorf("Lists of blocks are not same length")
+	}
+
+	for i, block := range a {
+		block2 := b[i]
+		if block.Id() != block2.Id() {
+			t.Errorf("Ids are not equal for block %v, %v != %v", i, block.Id(), block2.Id())
+		}
+		data := block.Bytes()
+		data2 := block2.Bytes()
+		if !slices.Equal(data, data2) {
+			t.Errorf("Byte arrays are not equal for block %v, lengths(%v,%v)", i, len(data), len(data2))
+
+		}
+	}
+}
+
 func TestArchiveWriteRead(t *testing.T) {
 	buf := bytes.Buffer{}
 	blocks := make([]carmirror.RawBlock[mock.BlockId], 2)
@@ -83,16 +102,27 @@ func TestArchiveWriteRead(t *testing.T) {
 	if !reflect.DeepEqual(archive.Header, archive2.Header) {
 		t.Errorf("Archive Headerrs are no longer equal after transport")
 	}
-	for i, block := range archive.Blocks {
-		block2 := archive2.Blocks[i]
-		if block.Id() != block2.Id() {
-			t.Errorf("Ids are not equal for block %v, %v != %v", i, block.Id(), block2.Id())
-		}
-		data := block.Bytes()
-		data2 := block2.Bytes()
-		if !slices.Equal(data, data2) {
-			t.Errorf("Byte arrays are not equal for block %v, lengths(%v,%v)", i, len(data), len(data2))
+	compareBlocks(archive.Blocks, archive2.Blocks, t)
+}
 
-		}
+func TestBlocksMessageReadWrite(t *testing.T) {
+	buf := bytes.Buffer{}
+	blocks := make([]carmirror.RawBlock[mock.BlockId], 1)
+	blocks[0] = mock.RandMockBlock()
+	message := NewBlocksMessage(uint(23), blocks)
+
+	if err := message.Write(&buf); err != nil {
+		t.Errorf("Error writing archive, %v", err)
 	}
+	message2 := BlocksMessage[mock.BlockId, *mock.BlockId, uint]{}
+	if err := message2.Read(&buf); err != io.EOF {
+		t.Errorf("Error reading archive, %v", err)
+	}
+	if message.Status != message2.Status {
+		t.Errorf("Status is not same, %v != %v", message.Status, message2.Status)
+	}
+	if !reflect.DeepEqual(message.Car.Header, message.Car.Header) {
+		t.Errorf("Archive Headers are no longer equal after transport")
+	}
+	compareBlocks(message.Car.Blocks, message2.Car.Blocks, t)
 }

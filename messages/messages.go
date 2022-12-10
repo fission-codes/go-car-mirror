@@ -8,6 +8,7 @@ import (
 
 	"github.com/fission-codes/go-car-mirror/carmirror"
 	"github.com/fission-codes/go-car-mirror/filter"
+	"github.com/fission-codes/go-car-mirror/util"
 	"github.com/fxamacker/cbor/v2"
 )
 
@@ -173,10 +174,10 @@ func (car *Archive[T, R]) Write(writer io.Writer) error {
 func (car *Archive[T, R]) Read(reader ByteAndBlockReader) error {
 	var err error
 	err = car.Header.Read(reader)
-	car.Blocks = car.Blocks[:0]
+	car.Blocks = make([]carmirror.RawBlock[T], 0)
 	for err == nil {
 		block := BlockWireFormat[T, R]{}
-		if err = block.Read(reader); err == nil || err == io.EOF {
+		if err = block.Read(reader); err == nil {
 			car.Blocks = append(car.Blocks, &block)
 		}
 	}
@@ -198,11 +199,43 @@ type BlocksMessage[T carmirror.BlockId, R carmirror.BlockIdRef[T], F carmirror.F
 	Car    Archive[T, R]
 }
 
+func NewBlocksMessage[
+	T carmirror.BlockId,
+	R carmirror.BlockIdRef[T],
+	F carmirror.Flags,
+](status F, blocks []carmirror.RawBlock[T]) *BlocksMessage[T, R, F] {
+	return &BlocksMessage[T, R, F]{
+		status,
+		Archive[T, R]{
+			ArchiveHeader[T]{
+				1,
+				util.Map(blocks, func(blk carmirror.RawBlock[T]) T { return blk.Id() }),
+			},
+			blocks,
+		},
+	}
+}
+
 func (msg *BlocksMessage[T, B, F]) Write(writer io.Writer) error {
+	if data, err := cbor.Marshal(msg.Status); err != nil {
+		return err
+	} else {
+		if err = writeBufferWithPrefix(writer, data); err != nil {
+			return err
+		}
+	}
+
 	return msg.Car.Write(writer)
 }
 
 func (msg *BlocksMessage[T, B, F]) Read(reader ByteAndBlockReader) error {
+	if data, err := readBufferWithPrefix(reader); err != nil {
+		return err
+	} else {
+		if err = cbor.Unmarshal(data, &msg.Status); err != nil {
+			return err
+		}
+	}
 	return msg.Car.Read(reader)
 }
 

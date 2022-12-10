@@ -104,3 +104,11 @@ func Max[T constraints.Ordered](a, b T) T {
 	}
 	return b
 }
+
+func Map[T any, U any](ts []T, mapper func(T) U) []U {
+	var result = make([]U, len(ts))
+	for i, v := range ts {
+		result[i] = mapper(v)
+	}
+	return result
+}
