@@ -43,8 +43,8 @@ func readBufferWithPrefix(reader ByteAndBlockReader) ([]byte, error) {
 }
 
 type ArchiveHeaderWireFormat[T carmirror.BlockId] struct {
-	Version int
-	Roots   []T
+	Version int `json:"version"`
+	Roots   []T `json:"roots"`
 }
 
 type ArchiveHeader[T carmirror.BlockId] ArchiveHeaderWireFormat[T] // Avoid recursion due to cbor marshalling falling back to using MarshalBinary
@@ -249,29 +249,52 @@ func (msg *BlocksMessage[T, B, F]) UnmarshalBinary(data []byte) error {
 	return msg.Read(bytes.NewBuffer(data))
 }
 
-// TODO: is ~uint32 the right choice here?
-type StatusMessage[I carmirror.BlockId, R carmirror.BlockIdRef[I], F filter.Filter[I], S ~uint32] struct {
-	Status S
-	Have   filter.Filter[I]
-	Want   []I
+type StatusMessageWireFormat[I carmirror.BlockId, R carmirror.BlockIdRef[I], S carmirror.Flags] struct {
+	Status S                           `json:"status"`
+	Have   *filter.FilterWireFormat[I] `json:"have"`
+	Want   []I                         `json:"want"`
 }
 
-func (msg *StatusMessage[I, R, F, S]) Write(writer io.Writer) error {
-	// TODO
-	return nil
+type StatusMessage[I carmirror.BlockId, R carmirror.BlockIdRef[I], S carmirror.Flags] StatusMessageWireFormat[I, R, S]
+
+func NewStatusMessage[I carmirror.BlockId, R carmirror.BlockIdRef[I], S carmirror.Flags](status S, have filter.Filter[I], want []I) *StatusMessage[I, R, S] {
+	return &StatusMessage[I, R, S]{
+		status,
+		filter.NewFilterWireFormat(have),
+		want,
+	}
 }
 
-func (msg *StatusMessage[I, R, F, S]) Read(reader ByteAndBlockReader) error {
-	// TODO
-	return nil
+func (msg *StatusMessage[I, R, S]) Write(writer io.Writer) error {
+	if data, err := cbor.Marshal((*StatusMessageWireFormat[I, R, S])(msg)); err != nil {
+		return err
+	} else {
+		return writeBufferWithPrefix(writer, data)
+	}
 }
 
-func (msg *StatusMessage[I, R, F, S]) MarshalBinary() ([]byte, error) {
+func (msg *StatusMessage[I, R, S]) Read(reader ByteAndBlockReader) error {
+	if data, err := readBufferWithPrefix(reader); err != nil {
+		return err
+	} else {
+		return cbor.Unmarshal(data, (*StatusMessageWireFormat[I, R, S])(msg))
+	}
+}
+
+func (msg *StatusMessage[I, R, S]) MarshalBinary() ([]byte, error) {
 	var buf bytes.Buffer
 	err := msg.Write(&buf)
 	return buf.Bytes(), err
 }
 
-func (msg *StatusMessage[I, R, F, S]) UnmarshalBinary(data []byte) error {
+func (msg *StatusMessage[I, R, S]) UnmarshalBinary(data []byte) error {
 	return msg.Read(bytes.NewBuffer(data))
+}
+
+func (msg *StatusMessage[I, R, S]) MarshalCBOR() ([]byte, error) {
+	return cbor.Marshal((*StatusMessageWireFormat[I, R, S])(msg))
+}
+
+func (msg *StatusMessage[I, R, S]) UnmarshalCBOR(data []byte) error {
+	return cbor.Unmarshal(data, (*StatusMessageWireFormat[I, R, S])(msg))
 }

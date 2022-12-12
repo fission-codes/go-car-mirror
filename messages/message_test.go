@@ -7,10 +7,17 @@ import (
 	"testing"
 
 	"github.com/fission-codes/go-car-mirror/carmirror"
+	"github.com/fission-codes/go-car-mirror/filter"
 	mock "github.com/fission-codes/go-car-mirror/fixtures"
 	"github.com/fission-codes/go-car-mirror/util"
 	"golang.org/x/exp/slices"
 )
+
+const MOCK_ID_HASH = 2
+
+func init() {
+	filter.RegisterHash(MOCK_ID_HASH, mock.XX3HashBlockId)
+}
 
 func assertBytesEqual(a []byte, b []byte, t *testing.T) {
 	if len(a) != len(b) {
@@ -125,4 +132,34 @@ func TestBlocksMessageReadWrite(t *testing.T) {
 		t.Errorf("Archive Headers are no longer equal after transport")
 	}
 	compareBlocks(message.Car.Blocks, message2.Car.Blocks, t)
+}
+
+func TestStatusMessageReadWrite(t *testing.T) {
+	buf := bytes.Buffer{}
+	want := make([]mock.BlockId, 1)
+	want[0] = mock.RandId()
+
+	have, err := filter.TryNewBloomFilter[mock.BlockId](1024, MOCK_ID_HASH)
+	if err != nil {
+		t.Errorf("Error creating bloom filter, %v", err)
+	}
+
+	message := NewStatusMessage[mock.BlockId](uint(23), have, want)
+
+	if err := message.Write(&buf); err != nil {
+		t.Errorf("Error writing status, %v", err)
+	}
+	message2 := StatusMessage[mock.BlockId, *mock.BlockId, uint]{}
+	if err := message2.Read(&buf); err != nil {
+		t.Errorf("Error reading filter, %v", err)
+	}
+	if message.Status != message2.Status {
+		t.Errorf("Status is not same, %v != %v", message.Status, message2.Status)
+	}
+	if !message.Have.Any().Equal(message2.Have.Any()) {
+		t.Errorf("have lists no longer equal after transport")
+	}
+	if !slices.Equal(message.Want, message2.Want) {
+		t.Errorf("want lists no longer equal after transport")
+	}
 }

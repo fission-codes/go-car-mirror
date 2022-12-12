@@ -50,7 +50,7 @@ type FilterWireFormat[K comparable] struct {
 	PF *PerfectFilter[K]  `json:"pf,omitempty"`
 }
 
-func (wf *FilterWireFormat[K]) any() Filter[K] {
+func (wf *FilterWireFormat[K]) Any() Filter[K] {
 	if wf.BL != nil {
 		return wf.BL
 	}
@@ -78,6 +78,9 @@ func NewFilterWireFormat[K comparable](filter Filter[K]) *FilterWireFormat[K] {
 	}
 	if pf, ok := filter.(*PerfectFilter[K]); ok {
 		return &FilterWireFormat[K]{PF: pf}
+	}
+	if pf, ok := filter.(*SynchronizedFilter[K]); ok {
+		return NewFilterWireFormat(pf.UnsynchronizedCopy())
 	}
 	return nil
 }
@@ -119,7 +122,7 @@ func (cf *CompoundFilter[K]) GetSparser() Side {
 }
 
 func (cf *CompoundFilter[K]) TryAddAll(other Filter[K]) error {
-	other = desynchronize(other)
+	other = Desynchronize(other)
 	// Try to add to the sparser of the two sides. If this fails,
 	// try adding to the other side. If this fails, try adding on
 	// on the less sparse side
@@ -141,7 +144,7 @@ func (cf *CompoundFilter[K]) TryAddAll(other Filter[K]) error {
 }
 
 func (cf *CompoundFilter[K]) AddAll(other Filter[K]) Filter[K] {
-	other = desynchronize(other)
+	other = Desynchronize(other)
 	ocf, ok := other.(*CompoundFilter[K])
 	if ok {
 		return cf.AddAll(ocf.SideA).AddAll(ocf.SideB)
@@ -199,8 +202,8 @@ func (cf *CompoundFilter[K]) UnmarshalJSON(bytes []byte) error {
 	var wireFormat CompoundFilterWireFormat[K] = CompoundFilterWireFormat[K]{}
 	err := json.Unmarshal(bytes, &wireFormat)
 	if err == nil {
-		cf.SideA = wireFormat.SideA.any()
-		cf.SideB = wireFormat.SideB.any()
+		cf.SideA = wireFormat.SideA.Any()
+		cf.SideB = wireFormat.SideB.Any()
 	}
 	return err
 }
@@ -209,8 +212,8 @@ func (cf *CompoundFilter[K]) UnmarshalCBOR(bytes []byte) error {
 	var wireFormat CompoundFilterWireFormat[K] = CompoundFilterWireFormat[K]{}
 	err := cbor.Unmarshal(bytes, &wireFormat)
 	if err == nil {
-		cf.SideA = wireFormat.SideA.any()
-		cf.SideB = wireFormat.SideB.any()
+		cf.SideA = wireFormat.SideA.Any()
+		cf.SideB = wireFormat.SideB.Any()
 	}
 	return err
 }
@@ -336,7 +339,7 @@ func (f *BloomFilter[K]) DoesNotContain(id K) bool {
 }
 
 func (f *BloomFilter[K]) TryAddAll(other Filter[K]) error {
-	other = desynchronize(other)
+	other = Desynchronize(other)
 	obf, ok := other.(*BloomFilter[K])
 	if ok {
 		log.Debugw("BloomFilter", "method", "TryAddAll", "other.bitCount", obf.filter.BitCount(), "hashCount", obf.filter.HashCount())
@@ -369,7 +372,7 @@ func (f *BloomFilter[K]) TryAddAll(other Filter[K]) error {
 }
 
 func (f *BloomFilter[K]) AddAll(other Filter[K]) Filter[K] {
-	other = desynchronize(other)
+	other = Desynchronize(other)
 	err := f.TryAddAll(other)
 	if err == nil {
 		return f
@@ -555,7 +558,7 @@ func (sf *SynchronizedFilter[K]) UnmarshalJSON(bytes []byte) error {
 	if err == nil {
 		sf.lock.Lock()
 		defer sf.lock.Unlock()
-		sf.filter = wireFormat.any()
+		sf.filter = wireFormat.Any()
 	}
 	return err
 }
@@ -566,7 +569,7 @@ func (sf *SynchronizedFilter[K]) UnmarshalCBOR(bytes []byte) error {
 	if err == nil {
 		sf.lock.Lock()
 		defer sf.lock.Unlock()
-		sf.filter = wireFormat.any()
+		sf.filter = wireFormat.Any()
 	}
 	return err
 }
@@ -591,7 +594,7 @@ func (sf *SynchronizedFilter[K]) Dump(log *zap.SugaredLogger, prefix string) {
 	log.Debugf("%s}", prefix)
 }
 
-func desynchronize[K comparable](filter Filter[K]) Filter[K] {
+func Desynchronize[K comparable](filter Filter[K]) Filter[K] {
 	if sf, ok := filter.(*SynchronizedFilter[K]); ok {
 		return sf.UnsynchronizedCopy()
 	} else {
@@ -613,7 +616,7 @@ func (pf *PerfectFilter[K]) DoesNotContain(id K) bool {
 }
 
 func (pf *PerfectFilter[K]) TryAddAll(other Filter[K]) error {
-	other = desynchronize(other)
+	other = Desynchronize(other)
 	opf, ok := other.(*PerfectFilter[K])
 	if ok {
 		for k := range opf.filter {
@@ -626,7 +629,7 @@ func (pf *PerfectFilter[K]) TryAddAll(other Filter[K]) error {
 }
 
 func (pf *PerfectFilter[K]) AddAll(other Filter[K]) Filter[K] {
-	other = desynchronize(other)
+	other = Desynchronize(other)
 	err := pf.TryAddAll(other)
 	if err == nil {
 		return pf

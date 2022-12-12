@@ -13,6 +13,7 @@ import (
 	core "github.com/fission-codes/go-car-mirror/carmirror"
 	cmerrors "github.com/fission-codes/go-car-mirror/errors"
 	"github.com/fission-codes/go-car-mirror/util"
+	"github.com/zeebo/xxh3"
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
 
@@ -187,10 +188,9 @@ func AddRandomTree(store *Store, maxChildren int, maxDepth int, pCrosslink float
 			block.AddChild(existingBlock.Id())
 		} else {
 			// gen rand num children
-			children := rand.Intn(maxChildren/3) + rand.Intn(maxChildren/3) + rand.Intn(maxChildren/3) // makes number of children cluster around average
+			children := 2 + rand.Intn(maxChildren/2) + rand.Intn(maxChildren/2) // makes number of children cluster around average
 			for child := 0; child < children; child++ {
-				childMinDepth := maxDepth / 2
-				childMaxDepth := rand.Intn(maxDepth-childMinDepth) + childMinDepth
+				childMaxDepth := util.Max(0, maxDepth-rand.Intn(2)-1)
 				block.AddChild(AddRandomTree(store, maxChildren, childMaxDepth, pCrosslink))
 			}
 		}
@@ -338,4 +338,8 @@ func (bs *Store) RandomBlock() (core.Block[BlockId], error) {
 
 func RandBool(p float64) bool {
 	return rand.Float64() < p
+}
+
+func XX3HashBlockId(id BlockId, seed uint64) uint64 {
+	return xxh3.HashSeed(id[:], seed)
 }
