@@ -18,7 +18,10 @@ import (
 	"golang.org/x/exp/slices"
 
 	"github.com/fxamacker/cbor/v2"
+	golog "github.com/ipfs/go-log/v2"
 )
+
+var log = golog.Logger("fixtures")
 
 const BLOCK_ID_SIZE = 32
 

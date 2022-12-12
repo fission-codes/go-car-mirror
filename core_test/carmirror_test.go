@@ -12,22 +12,18 @@ import (
 	"github.com/fission-codes/go-car-mirror/filter"
 	mock "github.com/fission-codes/go-car-mirror/fixtures"
 	"github.com/fission-codes/go-car-mirror/messages"
+	golog "github.com/ipfs/go-log/v2"
 	"github.com/zeebo/xxh3"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
-var log *zap.SugaredLogger
+var log = golog.Logger("core-test")
 
 const TYPICAL_LATENCY = 20
 const GBIT_SECOND = (1 << 30) / 8 / 1000 // Gigabit per second -> to bytes per second -> to bytes per millisecond
 
 func init() {
 	rand.Seed(time.Now().UnixNano())
-	config := zap.NewDevelopmentConfig()
-	config.Level.SetLevel(zapcore.InfoLevel)
-	zap.ReplaceGlobals(zap.Must(config.Build()))
-	log = zap.S()
+
 	InitDefault()
 }
 
@@ -304,7 +300,7 @@ func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, roo
 
 	snapshotAfter := GLOBAL_REPORTING.Snapshot()
 	diff := snapshotBefore.Diff(snapshotAfter)
-	diff.Write(log)
+	diff.Write(&log.SugaredLogger)
 	return nil
 }
 
@@ -389,7 +385,7 @@ func TestMockTransferSingleMissingTreeBlockBatchNoDelay(t *testing.T) {
 	MockBatchTransfer(senderStore, receiverStore, root, 50, 0, 0)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
-		receiverStore.Dump(root, log, "")
+		receiverStore.Dump(root, &log.SugaredLogger, "")
 	}
 }
 
@@ -402,6 +398,6 @@ func TestMockTransferSingleMissingTreeBlockBatch(t *testing.T) {
 	MockBatchTransfer(senderStore, receiverStore, root, 50, GBIT_SECOND, TYPICAL_LATENCY)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
-		receiverStore.Dump(root, log, "")
+		receiverStore.Dump(root, &log.SugaredLogger, "")
 	}
 }

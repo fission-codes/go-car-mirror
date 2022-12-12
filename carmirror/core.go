@@ -9,12 +9,16 @@ import (
 	"github.com/fission-codes/go-car-mirror/errors"
 	"github.com/fxamacker/cbor/v2"
 	"go.uber.org/zap"
+
 	"golang.org/x/exp/constraints"
 	"golang.org/x/exp/slices"
 
 	"github.com/fission-codes/go-car-mirror/filter"
 	"github.com/fission-codes/go-car-mirror/util"
+	golog "github.com/ipfs/go-log/v2"
 )
+
+var log = golog.Logger("carmirror")
 
 // BlockId represents a unique identifier for a Block.
 // This interface only represents the identifier, not the Block. The interface is chosen for compatibility
@@ -288,7 +292,7 @@ func NewReceiverSession[I BlockId, F Flags](
 		orchestrator,
 		store,
 		util.NewSynchronizedDeque[Block[I]](util.NewBlocksDeque[Block[I]](2048)),
-		zap.S(),
+		&log.SugaredLogger,
 	}
 }
 
@@ -408,7 +412,7 @@ func NewSenderSession[I BlockId, F Flags](store BlockStore[I], connection Sender
 		filter,
 		sync.Map{},
 		util.NewSynchronizedDeque[I](util.NewBlocksDeque[I](1024)),
-		zap.S(),
+		&log.SugaredLogger,
 	}
 }
 

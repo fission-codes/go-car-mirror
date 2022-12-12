@@ -10,15 +10,12 @@ import (
 
 	"github.com/fission-codes/go-bloom"
 	cbor "github.com/fxamacker/cbor/v2"
+	golog "github.com/ipfs/go-log/v2"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 )
 
-var log *zap.SugaredLogger
-
-func init() {
-	log = zap.S()
-}
+var log = golog.Logger("filter")
 
 // Filter is anything similar to a bloom filter that can efficiently (and without perfect accuracy) keep track of a list of `BlockId`s.
 type Filter[K comparable] interface {
