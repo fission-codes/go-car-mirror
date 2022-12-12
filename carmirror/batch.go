@@ -140,7 +140,7 @@ type BatchSendOrchestrator struct {
 func NewBatchSendOrchestrator() *BatchSendOrchestrator {
 	return &BatchSendOrchestrator{
 		flags: *util.NewSharedFlagSet(BatchStatus(0)),
-		log:   &log.SugaredLogger,
+		log:   log.With("component", "BatchSendOrchestrator"),
 	}
 }
 
@@ -195,7 +195,7 @@ type BatchReceiveOrchestrator struct {
 func NewBatchReceiveOrchestrator() *BatchReceiveOrchestrator {
 	return &BatchReceiveOrchestrator{
 		flags: *util.NewSharedFlagSet(BatchStatus(0)),
-		log:   &log.SugaredLogger,
+		log:   log.With("component", "BatchReceiveOrchestrator"),
 	}
 }
 
