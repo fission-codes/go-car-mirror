@@ -7,6 +7,7 @@ import (
 	"github.com/zeebo/xxh3"
 )
 
+// Registry is a global registry of hash functions.
 type Registry struct {
 	functions map[uint64]any
 	lock      sync.RWMutex
@@ -17,6 +18,7 @@ var registry Registry = Registry{
 	lock:      sync.RWMutex{},
 }
 
+// RegistryLookup looks up a hash function by its ID.
 func RegistryLookup[T any](id uint64) (bloom.HashFunction[T], bool) {
 	registry.lock.RLock()
 	defer registry.lock.RUnlock()
@@ -28,6 +30,7 @@ func RegistryLookup[T any](id uint64) (bloom.HashFunction[T], bool) {
 	return nil, false
 }
 
+// RegisterHash registers a hash function with the global registry.
 func RegisterHash[T any](id uint64, hash bloom.HashFunction[T]) {
 	registry.lock.Lock()
 	defer registry.lock.Unlock()
@@ -36,6 +39,7 @@ func RegisterHash[T any](id uint64, hash bloom.HashFunction[T]) {
 
 const XXH3_HASH_32_BYTES = 1
 
+// XX3Hash32Bytes is a 32-bit hash function for byte arrays.
 func XX3Hash32Bytes(id [32]byte, seed uint64) uint64 {
 	return xxh3.HashSeed(id[:], seed)
 }
