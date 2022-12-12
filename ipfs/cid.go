@@ -11,7 +11,16 @@ import (
 var ErrExpectedByteString = errors.New("expected byte string")
 var ErrWrongCborTagNumber = errors.New("wrong CBOR tag for CID")
 
+// The purpose of this is really just to add CBOR serialization/deserialization to the base CID type
 type Cid struct{ cid.Cid }
+
+func (ipfsCid Cid) Unwrap() cid.Cid {
+	return ipfsCid.Cid
+}
+
+func WrapCid(cid cid.Cid) Cid {
+	return Cid{cid}
+}
 
 func (ipfsCid Cid) MarshalCBOR() ([]byte, error) {
 	cid_bytes := make([]byte, 0, ipfsCid.ByteLen()+1)
