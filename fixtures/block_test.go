@@ -56,15 +56,15 @@ func TestMockIdToBinary(t *testing.T) {
 
 func TestMockBlockStableBytes(t *testing.T) {
 	block := NewBlock(RandId(), 1024)
-	if !slices.Equal(block.Bytes(), block.Bytes()) {
+	if !slices.Equal(block.RawData(), block.RawData()) {
 		t.Errorf("Unstable byte array, size 1024")
 	}
 	block = NewBlock(RandId(), 10240)
-	if !slices.Equal(block.Bytes(), block.Bytes()) {
+	if !slices.Equal(block.RawData(), block.RawData()) {
 		t.Errorf("Unstable byte array, size 10240")
 	}
 	block = NewBlock(RandId(), 102400)
-	if !slices.Equal(block.Bytes(), block.Bytes()) {
+	if !slices.Equal(block.RawData(), block.RawData()) {
 		t.Errorf("Unstable byte array, size 102400")
 	}
 }
@@ -75,7 +75,7 @@ func TestMockBlockRoundTripLinks(t *testing.T) {
 	block.AddChild(RandId())
 	block.AddChild(RandId())
 	copy := NewBlock(block.Id(), block.Size())
-	copy.setBytes(block.Bytes())
+	copy.setBytes(block.RawData())
 	if len(copy.Children()) != 3 {
 		t.Errorf("Copy does not have the correct number of links")
 	}
@@ -93,7 +93,7 @@ func TestMockBlockRoundTripLinksOnlyBlock(t *testing.T) {
 		t.Errorf("Block size should be > 0")
 	}
 	copy := NewBlock(block.Id(), 0)
-	copy.setBytes(block.Bytes())
+	copy.setBytes(block.RawData())
 	if copy.Size() != block.Size() {
 		t.Errorf("Copy size should be the same")
 	}

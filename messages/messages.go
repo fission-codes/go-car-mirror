@@ -134,7 +134,7 @@ func (b *BlockWireFormat[T, R]) Id() T {
 	return *b.IdRef
 }
 
-func (b *BlockWireFormat[T, R]) Bytes() []byte {
+func (b *BlockWireFormat[T, R]) RawData() []byte {
 	return b.Data
 }
 
@@ -148,7 +148,7 @@ func CastBlockWireFormat[T carmirror.BlockId, R carmirror.BlockIdRef[T]](rawBloc
 		return block
 	} else {
 		id := rawBlock.Id()
-		return &BlockWireFormat[T, R]{&id, rawBlock.Bytes()}
+		return &BlockWireFormat[T, R]{&id, rawBlock.RawData()}
 	}
 }
 

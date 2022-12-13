@@ -56,14 +56,14 @@ func TestBlockWireFormatWriteRead(t *testing.T) {
 	if err := rawBlock.Write(&buf); err != nil {
 		t.Errorf("Problem writing block %v", err)
 	}
-	assertBytesEqual(block.Bytes(), rawBlock.Bytes(), t)
+	assertBytesEqual(block.RawData(), rawBlock.RawData(), t)
 	copy := BlockWireFormat[mock.BlockId, *mock.BlockId]{}
 	if err := copy.Read(&buf); err != nil {
 		t.Errorf("error reading block %v", err)
 	}
 	if !carmirror.BlockEqual[mock.BlockId](rawBlock, &copy) {
 		t.Errorf("Blocks (%v, %v) not equal", rawBlock.Id(), copy.Id())
-		assertBytesEqual(rawBlock.Bytes(), copy.Bytes(), t)
+		assertBytesEqual(rawBlock.RawData(), copy.RawData(), t)
 	}
 }
 
@@ -77,8 +77,8 @@ func compareBlocks(a []carmirror.RawBlock[mock.BlockId], b []carmirror.RawBlock[
 		if block.Id() != block2.Id() {
 			t.Errorf("Ids are not equal for block %v, %v != %v", i, block.Id(), block2.Id())
 		}
-		data := block.Bytes()
-		data2 := block2.Bytes()
+		data := block.RawData()
+		data2 := block2.RawData()
 		if !slices.Equal(data, data2) {
 			t.Errorf("Byte arrays are not equal for block %v, lengths(%v,%v)", i, len(data), len(data2))
 
