@@ -39,11 +39,11 @@ func RegisterHash[T any](id uint64, hash bloom.HashFunction[T]) {
 
 const XXH3_HASH_32_BYTES = 1
 
-// XX3Hash32Bytes is a 32-bit hash function for byte arrays.
-func XX3Hash32Bytes(id [32]byte, seed uint64) uint64 {
+// XXH3Hash32Bytes is a 32-bit hash function for byte arrays.
+func XXH3Hash32Bytes(id [32]byte, seed uint64) uint64 {
 	return xxh3.HashSeed(id[:], seed)
 }
 
 func init() {
-	RegisterHash(XXH3_HASH_32_BYTES, XX3Hash32Bytes)
+	RegisterHash(XXH3_HASH_32_BYTES, XXH3Hash32Bytes)
 }
