@@ -8,6 +8,7 @@ import (
 
 	mc "github.com/multiformats/go-multicodec"
 
+	core "github.com/fission-codes/go-car-mirror/carmirror"
 	mh "github.com/multiformats/go-multihash"
 )
 
@@ -22,7 +23,7 @@ func RandId() Cid {
 	}
 }
 
-func TestMockIdToJson(t *testing.T) {
+func TestCIdToJson(t *testing.T) {
 	id := RandId()
 	if buf, err := id.MarshalJSON(); err == nil {
 		var id2 Cid
@@ -38,12 +39,10 @@ func TestMockIdToJson(t *testing.T) {
 	}
 }
 
-func TestMockIdToCBOR(t *testing.T) {
+func TestCIdToCBOR(t *testing.T) {
 	id := RandId()
-	t.Logf("raw bytes: %v", id.Bytes())
 	if buf, err := id.MarshalCBOR(); err == nil {
 		var id2 Cid
-		t.Logf("buffer %v", buf)
 		if err := id2.UnmarshalCBOR(buf); err == nil {
 			if id != id2 {
 				t.Errorf("Ids no longer equal")
@@ -58,7 +57,7 @@ func TestMockIdToCBOR(t *testing.T) {
 	}
 }
 
-func TestMockIdToBinary(t *testing.T) {
+func TestCidToBinary(t *testing.T) {
 	id := RandId()
 	if buf, err := id.MarshalBinary(); err == nil {
 		var id2 Cid
@@ -71,5 +70,16 @@ func TestMockIdToBinary(t *testing.T) {
 		}
 	} else {
 		t.Errorf("Error marshalling Id, %v", err)
+	}
+}
+
+func intoString[I core.BlockId](id I) string {
+	return id.String()
+}
+
+func TestCidIsCoreId(t *testing.T) {
+	id := RandId()
+	if id.String() != intoString(id) {
+		t.Errorf("Expected equal strings")
 	}
 }
