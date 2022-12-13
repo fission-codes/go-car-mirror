@@ -1,6 +1,7 @@
 package carmirror
 
 import (
+	"context"
 	"encoding"
 	"encoding/json"
 	"io"
@@ -71,20 +72,20 @@ type Block[I BlockId] interface {
 // ReadableBlockStore represents read operations for a store of blocks.
 type ReadableBlockStore[I BlockId] interface {
 	// Get gets the block from the blockstore with the given ID.
-	Get(I) (Block[I], error)
+	Get(context.Context, I) (Block[I], error)
 
 	// Has returns true if the blockstore has a block with the given ID.
-	Has(I) (bool, error)
+	Has(context.Context, I) (bool, error)
 
 	// All returns a channel that will receive all of the block IDs in this store.
-	All() (<-chan I, error)
+	All(context.Context) (<-chan I, error)
 }
 
 type BlockStore[I BlockId] interface {
 	ReadableBlockStore[I]
 
 	// Add puts a given block to the blockstore.
-	Add(RawBlock[I]) (Block[I], error)
+	Add(context.Context, RawBlock[I]) (Block[I], error)
 }
 
 type SynchronizedBlockStore[I BlockId] struct {
@@ -96,21 +97,21 @@ func NewSynchronizedBlockStore[I BlockId](store BlockStore[I]) *SynchronizedBloc
 	return &SynchronizedBlockStore[I]{store, sync.RWMutex{}}
 }
 
-func (bs *SynchronizedBlockStore[I]) Get(id I) (Block[I], error) {
+func (bs *SynchronizedBlockStore[I]) Get(ctx context.Context, id I) (Block[I], error) {
 	bs.mutex.RLock()
 	defer bs.mutex.RUnlock()
-	return bs.store.Get(id)
+	return bs.store.Get(ctx, id)
 }
 
-func (bs *SynchronizedBlockStore[I]) Has(id I) (bool, error) {
+func (bs *SynchronizedBlockStore[I]) Has(ctx context.Context, id I) (bool, error) {
 	bs.mutex.RLock()
 	defer bs.mutex.RUnlock()
-	return bs.store.Has(id)
+	return bs.store.Has(ctx, id)
 }
 
-func (bs *SynchronizedBlockStore[I]) All() (<-chan I, error) {
+func (bs *SynchronizedBlockStore[I]) All(ctx context.Context) (<-chan I, error) {
 	bs.mutex.RLock()
-	if all, err := bs.store.All(); err == nil {
+	if all, err := bs.store.All(ctx); err == nil {
 		res := make(chan I)
 		go func() {
 			defer bs.mutex.RUnlock()
@@ -125,10 +126,10 @@ func (bs *SynchronizedBlockStore[I]) All() (<-chan I, error) {
 	}
 }
 
-func (bs *SynchronizedBlockStore[I]) Add(block RawBlock[I]) (Block[I], error) {
+func (bs *SynchronizedBlockStore[I]) Add(ctx context.Context, block RawBlock[I]) (Block[I], error) {
 	bs.mutex.Lock()
 	defer bs.mutex.Unlock()
-	return bs.store.Add(block)
+	return bs.store.Add(ctx, block)
 }
 
 type MutablePointerResolver[I BlockId] interface {
@@ -298,7 +299,7 @@ func NewReceiverSession[I BlockId, F Flags](
 
 func (rs *ReceiverSession[I, F]) AccumulateStatus(id I) error {
 	// Get block and handle errors
-	block, err := rs.store.Get(id)
+	block, err := rs.store.Get(context.Background(), id)
 
 	if err == errors.ErrBlockNotFound {
 		return rs.accumulator.Want(id)
@@ -325,7 +326,7 @@ func (rs *ReceiverSession[I, F]) HandleBlock(rawBlock RawBlock[I]) {
 	rs.orchestrator.Notify(BEGIN_RECEIVE)
 	defer rs.orchestrator.Notify(END_RECEIVE)
 
-	block, err := rs.store.Add(rawBlock)
+	block, err := rs.store.Add(context.TODO(), rawBlock)
 	if err != nil {
 		rs.log.Debugf("Failed to add block to store. err = %v", err)
 	}
@@ -433,7 +434,7 @@ func (ss *SenderSession[I, F]) Run() error {
 			if _, ok := ss.sent.Load(id); !ok {
 				ss.sent.Store(id, true)
 
-				block, err := ss.store.Get(id)
+				block, err := ss.store.Get(context.Background(), id)
 				if err != nil {
 					if err != errors.ErrBlockNotFound {
 						return err
