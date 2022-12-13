@@ -122,7 +122,7 @@ func (b *Block) Id() BlockId {
 	return b.id
 }
 
-func (b *Block) Bytes() []byte {
+func (b *Block) RawData() []byte {
 	var buf bytes.Buffer
 	if err := binary.Write(&buf, binary.BigEndian, uint16(len(b.links))); err != nil {
 		panic(err)
@@ -298,7 +298,7 @@ func (bs *Store) Add(rawBlock core.RawBlock[BlockId]) (core.Block[BlockId], erro
 	block, ok := rawBlock.(*Block)
 	if !ok {
 		block = NewBlock(rawBlock.Id(), rawBlock.Size())
-		block.setBytes(rawBlock.Bytes())
+		block.setBytes(rawBlock.RawData())
 	}
 	id := block.Id()
 	bs.blocks[id] = block

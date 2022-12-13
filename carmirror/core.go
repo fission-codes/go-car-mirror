@@ -53,13 +53,13 @@ type RawBlock[I BlockId] interface {
 	// Id returns the BlockId for the Block.
 	Id() I
 	// get the raw block bytes
-	Bytes() []byte
+	RawData() []byte
 	// The size of the block
 	Size() int64
 }
 
 func BlockEqual[I BlockId](a RawBlock[I], b RawBlock[I]) bool {
-	return a.Id() == b.Id() && slices.Equal(a.Bytes(), b.Bytes())
+	return a.Id() == b.Id() && slices.Equal(a.RawData(), b.RawData())
 }
 
 // Block is an immutable data block referenced by a unique ID. It may reference other blocks by Id
