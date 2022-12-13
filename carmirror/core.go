@@ -1,3 +1,6 @@
+// Package carmirror provides a generic Go implementation of the [CAR Mirror] protocol.
+//
+// [CAR Mirror]: https://github.com/fission-codes/spec/blob/main/car-pool/car-mirror/SPEC.md
 package carmirror
 
 import (
@@ -23,14 +26,14 @@ var log = golog.Logger("carmirror")
 
 // BlockId represents a unique identifier for a Block.
 // This interface only represents the identifier, not the Block. The interface is chosen for compatibility
-// with ipfs/go-cid - noting that the go-cid is, for the moment, comparable
+// with ipfs/go-cid - noting that go-cid is, for the moment, comparable.
+//
 // It's annoying that go-cid doesn't implement cbor.Marshaler/cbor.Unmarshaler because the binary
 // representation of a CID and the CBOR canonical representation are quite different:
+//   - [https://pkg.go.dev/github.com/ipfs/go-cid#Cast] - binary form of CID
+//   - [https://ipld.io/specs/codecs/dag-cbor/spec/#links] - CBOR representation
 //
-// * [https://pkg.go.dev/github.com/ipfs/go-cid#Cast] - binary form of CID
-// * [https://ipld.io/specs/codecs/dag-cbor/spec/#links] - CBOR representation
-//
-// Unfortunately we intend to leverage the CAR v1 spec for compatibility, which (oddly, IMHO) specifies
+// Unfortunately we intend to leverage the CAR v1 spec for compatibility, which, oddly, specifies
 // using the CBOR form of the CID in the header and the raw byte form in the body. Thus, our interface here
 // needs to be able support both.
 type BlockId interface {
@@ -41,6 +44,10 @@ type BlockId interface {
 	String() string
 }
 
+// BlockIdRef is a reference to a BlockId.
+// In Go, you are not supposed to have a mix of pointer and non-pointer receivers for the same interface.
+// go-cid has a mix of pointer and non-pointer receivers.
+// Since unmarshaling a BlockId will require a pointer receiver in order to update the BlockId, we needed a separate interface.
 type BlockIdRef[T BlockId] interface {
 	*T
 	encoding.BinaryUnmarshaler
@@ -49,7 +56,7 @@ type BlockIdRef[T BlockId] interface {
 	Read(io.ByteReader) (int, error)
 }
 
-// Represents a raw block before any association with a blockstore
+// RawBlock represents a raw block before any association with a blockstore.
 type RawBlock[I BlockId] interface {
 	// Id returns the BlockId for the Block.
 	Id() I
@@ -59,11 +66,12 @@ type RawBlock[I BlockId] interface {
 	Size() int64
 }
 
+// BlockEqual returns true if the two blocks are equal.
 func BlockEqual[I BlockId](a RawBlock[I], b RawBlock[I]) bool {
 	return a.Id() == b.Id() && slices.Equal(a.RawData(), b.RawData())
 }
 
-// Block is an immutable data block referenced by a unique ID. It may reference other blocks by Id
+// Block is an immutable data block referenced by a unique ID. It may reference other blocks by Id.
 type Block[I BlockId] interface {
 	RawBlock[I]
 	Children() []I
@@ -81,6 +89,7 @@ type ReadableBlockStore[I BlockId] interface {
 	All(context.Context) (<-chan I, error)
 }
 
+// BlockStore represents read and write operations for a store of blocks.
 type BlockStore[I BlockId] interface {
 	ReadableBlockStore[I]
 
@@ -88,27 +97,32 @@ type BlockStore[I BlockId] interface {
 	Add(context.Context, RawBlock[I]) (Block[I], error)
 }
 
+// SyncBlockStore is a BlockStore that is also thread-safe.
 type SynchronizedBlockStore[I BlockId] struct {
 	store BlockStore[I]
 	mutex sync.RWMutex
 }
 
+// NewSynchronizedBlockStore creates a new SynchronizedBlockStore.
 func NewSynchronizedBlockStore[I BlockId](store BlockStore[I]) *SynchronizedBlockStore[I] {
 	return &SynchronizedBlockStore[I]{store, sync.RWMutex{}}
 }
 
+// Get gets the block from the synchronized blockstore with the given ID.
 func (bs *SynchronizedBlockStore[I]) Get(ctx context.Context, id I) (Block[I], error) {
 	bs.mutex.RLock()
 	defer bs.mutex.RUnlock()
 	return bs.store.Get(ctx, id)
 }
 
+// Has returns true if the synchronized blockstore has a block with the given ID.
 func (bs *SynchronizedBlockStore[I]) Has(ctx context.Context, id I) (bool, error) {
 	bs.mutex.RLock()
 	defer bs.mutex.RUnlock()
 	return bs.store.Has(ctx, id)
 }
 
+// All returns a channel that will receive all of the block IDs in this synchronized blockstore.
 func (bs *SynchronizedBlockStore[I]) All(ctx context.Context) (<-chan I, error) {
 	bs.mutex.RLock()
 	if all, err := bs.store.All(ctx); err == nil {
@@ -126,18 +140,20 @@ func (bs *SynchronizedBlockStore[I]) All(ctx context.Context) (<-chan I, error) 
 	}
 }
 
+// Add adds a given block to the synchronized blockstore.
 func (bs *SynchronizedBlockStore[I]) Add(ctx context.Context, block RawBlock[I]) (Block[I], error) {
 	bs.mutex.Lock()
 	defer bs.mutex.Unlock()
 	return bs.store.Add(ctx, block)
 }
 
+// MutablePointerResolver is responsible for resolving a pointer into a BlockId.
 type MutablePointerResolver[I BlockId] interface {
 	// Resolve attempts to resolve ptr into a block ID.
 	Resolve(ptr string) (I, error)
 }
 
-// BlockSender is responsible for sending blocks - immediately and asynchronously, or via a buffer.
+// BlockSender is responsible for sending blocks, immediately and asynchronously, or via a buffer.
 // The details are up to the implementor.
 type BlockSender[I BlockId] interface {
 	SendBlock(block RawBlock[I]) error
@@ -180,8 +196,10 @@ type StatusAccumulator[I BlockId] interface {
 	Receive(I) error
 }
 
+// SessionEvent is an event that can occur during a session.
 type SessionEvent uint16
 
+// Core session event constants.
 const (
 	BEGIN_SESSION SessionEvent = iota
 	END_SESSION
@@ -200,6 +218,7 @@ const (
 	CANCEL
 )
 
+// String returns a string representation of the session event.
 func (se SessionEvent) String() string {
 	switch se {
 	case BEGIN_SESSION:
@@ -237,7 +256,7 @@ func (se SessionEvent) String() string {
 	}
 }
 
-// Internal state...
+// Internal state of a session.
 type Flags constraints.Unsigned
 
 // Orchestrator is responsible for managing the flow of blocks and/or status.
@@ -250,9 +269,12 @@ type Orchestrator[F Flags] interface {
 	// ReceiveState is used to receive state from a remote session.
 	ReceiveState(F) error
 
+	// IsClosed returns true if the orchestrator is closed.
 	IsClosed() bool
 }
 
+// SenderConnection provides a way to get a sender after you create the session.
+// The sender wants to know about the orchestrator, to notify certain events, like flush.
 type SenderConnection[
 	F Flags,
 	I BlockId,
