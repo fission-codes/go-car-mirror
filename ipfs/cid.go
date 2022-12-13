@@ -23,13 +23,13 @@ func WrapCid(cid cid.Cid) Cid {
 }
 
 func (ipfsCid Cid) MarshalCBOR() ([]byte, error) {
-	cid_bytes := make([]byte, 0, ipfsCid.ByteLen()+1)
-	cid_bytes = append(cid_bytes, 0)
-	cid_bytes = append(cid_bytes, ipfsCid.Bytes()...)
+	cidBytes := make([]byte, 0, ipfsCid.ByteLen()+1)
+	cidBytes = append(cidBytes, 0)
+	cidBytes = append(cidBytes, ipfsCid.Bytes()...)
 
 	return cbor.Marshal(cbor.Tag{
 		Number:  42,
-		Content: cid_bytes,
+		Content: cidBytes,
 	})
 }
 

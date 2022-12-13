@@ -23,7 +23,7 @@ func RandId() Cid {
 	}
 }
 
-func TestCIdToJson(t *testing.T) {
+func TestCidToJson(t *testing.T) {
 	id := RandId()
 	if buf, err := id.MarshalJSON(); err == nil {
 		var id2 Cid
@@ -39,7 +39,7 @@ func TestCIdToJson(t *testing.T) {
 	}
 }
 
-func TestCIdToCBOR(t *testing.T) {
+func TestCidToCBOR(t *testing.T) {
 	id := RandId()
 	if buf, err := id.MarshalCBOR(); err == nil {
 		var id2 Cid
