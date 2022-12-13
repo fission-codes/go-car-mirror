@@ -2,6 +2,7 @@ package core_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -31,7 +32,7 @@ var ErrReceiverNotSet error = errors.New("receiver not set")
 
 func TestAntiEvergreen(t *testing.T) {
 	senderStore := mock.NewStore()
-	root := mock.AddRandomTree(senderStore, 5, 5, 0.0)
+	root := mock.AddRandomTree(context.Background(), senderStore, 5, 5, 0.0)
 
 	randomBlock, err := senderStore.RandomBlock()
 	if err != nil {
@@ -306,7 +307,7 @@ func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, roo
 
 func TestMockTransferToEmptyStoreSingleBatchNoDelay(t *testing.T) {
 	senderStore := mock.NewStore()
-	root := mock.AddRandomTree(senderStore, 10, 5, 0.0)
+	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
 	receiverStore := mock.NewStore()
 	MockBatchTransfer(senderStore, receiverStore, root, 5000, 0, 0)
 	if !receiverStore.HasAll(root) {
@@ -316,7 +317,7 @@ func TestMockTransferToEmptyStoreSingleBatchNoDelay(t *testing.T) {
 
 func TestMockTransferToEmptyStoreSingleBatch(t *testing.T) {
 	senderStore := mock.NewStore()
-	root := mock.AddRandomTree(senderStore, 10, 5, 0.0)
+	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
 	receiverStore := mock.NewStore()
 	MockBatchTransfer(senderStore, receiverStore, root, 5000, GBIT_SECOND, TYPICAL_LATENCY)
 	if !receiverStore.HasAll(root) {
@@ -326,7 +327,7 @@ func TestMockTransferToEmptyStoreSingleBatch(t *testing.T) {
 
 func TestMockTransferToEmptyStoreMultiBatchNoDelay(t *testing.T) {
 	senderStore := mock.NewStore()
-	root := mock.AddRandomTree(senderStore, 10, 5, 0.0)
+	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
 	receiverStore := mock.NewStore()
 	MockBatchTransfer(senderStore, receiverStore, root, 50, 0, 0)
 	if !receiverStore.HasAll(root) {
@@ -336,7 +337,7 @@ func TestMockTransferToEmptyStoreMultiBatchNoDelay(t *testing.T) {
 
 func TestMockTransferToEmptyStoreMultiBatch(t *testing.T) {
 	senderStore := mock.NewStore()
-	root := mock.AddRandomTree(senderStore, 10, 5, 0.0)
+	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
 	receiverStore := mock.NewStore()
 	MockBatchTransfer(senderStore, receiverStore, root, 50, GBIT_SECOND, TYPICAL_LATENCY)
 	if !receiverStore.HasAll(root) {
@@ -346,9 +347,9 @@ func TestMockTransferToEmptyStoreMultiBatch(t *testing.T) {
 
 func TestMockTransferSingleMissingBlockBatchNoDelay(t *testing.T) {
 	senderStore := mock.NewStore()
-	root := mock.AddRandomTree(senderStore, 10, 5, 0.0)
+	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
 	receiverStore := mock.NewStore()
-	receiverStore.AddAll(senderStore)
+	receiverStore.AddAll(context.Background(), senderStore)
 	block, err := receiverStore.RandomBlock()
 	if err != nil {
 		t.Errorf("Could not find random block %v", err)
@@ -362,9 +363,9 @@ func TestMockTransferSingleMissingBlockBatchNoDelay(t *testing.T) {
 
 func TestMockTransferSingleMissingBlockBatch(t *testing.T) {
 	senderStore := mock.NewStore()
-	root := mock.AddRandomTree(senderStore, 10, 5, 0.0)
+	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
 	receiverStore := mock.NewStore()
-	receiverStore.AddAll(senderStore)
+	receiverStore.AddAll(context.Background(), senderStore)
 	block, err := receiverStore.RandomBlock()
 	if err != nil {
 		t.Errorf("Could not find random block %v", err)
@@ -378,10 +379,10 @@ func TestMockTransferSingleMissingBlockBatch(t *testing.T) {
 
 func TestMockTransferSingleMissingTreeBlockBatchNoDelay(t *testing.T) {
 	senderStore := mock.NewStore()
-	mock.AddRandomForest(senderStore, 10)
+	mock.AddRandomForest(context.Background(), senderStore, 10)
 	receiverStore := mock.NewStore()
-	receiverStore.AddAll(senderStore)
-	root := mock.AddRandomTree(senderStore, 10, 5, 0.1)
+	receiverStore.AddAll(context.Background(), senderStore)
+	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.1)
 	MockBatchTransfer(senderStore, receiverStore, root, 50, 0, 0)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
@@ -391,10 +392,10 @@ func TestMockTransferSingleMissingTreeBlockBatchNoDelay(t *testing.T) {
 
 func TestMockTransferSingleMissingTreeBlockBatch(t *testing.T) {
 	senderStore := mock.NewStore()
-	mock.AddRandomForest(senderStore, 10)
+	mock.AddRandomForest(context.Background(), senderStore, 10)
 	receiverStore := mock.NewStore()
-	receiverStore.AddAll(senderStore)
-	root := mock.AddRandomTree(senderStore, 10, 5, 0.1)
+	receiverStore.AddAll(context.Background(), senderStore)
+	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.1)
 	MockBatchTransfer(senderStore, receiverStore, root, 50, GBIT_SECOND, TYPICAL_LATENCY)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")

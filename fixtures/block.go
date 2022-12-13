@@ -2,6 +2,7 @@ package fixtures
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -178,7 +179,7 @@ func (b *Block) AddChild(id BlockId) error {
 	return nil
 }
 
-func AddRandomTree(store *Store, maxChildren int, maxDepth int, pCrosslink float64) BlockId {
+func AddRandomTree(ctx context.Context, store *Store, maxChildren int, maxDepth int, pCrosslink float64) BlockId {
 	id := RandId()
 	block := NewBlock(id, rand.Int63n(10240))
 
@@ -194,20 +195,20 @@ func AddRandomTree(store *Store, maxChildren int, maxDepth int, pCrosslink float
 			children := 2 + rand.Intn(maxChildren/2) + rand.Intn(maxChildren/2) // makes number of children cluster around average
 			for child := 0; child < children; child++ {
 				childMaxDepth := util.Max(0, maxDepth-rand.Intn(2)-1)
-				block.AddChild(AddRandomTree(store, maxChildren, childMaxDepth, pCrosslink))
+				block.AddChild(AddRandomTree(ctx, store, maxChildren, childMaxDepth, pCrosslink))
 			}
 		}
 	}
 
-	store.Add(block)
+	store.Add(ctx, block)
 
 	return id
 }
 
-func AddRandomForest(store *Store, rootCount int) []BlockId {
+func AddRandomForest(ctx context.Context, store *Store, rootCount int) []BlockId {
 	roots := make([]BlockId, rootCount)
 	for i := 0; i < rootCount; i++ {
-		roots[i] = AddRandomTree(store, 10, 5, 0.05)
+		roots[i] = AddRandomTree(ctx, store, 10, 5, 0.05)
 	}
 	return roots
 }
@@ -223,7 +224,7 @@ func NewStore() *Store {
 	}
 }
 
-func (bs *Store) Get(id BlockId) (core.Block[BlockId], error) {
+func (bs *Store) Get(_ context.Context, id BlockId) (core.Block[BlockId], error) {
 	block, ok := bs.blocks[id]
 	if !ok || block == nil {
 		return nil, cmerrors.ErrBlockNotFound
@@ -247,7 +248,7 @@ func (bs *Store) Dump(id BlockId, log *zap.SugaredLogger, spacer string) (core.B
 	return block, nil
 }
 
-func (bs *Store) Has(id BlockId) (bool, error) {
+func (bs *Store) Has(_ context.Context, id BlockId) (bool, error) {
 	_, ok := bs.blocks[id]
 	return ok, nil
 }
@@ -285,7 +286,7 @@ func (bs *Store) doHasAll(root BlockId) error {
 	}
 }
 
-func (bs *Store) All() (<-chan BlockId, error) {
+func (bs *Store) All(_ context.Context) (<-chan BlockId, error) {
 	values := make(chan BlockId, len(bs.blocks))
 	for _, v := range bs.blocks {
 		values <- v.Id()
@@ -294,7 +295,7 @@ func (bs *Store) All() (<-chan BlockId, error) {
 	return values, nil
 }
 
-func (bs *Store) Add(rawBlock core.RawBlock[BlockId]) (core.Block[BlockId], error) {
+func (bs *Store) Add(_ context.Context, rawBlock core.RawBlock[BlockId]) (core.Block[BlockId], error) {
 	block, ok := rawBlock.(*Block)
 	if !ok {
 		block = NewBlock(rawBlock.Id(), rawBlock.Size())
@@ -305,11 +306,11 @@ func (bs *Store) Add(rawBlock core.RawBlock[BlockId]) (core.Block[BlockId], erro
 	return block, nil
 }
 
-func (bs *Store) AddAll(store core.BlockStore[BlockId]) error {
-	if blocks, err := store.All(); err == nil {
+func (bs *Store) AddAll(ctx context.Context, store core.BlockStore[BlockId]) error {
+	if blocks, err := store.All(ctx); err == nil {
 		for id := range blocks {
-			if block, err := store.Get(id); err == nil {
-				_, err = bs.Add(block)
+			if block, err := store.Get(ctx, id); err == nil {
+				_, err = bs.Add(ctx, block)
 				if err != nil {
 					return err
 				}

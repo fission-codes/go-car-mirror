@@ -1,6 +1,7 @@
 package carmirror
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -226,9 +227,9 @@ func NewInstrumentedBlockStore[I BlockId](store BlockStore[I], stats Stats) *Ins
 	}
 }
 
-func (ibs *InstrumentedBlockStore[I]) Get(id I) (Block[I], error) {
+func (ibs *InstrumentedBlockStore[I]) Get(ctx context.Context, id I) (Block[I], error) {
 	ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Get", "id", id)
-	result, err := ibs.store.Get(id)
+	result, err := ibs.store.Get(ctx, id)
 	if err == nil {
 		ibs.stats.Log("Get.Ok")
 	} else {
@@ -238,9 +239,9 @@ func (ibs *InstrumentedBlockStore[I]) Get(id I) (Block[I], error) {
 	return result, err
 }
 
-func (ibs *InstrumentedBlockStore[I]) Has(id I) (bool, error) {
+func (ibs *InstrumentedBlockStore[I]) Has(ctx context.Context, id I) (bool, error) {
 	ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Has", "id", id)
-	result, err := ibs.store.Has(id)
+	result, err := ibs.store.Has(ctx, id)
 	if err == nil {
 		ibs.stats.Log(fmt.Sprintf("Has.%v", result))
 	} else {
@@ -250,9 +251,9 @@ func (ibs *InstrumentedBlockStore[I]) Has(id I) (bool, error) {
 	return result, err
 }
 
-func (ibs *InstrumentedBlockStore[I]) All() (<-chan I, error) {
+func (ibs *InstrumentedBlockStore[I]) All(ctx context.Context) (<-chan I, error) {
 	ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "All")
-	blocks, err := ibs.store.All()
+	blocks, err := ibs.store.All(ctx)
 	result := make(chan I)
 	if err == nil {
 		go func(blocks <-chan I) {
@@ -270,9 +271,9 @@ func (ibs *InstrumentedBlockStore[I]) All() (<-chan I, error) {
 
 }
 
-func (ibs *InstrumentedBlockStore[I]) Add(rawBlock RawBlock[I]) (Block[I], error) {
+func (ibs *InstrumentedBlockStore[I]) Add(ctx context.Context, rawBlock RawBlock[I]) (Block[I], error) {
 	ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Add", "id", rawBlock.Id())
-	block, err := ibs.store.Add(rawBlock)
+	block, err := ibs.store.Add(ctx, rawBlock)
 	if err == nil {
 		ibs.stats.Log("Add.Ok")
 	} else {
