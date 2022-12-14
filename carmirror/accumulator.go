@@ -7,13 +7,16 @@ import (
 	"golang.org/x/exp/maps"
 )
 
+// SimpleStatusAccumulator is a simple implementation of StatusAccumulator.
+// Its operations are protected by a mutex, so it is safe to use from multiple goroutines.
 type SimpleStatusAccumulator[I BlockId] struct {
 	have   filter.Filter[I]
-	want   map[I]bool
-	wanted map[I]bool
+	want   map[I]bool // map of blocks that are currently wanted
+	wanted map[I]bool // map of blocks that have been wanted, to prevent sending duplicate wants
 	mutex  sync.Mutex
 }
 
+// NewSimpleStatusAccumulator creates a new SimpleStatusAccumulator.
 func NewSimpleStatusAccumulator[I BlockId](filter filter.Filter[I]) *SimpleStatusAccumulator[I] {
 	return &SimpleStatusAccumulator[I]{
 		have:   filter,
@@ -23,6 +26,7 @@ func NewSimpleStatusAccumulator[I BlockId](filter filter.Filter[I]) *SimpleStatu
 	}
 }
 
+// Have marks the given block as having been received.
 func (ssa *SimpleStatusAccumulator[I]) Have(id I) error {
 	ssa.mutex.Lock()
 	defer ssa.mutex.Unlock()
@@ -30,6 +34,7 @@ func (ssa *SimpleStatusAccumulator[I]) Have(id I) error {
 	return nil
 }
 
+// Want marks the given block as wanted.
 func (ssa *SimpleStatusAccumulator[I]) Want(id I) error {
 	ssa.mutex.Lock()
 	defer ssa.mutex.Unlock()
@@ -39,6 +44,7 @@ func (ssa *SimpleStatusAccumulator[I]) Want(id I) error {
 	return nil
 }
 
+// Receive marks the given block as received.
 func (ssa *SimpleStatusAccumulator[I]) Receive(id I) error {
 	ssa.mutex.Lock()
 	defer ssa.mutex.Unlock()
@@ -47,6 +53,7 @@ func (ssa *SimpleStatusAccumulator[I]) Receive(id I) error {
 	return nil
 }
 
+// Send sends the current status using the given StatusSender.
 func (ssa *SimpleStatusAccumulator[I]) Send(sender StatusSender[I]) error {
 	ssa.mutex.Lock()
 	defer ssa.mutex.Unlock()
