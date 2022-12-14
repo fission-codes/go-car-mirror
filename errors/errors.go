@@ -2,6 +2,9 @@ package errors
 
 import "errors"
 
-var ErrBlockNotFound = errors.New("block not found")
-var ErrStatsAlreadyInitialized = errors.New("stats already initialized")
-var ErrStateError = errors.New("unexpected state transition")
+// Errors that can be returned by the carmirror package.
+var (
+	ErrBlockNotFound           = errors.New("block not found")
+	ErrStatsAlreadyInitialized = errors.New("stats already initialized")
+	ErrStateError              = errors.New("unexpected state transition")
+)

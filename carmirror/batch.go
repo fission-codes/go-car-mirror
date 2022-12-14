@@ -12,6 +12,7 @@ import (
 // BatchState is a bitfield that describes the state of a batch session.
 type BatchState uint32
 
+// Named constants for BatchState flags.
 const (
 	RECEIVER_READY BatchState = 1 << iota
 	RECEIVER_CLOSING
@@ -24,6 +25,7 @@ const (
 	SENDER   = SENDER_READY | SENDER_CLOSING | SENDER_CLOSED
 )
 
+// Strings returns a slice of strings describing the given BatchState.
 func (bs BatchState) Strings() []string {
 	var strings []string
 	if bs&RECEIVER_READY != 0 {
@@ -50,30 +52,39 @@ func (bs BatchState) Strings() []string {
 	return strings
 }
 
+// String returns a string describing the given BatchState.
+// Each state flag is separated by a pipe character.
 func (bs BatchState) String() string {
 	return strings.Join(bs.Strings(), "|")
 }
 
+// BatchBlockReceiver is an interface for receiving batches of blocks.
 type BatchBlockReceiver[I BlockId] interface {
+	// HandleList handles a list of blocks.
 	HandleList(BatchState, []RawBlock[I]) error
 }
 
+// BatchBlockSender is an interface for sending batches of blocks.
 type BatchBlockSender[I BlockId] interface {
+	// SendList sends a list of blocks.
 	SendList(BatchState, []RawBlock[I]) error
+	// Close closes the sender.
 	Close() error
 }
 
-// ReceiverSession[I BlockId, F Flags]
+// SimpleBatchBlockReceiver is a simple implementation of BatchBlockReceiver.
 type SimpleBatchBlockReceiver[I BlockId] struct {
 	session BlockReceiver[I, BatchState]
 }
 
+// NewSimpleBatchBlockReceiver creates a new SimpleBatchBlockReceiver.
 func NewSimpleBatchBlockReceiver[I BlockId](rs BlockReceiver[I, BatchState]) *SimpleBatchBlockReceiver[I] {
 	return &SimpleBatchBlockReceiver[I]{
 		session: rs,
 	}
 }
 
+// HandleList handles a list of raw blocks.
 func (sbbr *SimpleBatchBlockReceiver[I]) HandleList(flags BatchState, list []RawBlock[I]) error {
 	for _, block := range list {
 		sbbr.session.HandleBlock(block)
@@ -84,6 +95,7 @@ func (sbbr *SimpleBatchBlockReceiver[I]) HandleList(flags BatchState, list []Raw
 	return nil
 }
 
+// SimpleBatchBlockSender is a simple implementation of BatchBlockSender.
 type SimpleBatchBlockSender[I BlockId] struct {
 	orchestrator Orchestrator[BatchState]
 	list         []RawBlock[I]
@@ -92,6 +104,7 @@ type SimpleBatchBlockSender[I BlockId] struct {
 	maxBatchSize uint32
 }
 
+// NewSimpleBatchBlockSender creates a new SimpleBatchBlockSender.
 func NewSimpleBatchBlockSender[I BlockId](sender BatchBlockSender[I], orchestrator Orchestrator[BatchState], maxBatchSize uint32) *SimpleBatchBlockSender[I] {
 	return &SimpleBatchBlockSender[I]{
 		orchestrator: orchestrator,
@@ -101,6 +114,7 @@ func NewSimpleBatchBlockSender[I BlockId](sender BatchBlockSender[I], orchestrat
 	}
 }
 
+// SendBlock adds a block to the batch and sends the batch if it is full.
 func (sbbs *SimpleBatchBlockSender[I]) SendBlock(block RawBlock[I]) error {
 	sbbs.listMutex.Lock()
 	sbbs.list = append(sbbs.list, block)
@@ -113,18 +127,20 @@ func (sbbs *SimpleBatchBlockSender[I]) SendBlock(block RawBlock[I]) error {
 	return nil
 }
 
+// Close closes the sender.
 func (sbbs *SimpleBatchBlockSender[I]) Close() error {
 	return sbbs.sender.Close()
 }
 
+// Flush sends the current batch of blocks.
 func (sbbs *SimpleBatchBlockSender[I]) Flush() error {
 	sbbs.orchestrator.Notify(BEGIN_FLUSH)
 	defer sbbs.orchestrator.Notify(END_FLUSH)
 
-	batchStatus := sbbs.orchestrator.State()
+	batchState := sbbs.orchestrator.State()
 	sbbs.listMutex.Lock()
 	defer sbbs.listMutex.Unlock()
-	if err := sbbs.sender.SendList(batchStatus&SENDER, sbbs.list); err != nil {
+	if err := sbbs.sender.SendList(batchState&SENDER, sbbs.list); err != nil {
 		return err
 	}
 	sbbs.list = sbbs.list[:0]
@@ -132,12 +148,13 @@ func (sbbs *SimpleBatchBlockSender[I]) Flush() error {
 	return nil
 }
 
-// BatchSendOrchestrator
+// BatchSendOrchestrator is an orchestrator for sending batches of blocks.
 type BatchSendOrchestrator struct {
 	flags util.SharedFlagSet[BatchState]
 	log   *zap.SugaredLogger
 }
 
+// NewBatchSendOrchestrator creates a new BatchSendOrchestrator.
 func NewBatchSendOrchestrator() *BatchSendOrchestrator {
 	return &BatchSendOrchestrator{
 		flags: *util.NewSharedFlagSet(BatchState(0)),
@@ -145,6 +162,8 @@ func NewBatchSendOrchestrator() *BatchSendOrchestrator {
 	}
 }
 
+// Notify notifies the orchestrator of a session event.
+// Events lead to state transitions in the orchestrator.
 func (bso *BatchSendOrchestrator) Notify(event SessionEvent) error {
 	switch event {
 	case BEGIN_SESSION:
@@ -174,25 +193,29 @@ func (bso *BatchSendOrchestrator) Notify(event SessionEvent) error {
 	return nil
 }
 
+// State returns the current state of the orchestrator.
 func (bso *BatchSendOrchestrator) State() BatchState {
 	return bso.flags.All()
 }
 
-func (bso *BatchSendOrchestrator) ReceiveState(batchStatus BatchState) error {
-	bso.flags.Update(RECEIVER, batchStatus)
+// ReceiveState unsets any current receiver state flags, and sets the specified state flags.
+func (bso *BatchSendOrchestrator) ReceiveState(batchState BatchState) error {
+	bso.flags.Update(RECEIVER, batchState)
 	return nil
 }
 
+// IsClosed returns true if the sender is closed.
 func (bso *BatchSendOrchestrator) IsClosed() bool {
 	return bso.flags.Contains(SENDER_CLOSED)
 }
 
-// BatchReceiveOrchestrator
+// BatchReceiveOrchestrator is an orchestrator for receiving batches of blocks.
 type BatchReceiveOrchestrator struct {
 	flags util.SharedFlagSet[BatchState]
 	log   *zap.SugaredLogger
 }
 
+// NewBatchReceiveOrchestrator creates a new BatchReceiveOrchestrator.
 func NewBatchReceiveOrchestrator() *BatchReceiveOrchestrator {
 	return &BatchReceiveOrchestrator{
 		flags: *util.NewSharedFlagSet(BatchState(0)),
@@ -200,6 +223,7 @@ func NewBatchReceiveOrchestrator() *BatchReceiveOrchestrator {
 	}
 }
 
+// Notify notifies the orchestrator of a session event, updating the state as appropriate.
 func (bro *BatchReceiveOrchestrator) Notify(event SessionEvent) error {
 	switch event {
 	case BEGIN_SESSION:
@@ -225,16 +249,19 @@ func (bro *BatchReceiveOrchestrator) Notify(event SessionEvent) error {
 	return nil
 }
 
+// State returns the current state of the orchestrator.
 func (bro *BatchReceiveOrchestrator) State() BatchState {
 	return bro.flags.All()
 }
 
-func (bro *BatchReceiveOrchestrator) ReceiveState(batchStatus BatchState) error {
+// ReceiveState unsets any current sender state flags, and sets the specified state flags.
+func (bro *BatchReceiveOrchestrator) ReceiveState(batchState BatchState) error {
 	// Slight hack here to allow ReceiverChecking to be updated by SimpleBatchBlockReceiver
-	bro.flags.Update(SENDER|RECEIVER_CHECKING, batchStatus)
+	bro.flags.Update(SENDER|RECEIVER_CHECKING, batchState)
 	return nil
 }
 
+// IsClosed returns true if the receiver is closed.
 func (bro *BatchReceiveOrchestrator) IsClosed() bool {
 	return bro.flags.ContainsAny(SENDER_CLOSED | RECEIVER_CLOSED)
 }
