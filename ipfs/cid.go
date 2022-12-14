@@ -1,4 +1,4 @@
-package ipfs
+package ipld
 
 //import core "github.com/fission-codes/go-car-mirror/carmirror"
 import (

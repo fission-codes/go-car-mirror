@@ -1,4 +1,4 @@
-package ipfs
+package ipld
 
 import (
 	cbor "github.com/fxamacker/cbor/v2"
