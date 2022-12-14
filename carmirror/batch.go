@@ -9,10 +9,11 @@ import (
 	"go.uber.org/zap"
 )
 
-type BatchStatus uint32
+// BatchState is a bitfield that describes the state of a batch session.
+type BatchState uint32
 
 const (
-	RECEIVER_READY BatchStatus = 1 << iota
+	RECEIVER_READY BatchState = 1 << iota
 	RECEIVER_CLOSING
 	RECEIVER_CLOSED
 	RECEIVER_CHECKING
@@ -23,7 +24,7 @@ const (
 	SENDER   = SENDER_READY | SENDER_CLOSING | SENDER_CLOSED
 )
 
-func (bs BatchStatus) Strings() []string {
+func (bs BatchState) Strings() []string {
 	var strings []string
 	if bs&RECEIVER_READY != 0 {
 		strings = append(strings, "RECEIVER_READY")
@@ -49,31 +50,31 @@ func (bs BatchStatus) Strings() []string {
 	return strings
 }
 
-func (bs BatchStatus) String() string {
+func (bs BatchState) String() string {
 	return strings.Join(bs.Strings(), "|")
 }
 
 type BatchBlockReceiver[I BlockId] interface {
-	HandleList(BatchStatus, []RawBlock[I]) error
+	HandleList(BatchState, []RawBlock[I]) error
 }
 
 type BatchBlockSender[I BlockId] interface {
-	SendList(BatchStatus, []RawBlock[I]) error
+	SendList(BatchState, []RawBlock[I]) error
 	Close() error
 }
 
 // ReceiverSession[I BlockId, F Flags]
 type SimpleBatchBlockReceiver[I BlockId] struct {
-	session BlockReceiver[I, BatchStatus]
+	session BlockReceiver[I, BatchState]
 }
 
-func NewSimpleBatchBlockReceiver[I BlockId](rs BlockReceiver[I, BatchStatus]) *SimpleBatchBlockReceiver[I] {
+func NewSimpleBatchBlockReceiver[I BlockId](rs BlockReceiver[I, BatchState]) *SimpleBatchBlockReceiver[I] {
 	return &SimpleBatchBlockReceiver[I]{
 		session: rs,
 	}
 }
 
-func (sbbr *SimpleBatchBlockReceiver[I]) HandleList(flags BatchStatus, list []RawBlock[I]) error {
+func (sbbr *SimpleBatchBlockReceiver[I]) HandleList(flags BatchState, list []RawBlock[I]) error {
 	for _, block := range list {
 		sbbr.session.HandleBlock(block)
 	}
@@ -84,14 +85,14 @@ func (sbbr *SimpleBatchBlockReceiver[I]) HandleList(flags BatchStatus, list []Ra
 }
 
 type SimpleBatchBlockSender[I BlockId] struct {
-	orchestrator Orchestrator[BatchStatus]
+	orchestrator Orchestrator[BatchState]
 	list         []RawBlock[I]
 	listMutex    sync.Mutex
 	sender       BatchBlockSender[I]
 	maxBatchSize uint32
 }
 
-func NewSimpleBatchBlockSender[I BlockId](sender BatchBlockSender[I], orchestrator Orchestrator[BatchStatus], maxBatchSize uint32) *SimpleBatchBlockSender[I] {
+func NewSimpleBatchBlockSender[I BlockId](sender BatchBlockSender[I], orchestrator Orchestrator[BatchState], maxBatchSize uint32) *SimpleBatchBlockSender[I] {
 	return &SimpleBatchBlockSender[I]{
 		orchestrator: orchestrator,
 		list:         make([]RawBlock[I], 0, maxBatchSize),
@@ -133,13 +134,13 @@ func (sbbs *SimpleBatchBlockSender[I]) Flush() error {
 
 // BatchSendOrchestrator
 type BatchSendOrchestrator struct {
-	flags util.SharedFlagSet[BatchStatus]
+	flags util.SharedFlagSet[BatchState]
 	log   *zap.SugaredLogger
 }
 
 func NewBatchSendOrchestrator() *BatchSendOrchestrator {
 	return &BatchSendOrchestrator{
-		flags: *util.NewSharedFlagSet(BatchStatus(0)),
+		flags: *util.NewSharedFlagSet(BatchState(0)),
 		log:   log.With("component", "BatchSendOrchestrator"),
 	}
 }
@@ -173,11 +174,11 @@ func (bso *BatchSendOrchestrator) Notify(event SessionEvent) error {
 	return nil
 }
 
-func (bso *BatchSendOrchestrator) State() BatchStatus {
+func (bso *BatchSendOrchestrator) State() BatchState {
 	return bso.flags.All()
 }
 
-func (bso *BatchSendOrchestrator) ReceiveState(batchStatus BatchStatus) error {
+func (bso *BatchSendOrchestrator) ReceiveState(batchStatus BatchState) error {
 	bso.flags.Update(RECEIVER, batchStatus)
 	return nil
 }
@@ -188,13 +189,13 @@ func (bso *BatchSendOrchestrator) IsClosed() bool {
 
 // BatchReceiveOrchestrator
 type BatchReceiveOrchestrator struct {
-	flags util.SharedFlagSet[BatchStatus]
+	flags util.SharedFlagSet[BatchState]
 	log   *zap.SugaredLogger
 }
 
 func NewBatchReceiveOrchestrator() *BatchReceiveOrchestrator {
 	return &BatchReceiveOrchestrator{
-		flags: *util.NewSharedFlagSet(BatchStatus(0)),
+		flags: *util.NewSharedFlagSet(BatchState(0)),
 		log:   log.With("component", "BatchReceiveOrchestrator"),
 	}
 }
@@ -224,11 +225,11 @@ func (bro *BatchReceiveOrchestrator) Notify(event SessionEvent) error {
 	return nil
 }
 
-func (bro *BatchReceiveOrchestrator) State() BatchStatus {
+func (bro *BatchReceiveOrchestrator) State() BatchState {
 	return bro.flags.All()
 }
 
-func (bro *BatchReceiveOrchestrator) ReceiveState(batchStatus BatchStatus) error {
+func (bro *BatchReceiveOrchestrator) ReceiveState(batchStatus BatchState) error {
 	// Slight hack here to allow ReceiverChecking to be updated by SimpleBatchBlockReceiver
 	bro.flags.Update(SENDER|RECEIVER_CHECKING, batchStatus)
 	return nil
