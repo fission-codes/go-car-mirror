@@ -195,17 +195,17 @@ func (ah *Archive[T, R]) MarshalBinary() ([]byte, error) {
 }
 
 type BlocksMessage[T carmirror.BlockId, R carmirror.BlockIdRef[T], F carmirror.Flags] struct {
-	Status F
-	Car    Archive[T, R]
+	State F
+	Car   Archive[T, R]
 }
 
 func NewBlocksMessage[
 	T carmirror.BlockId,
 	R carmirror.BlockIdRef[T],
 	F carmirror.Flags,
-](status F, blocks []carmirror.RawBlock[T]) *BlocksMessage[T, R, F] {
+](state F, blocks []carmirror.RawBlock[T]) *BlocksMessage[T, R, F] {
 	return &BlocksMessage[T, R, F]{
-		status,
+		state,
 		Archive[T, R]{
 			ArchiveHeader[T]{
 				1,
@@ -217,7 +217,7 @@ func NewBlocksMessage[
 }
 
 func (msg *BlocksMessage[T, B, F]) Write(writer io.Writer) error {
-	if data, err := cbor.Marshal(msg.Status); err != nil {
+	if data, err := cbor.Marshal(msg.State); err != nil {
 		return err
 	} else {
 		if err = writeBufferWithPrefix(writer, data); err != nil {
@@ -232,7 +232,7 @@ func (msg *BlocksMessage[T, B, F]) Read(reader ByteAndBlockReader) error {
 	if data, err := readBufferWithPrefix(reader); err != nil {
 		return err
 	} else {
-		if err = cbor.Unmarshal(data, &msg.Status); err != nil {
+		if err = cbor.Unmarshal(data, &msg.State); err != nil {
 			return err
 		}
 	}
@@ -250,16 +250,16 @@ func (msg *BlocksMessage[T, B, F]) UnmarshalBinary(data []byte) error {
 }
 
 type StatusMessageWireFormat[I carmirror.BlockId, R carmirror.BlockIdRef[I], S carmirror.Flags] struct {
-	Status S                           `json:"status"`
-	Have   *filter.FilterWireFormat[I] `json:"have"`
-	Want   []I                         `json:"want"`
+	State S                           `json:"state"`
+	Have  *filter.FilterWireFormat[I] `json:"have"`
+	Want  []I                         `json:"want"`
 }
 
 type StatusMessage[I carmirror.BlockId, R carmirror.BlockIdRef[I], S carmirror.Flags] StatusMessageWireFormat[I, R, S]
 
-func NewStatusMessage[I carmirror.BlockId, R carmirror.BlockIdRef[I], S carmirror.Flags](status S, have filter.Filter[I], want []I) *StatusMessage[I, R, S] {
+func NewStatusMessage[I carmirror.BlockId, R carmirror.BlockIdRef[I], S carmirror.Flags](state S, have filter.Filter[I], want []I) *StatusMessage[I, R, S] {
 	return &StatusMessage[I, R, S]{
-		status,
+		state,
 		filter.NewFilterWireFormat(have),
 		want,
 	}

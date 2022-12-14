@@ -125,8 +125,8 @@ func TestBlocksMessageReadWrite(t *testing.T) {
 	if err := message2.Read(&buf); err != io.EOF {
 		t.Errorf("Error reading archive, %v", err)
 	}
-	if message.Status != message2.Status {
-		t.Errorf("Status is not same, %v != %v", message.Status, message2.Status)
+	if message.State != message2.State {
+		t.Errorf("State is not same, %v != %v", message.State, message2.State)
 	}
 	if !reflect.DeepEqual(message.Car.Header, message.Car.Header) {
 		t.Errorf("Archive Headers are no longer equal after transport")
@@ -153,8 +153,8 @@ func TestStatusMessageReadWrite(t *testing.T) {
 	if err := message2.Read(&buf); err != nil {
 		t.Errorf("Error reading filter, %v", err)
 	}
-	if message.Status != message2.Status {
-		t.Errorf("Status is not same, %v != %v", message.Status, message2.Status)
+	if message.State != message2.State {
+		t.Errorf("State is not same, %v != %v", message.State, message2.State)
 	}
 	if !message.Have.Any().Equal(message2.Have.Any()) {
 		t.Errorf("have lists no longer equal after transport")

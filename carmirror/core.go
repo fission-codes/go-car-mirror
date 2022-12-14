@@ -178,6 +178,7 @@ type BlockReceiver[I BlockId, F Flags] interface {
 
 // StatusSender is responsible for sending status.
 // The key intuition of CAR Mirror is that status can be sent efficiently using a lossy filter.
+// TODO: this use of status implies it's just filter, not want list.  Be precise in language.
 // The StatusSender will therefore usually batch reported information and send it in bulk to the ReceiverSession.
 type StatusSender[I BlockId] interface {
 	// SendStatus sends the status to the ReceiverSession.
