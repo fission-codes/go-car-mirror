@@ -1,8 +1,11 @@
 package ipfs
 
 import (
+	cbor "github.com/fxamacker/cbor/v2"
 	block "github.com/ipfs/go-block-format"
+	ipld_cbor "github.com/ipfs/go-ipld-cbor"
 	node "github.com/ipfs/go-ipld-format"
+	mh "github.com/multiformats/go-multihash"
 )
 
 // Wrap the generic block interface
@@ -57,4 +60,17 @@ func (blk *Block) GetChildren() []Cid {
 		result[i] = WrapCid(node.Cid)
 	}
 	return result
+}
+
+func TryBlockFromCBOR(cborData any) (*Block, error) {
+	cborNode, err := cbor.Marshal(cborData)
+	if err != nil {
+		return nil, err
+	}
+	ipldNode, err := ipld_cbor.Decode(cborNode, mh.SHA2_256, 32)
+	if err != nil {
+		return nil, err
+
+	}
+	return WrapBlock(ipldNode), nil
 }
