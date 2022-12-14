@@ -9,6 +9,8 @@ import (
 	"go.uber.org/zap"
 )
 
+// BatchStatus is a bitfield that describes the state of a batch session.
+// TODO: Rename this to State.  Status is used to represent a have filter and want list elsewhere.
 type BatchStatus uint32
 
 const (

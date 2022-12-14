@@ -33,7 +33,7 @@ var log = golog.Logger("carmirror")
 //   - [https://pkg.go.dev/github.com/ipfs/go-cid#Cast] - binary form of CID
 //   - [https://ipld.io/specs/codecs/dag-cbor/spec/#links] - CBOR representation
 //
-// Unfortunately we intend to leverage the CAR v1 spec for compatibility, which, oddly, specifies
+// Unfortunately, we intend to leverage the CAR v1 spec for compatibility, which, oddly, specifies
 // using the CBOR form of the CID in the header and the raw byte form in the body. Thus, our interface here
 // needs to be able support both.
 type BlockId interface {
@@ -60,9 +60,9 @@ type BlockIdRef[T BlockId] interface {
 type RawBlock[I BlockId] interface {
 	// Id returns the BlockId for the Block.
 	Id() I
-	// get the raw block bytes
+	// RawData returns the raw data bytes for the Block.
 	RawData() []byte
-	// The size of the block
+	// Size returns the size of the block
 	Size() int64
 }
 
@@ -74,12 +74,14 @@ func BlockEqual[I BlockId](a RawBlock[I], b RawBlock[I]) bool {
 // Block is an immutable data block referenced by a unique ID. It may reference other blocks by Id.
 type Block[I BlockId] interface {
 	RawBlock[I]
+
+	// Children returns the BlockIds of the children of this block.
 	Children() []I
 }
 
 // ReadableBlockStore represents read operations for a store of blocks.
 type ReadableBlockStore[I BlockId] interface {
-	// Get gets the block from the blockstore with the given ID.
+	// Get returns the block from the blockstore with the given ID.
 	Get(context.Context, I) (Block[I], error)
 
 	// Has returns true if the blockstore has a block with the given ID.
@@ -97,7 +99,7 @@ type BlockStore[I BlockId] interface {
 	Add(context.Context, RawBlock[I]) (Block[I], error)
 }
 
-// SyncBlockStore is a BlockStore that is also thread-safe.
+// SynchronizedBlockStore is a BlockStore that is also thread-safe.
 type SynchronizedBlockStore[I BlockId] struct {
 	store BlockStore[I]
 	mutex sync.RWMutex
@@ -108,7 +110,7 @@ func NewSynchronizedBlockStore[I BlockId](store BlockStore[I]) *SynchronizedBloc
 	return &SynchronizedBlockStore[I]{store, sync.RWMutex{}}
 }
 
-// Get gets the block from the synchronized blockstore with the given ID.
+// Get returns the block from the synchronized blockstore with the given ID.
 func (bs *SynchronizedBlockStore[I]) Get(ctx context.Context, id I) (Block[I], error) {
 	bs.mutex.RLock()
 	defer bs.mutex.RUnlock()
@@ -140,7 +142,7 @@ func (bs *SynchronizedBlockStore[I]) All(ctx context.Context) (<-chan I, error) 
 	}
 }
 
-// Add adds a given block to the synchronized blockstore.
+// Add adds a given RawBlock to the synchronized blockstore, returnng the Block.
 func (bs *SynchronizedBlockStore[I]) Add(ctx context.Context, block RawBlock[I]) (Block[I], error) {
 	bs.mutex.Lock()
 	defer bs.mutex.Unlock()
@@ -163,7 +165,7 @@ type BlockSender[I BlockId] interface {
 
 // BlockReceiver is responsible for receiving blocks.
 type StateReceiver[F Flags] interface {
-	// HandleBlock is called on receipt of a new block.
+	// HandleState is called on receipt of a new state.
 	HandleState(state F)
 }
 
@@ -178,25 +180,42 @@ type BlockReceiver[I BlockId, F Flags] interface {
 // The key intuition of CAR Mirror is that status can be sent efficiently using a lossy filter.
 // The StatusSender will therefore usually batch reported information and send it in bulk to the ReceiverSession.
 type StatusSender[I BlockId] interface {
+	// SendStatus sends the status to the ReceiverSession.
+	// The have filter is a lossy filter of the blocks that the SenderSession has.
+	// The want list is a list of blocks that the SenderSession wants.
 	SendStatus(have filter.Filter[I], want []I) error
+
+	// TODO: Close closes the ???.
 	Close() error
 }
 
 // StatusReceiver is responsible for receiving a status.
+// It also receives the state of the session.
 type StatusReceiver[I BlockId, F Flags] interface {
 	StateReceiver[F]
+
+	// HandleStatus is called on receipt of a new status.
+	// The have filter is a lossy filter of the blocks that the ??? has.
+	// The want list is a list of blocks that the ??? wants.
 	HandleStatus(have filter.Filter[I], want []I)
 }
 
 // StatusAccumulator is responsible for collecting status.
 type StatusAccumulator[I BlockId] interface {
+	// Have records that the ??? has a block.
 	Have(I) error
+	// Want records that the ??? wants a block.
 	Want(I) error
+
+	// Send sends the status to the StatusSender.
 	Send(StatusSender[I]) error
+
+	// Receive records that the block id has been received, updating any accumulated status as a result.
 	Receive(I) error
 }
 
 // SessionEvent is an event that can occur during a session.
+// When events occur, they trigger updates to session state.
 type SessionEvent uint16
 
 // Core session event constants.
@@ -256,11 +275,12 @@ func (se SessionEvent) String() string {
 	}
 }
 
-// Internal state of a session.
+// Flags represent the internal state of a session.
 type Flags constraints.Unsigned
 
 // Orchestrator is responsible for managing the flow of blocks and/or status.
 type Orchestrator[F Flags] interface {
+	// Notify is used to notify the orchestrator of an event.
 	Notify(SessionEvent) error
 
 	// State is used to obtain state to send to a remote session.
@@ -273,22 +293,26 @@ type Orchestrator[F Flags] interface {
 	IsClosed() bool
 }
 
-// SenderConnection provides a way to get a sender after you create the session.
-// The sender wants to know about the orchestrator, to notify certain events, like flush.
+// SenderConnection provides a way to get a block sender after you create the session.
+// The sender wants to know about the orchestrator, to notify it of certain events, like flush.
 type SenderConnection[
 	F Flags,
 	I BlockId,
 ] interface {
+	// OpenBlockSender opens a block sender.
 	OpenBlockSender(Orchestrator[F]) BlockSender[I]
 }
 
+// ReceiverConnection provides a way to get a status sender after you create the session.
 type ReceiverConnection[
 	F Flags,
 	I BlockId,
 ] interface {
+	// OpenStatusSender opens a status sender.
 	OpenStatusSender(Orchestrator[F]) StatusSender[I]
 }
 
+// ReceiverSession is a session that receives blocks.
 type ReceiverSession[
 	I BlockId,
 	F Flags,
@@ -299,10 +323,9 @@ type ReceiverSession[
 	store        BlockStore[I]
 	pending      *util.SynchronizedDeque[Block[I]]
 	log          *zap.SugaredLogger
-	// pending      map[I]bool
-	// pendingMutex sync.RWMutex
 }
 
+// NewReceiverSession creates a new ReceiverSession.
 func NewReceiverSession[I BlockId, F Flags](
 	store BlockStore[I],
 	connection ReceiverConnection[F, I],
@@ -319,6 +342,7 @@ func NewReceiverSession[I BlockId, F Flags](
 	}
 }
 
+// AccumulateStatus accumulates the status of the block with the given id and all of its children.
 func (rs *ReceiverSession[I, F]) AccumulateStatus(id I) error {
 	// Get block and handle errors
 	block, err := rs.store.Get(context.Background(), id)
@@ -344,6 +368,7 @@ func (rs *ReceiverSession[I, F]) AccumulateStatus(id I) error {
 	return nil
 }
 
+// HandleBlock handles a block that is being received.
 func (rs *ReceiverSession[I, F]) HandleBlock(rawBlock RawBlock[I]) {
 	rs.orchestrator.Notify(BEGIN_RECEIVE)
 	defer rs.orchestrator.Notify(END_RECEIVE)
@@ -360,6 +385,9 @@ func (rs *ReceiverSession[I, F]) HandleBlock(rawBlock RawBlock[I]) {
 	rs.pending.PushBack(block)
 }
 
+// Run runs the receiver session.
+// TODO: Is start a better name?  Starting a session?
+// Or begin, to match the event names?
 func (rs *ReceiverSession[I, F]) Run() error {
 	sender := rs.connection.OpenStatusSender(rs.orchestrator)
 
@@ -399,6 +427,7 @@ func (rs *ReceiverSession[I, F]) Run() error {
 	return nil
 }
 
+// HandleState makes sure the state is handled by the orchestrator.
 func (ss *ReceiverSession[I, F]) HandleState(state F) {
 	err := ss.orchestrator.ReceiveState(state)
 	if err != nil {
@@ -406,14 +435,17 @@ func (ss *ReceiverSession[I, F]) HandleState(state F) {
 	}
 }
 
+// Cancel cancels the session.
 func (ss *ReceiverSession[I, F]) Cancel() error {
 	return ss.orchestrator.Notify(CANCEL)
 }
 
+// IsClosed returns true if the session is closed.
 func (rs *ReceiverSession[I, F]) IsClosed() bool {
 	return rs.orchestrator.IsClosed()
 }
 
+// SenderSession is a session for sending blocks.
 type SenderSession[
 	I BlockId,
 	F Flags,
@@ -427,6 +459,7 @@ type SenderSession[
 	log          *zap.SugaredLogger
 }
 
+// NewSenderSession creates a new SenderSession.
 func NewSenderSession[I BlockId, F Flags](store BlockStore[I], connection SenderConnection[F, I], filter filter.Filter[I], orchestrator Orchestrator[F]) *SenderSession[I, F] {
 	return &SenderSession[I, F]{
 		store,
@@ -439,6 +472,8 @@ func NewSenderSession[I BlockId, F Flags](store BlockStore[I], connection Sender
 	}
 }
 
+// Run runs the sender session.
+// TODO: Consider renaming to Start or Begin or Open to match Close/IsClosed?
 func (ss *SenderSession[I, F]) Run() error {
 	sender := ss.connection.OpenBlockSender(ss.orchestrator)
 	if err := ss.orchestrator.Notify(BEGIN_SESSION); err != nil {
@@ -492,6 +527,9 @@ func (ss *SenderSession[I, F]) Run() error {
 	return nil
 }
 
+// HandleStatus handles incoming status, updating the filter and pending list.
+// TODO: Is pending just want but from the sender side?  and filter is have from the sender side?  Could we name these similarly?
+// receiverHave, receiverWant?
 func (ss *SenderSession[I, F]) HandleStatus(have filter.Filter[I], want []I) {
 	if err := ss.orchestrator.Notify(BEGIN_RECEIVE); err != nil {
 		ss.log.Errorw("SenderSession", "method", "HandleStatus", "error", err)
@@ -507,6 +545,7 @@ func (ss *SenderSession[I, F]) HandleStatus(have filter.Filter[I], want []I) {
 	ss.log.Debugw("SenderSession", "method", "HandleStatus", "pending", ss.pending.Len())
 }
 
+// Close closes the sender session.
 func (ss *SenderSession[I, F]) Close() error {
 	if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
 		return err
@@ -518,14 +557,17 @@ func (ss *SenderSession[I, F]) Close() error {
 	return nil
 }
 
+// Cancel cancels the sender session.
 func (ss *SenderSession[I, F]) Cancel() error {
 	return ss.orchestrator.Notify(CANCEL)
 }
 
+// Enqueue enqueues a block id to be sent.
 func (ss *SenderSession[I, F]) Enqueue(id I) error {
 	return ss.pending.PushBack(id)
 }
 
+// HandleState handles incoming session state.
 func (ss *SenderSession[I, F]) HandleState(state F) {
 	err := ss.orchestrator.ReceiveState(state)
 	if err != nil {
@@ -533,6 +575,7 @@ func (ss *SenderSession[I, F]) HandleState(state F) {
 	}
 }
 
+// IsClosed returns true if the session is closed.
 func (ss *SenderSession[I, F]) IsClosed() bool {
 	return ss.orchestrator.IsClosed()
 }
