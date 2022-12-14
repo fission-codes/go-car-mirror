@@ -6,22 +6,33 @@ import (
 	"sync"
 )
 
-var ErrListEmpty = errors.New("list is empty")
-var ErrListFull = errors.New("list is full")
+// Errors that can be returned by the util package.
+var (
+	ErrListEmpty = errors.New("list is empty")
+	ErrListFull  = errors.New("list is full")
+)
 
+// Deque is a double-ended queue.
 type Deque[T any] interface {
-	// Last element or nil pointer
+	// Back returns the last element of the deque or a nil pointer.
 	Back() *T
-	// First element or nil pointer
+	// Front returns the first element of the deque or a nil pointer.
 	Front() *T
+	// Len returns the number of elements in the deque.
 	Len() int
+	// PushBack adds an element to the back of the deque.
 	PushBack(v T) error
+	// PushFront adds an element to the front of the deque.
 	PushFront(v T) error
+	// PopBack removes the last element from the deque and returns it.
 	PopBack() (T, error)
+	// PopFront removes the first element from the deque and returns it.
 	PopFront() (T, error)
+	// Capacity returns the maximum number of elements that can be stored in the deque.
 	Capacity() int // -1 for unbounded
 }
 
+// ArrayDeque is a double-ended queue implemented using an array.
 type ArrayDeque[T any] struct {
 	data  []T
 	head  int
@@ -29,6 +40,7 @@ type ArrayDeque[T any] struct {
 	empty bool
 }
 
+// NewArrayDeque creates a new ArrayDeque with the given capacity.
 func NewArrayDeque[T any](capacity int) *ArrayDeque[T] {
 	return &ArrayDeque[T]{
 		make([]T, capacity),
@@ -38,6 +50,7 @@ func NewArrayDeque[T any](capacity int) *ArrayDeque[T] {
 	}
 }
 
+// Capacity returns the maximum number of elements that can be stored in the deque.
 func (dq *ArrayDeque[T]) Capacity() int {
 	return len(dq.data)
 }
@@ -58,6 +71,7 @@ func (dq *ArrayDeque[T]) inc(index int) int {
 	return index
 }
 
+// Back returns the last element of the deque or a nil pointer.
 func (dq *ArrayDeque[T]) Back() *T {
 	if dq.empty {
 		return nil
@@ -66,6 +80,7 @@ func (dq *ArrayDeque[T]) Back() *T {
 	}
 }
 
+// Front returns the first element of the deque or a nil pointer.
 func (dq *ArrayDeque[T]) Front() *T {
 	if dq.empty {
 		return nil
@@ -74,6 +89,7 @@ func (dq *ArrayDeque[T]) Front() *T {
 	}
 }
 
+// Len returns the number of elements in the deque.
 func (dq *ArrayDeque[T]) Len() int {
 
 	if dq.head > dq.tail {
@@ -89,6 +105,7 @@ func (dq *ArrayDeque[T]) Len() int {
 	}
 }
 
+// PushBack adds an element to the back of the deque.
 func (dq *ArrayDeque[T]) PushBack(v T) error {
 	if dq.head == dq.tail && !dq.empty {
 		return ErrListFull
@@ -100,6 +117,7 @@ func (dq *ArrayDeque[T]) PushBack(v T) error {
 	}
 }
 
+// PopBack removes the last element from the deque and returns it.
 func (dq *ArrayDeque[T]) PopBack() (T, error) {
 	if dq.empty {
 		return *new(T), ErrListEmpty
@@ -112,6 +130,7 @@ func (dq *ArrayDeque[T]) PopBack() (T, error) {
 	}
 }
 
+// PushFront adds an element to the front of the deque.
 func (dq *ArrayDeque[T]) PushFront(v T) error {
 	capacity := len(dq.data)
 	if dq.Len() == capacity {
@@ -124,6 +143,7 @@ func (dq *ArrayDeque[T]) PushFront(v T) error {
 	}
 }
 
+// PopFront removes the first element from the deque and returns it.
 func (dq *ArrayDeque[T]) PopFront() (T, error) {
 	if dq.empty {
 		return *new(T), ErrListEmpty
@@ -137,12 +157,14 @@ func (dq *ArrayDeque[T]) PopFront() (T, error) {
 	}
 }
 
+// SynchronizedDeque is a double-ended queue that is thread-safe.
 type SynchronizedDeque[T any] struct {
 	deque   Deque[T]
 	mutex   *sync.RWMutex
 	condvar *sync.Cond
 }
 
+// NewSynchronizedDeque creates a new SynchronizedDeque.
 func NewSynchronizedDeque[T any](deque Deque[T]) *SynchronizedDeque[T] {
 	mutex := new(sync.RWMutex)
 	return &SynchronizedDeque[T]{
@@ -152,30 +174,35 @@ func NewSynchronizedDeque[T any](deque Deque[T]) *SynchronizedDeque[T] {
 	}
 }
 
+// Capacity returns the maximum number of elements that can be stored in the deque.
 func (dq *SynchronizedDeque[T]) Capacity() int {
 	dq.mutex.RLock()
 	defer dq.mutex.RUnlock()
 	return dq.deque.Capacity()
 }
 
+// Back returns the last element of the deque or a nil pointer.
 func (dq *SynchronizedDeque[T]) Back() *T {
 	dq.mutex.RLock()
 	defer dq.mutex.RUnlock()
 	return dq.deque.Back()
 }
 
+// Front returns the first element of the deque or a nil pointer.
 func (dq *SynchronizedDeque[T]) Front() *T {
 	dq.mutex.RLock()
 	defer dq.mutex.RUnlock()
 	return dq.deque.Front()
 }
 
+// Len returns the number of elements in the deque.
 func (dq *SynchronizedDeque[T]) Len() int {
 	dq.mutex.RLock()
 	defer dq.mutex.RUnlock()
 	return dq.deque.Len()
 }
 
+// PushBack adds an element to the back of the deque.
 func (dq *SynchronizedDeque[T]) PushBack(v T) error {
 	dq.mutex.Lock()
 	defer dq.mutex.Unlock()
@@ -184,12 +211,15 @@ func (dq *SynchronizedDeque[T]) PushBack(v T) error {
 	return result
 }
 
+// PopBack removes the last element from the deque and returns it.
 func (dq *SynchronizedDeque[T]) PopBack() (T, error) {
 	dq.mutex.Lock()
 	defer dq.mutex.Unlock()
 	return dq.deque.PopBack()
 }
 
+// PollBack removes the last element from the deque and returns it.
+// If the deque is empty, it will block until an element is available.
 func (dq *SynchronizedDeque[T]) PollBack() T {
 	dq.mutex.Lock()
 	defer dq.mutex.Unlock()
@@ -203,6 +233,7 @@ func (dq *SynchronizedDeque[T]) PollBack() T {
 	return res
 }
 
+// PushFront adds an element to the front of the deque.
 func (dq *SynchronizedDeque[T]) PushFront(v T) error {
 	dq.mutex.Lock()
 	defer dq.mutex.Unlock()
@@ -211,12 +242,15 @@ func (dq *SynchronizedDeque[T]) PushFront(v T) error {
 	return result
 }
 
+// PopFront removes the first element from the deque and returns it.
 func (dq *SynchronizedDeque[T]) PopFront() (T, error) {
 	dq.mutex.Lock()
 	defer dq.mutex.Unlock()
 	return dq.deque.PopFront()
 }
 
+// PollFront removes the first element from the deque and returns it.
+// If the deque is empty, it will block until an element is available.
 func (dq *SynchronizedDeque[T]) PollFront() T {
 	dq.mutex.Lock()
 	defer dq.mutex.Unlock()
@@ -230,20 +264,24 @@ func (dq *SynchronizedDeque[T]) PollFront() T {
 	return res
 }
 
+// ListDeque is a double-ended queue that is implemented using a linked list.
 type ListDeque[T any] struct {
 	list list.List
 }
 
+// NewListDeque creates a new ListDeque.
 func NewListDeque[T any]() *ListDeque[T] {
 	return &ListDeque[T]{
 		list.List{},
 	}
 }
 
+// Capacity returns the maximum number of elements that can be stored in the deque.
 func (dq *ListDeque[T]) Capacity() int {
 	return -1
 }
 
+// Back returns the last element of the deque or a nil pointer.
 func (dq *ListDeque[T]) Back() *T {
 	if element, ok := dq.list.Back().Value.(T); ok {
 		return &element
@@ -252,6 +290,7 @@ func (dq *ListDeque[T]) Back() *T {
 	}
 }
 
+// Front returns the first element of the deque or a nil pointer.
 func (dq *ListDeque[T]) Front() *T {
 	if element, ok := dq.list.Front().Value.(T); ok {
 		return &element
@@ -260,15 +299,18 @@ func (dq *ListDeque[T]) Front() *T {
 	}
 }
 
+// Len returns the number of elements in the deque.
 func (dq *ListDeque[T]) Len() int {
 	return dq.list.Len()
 }
 
+// PushBack adds an element to the back of the deque.
 func (dq *ListDeque[T]) PushBack(v T) error {
 	dq.list.PushBack(v)
 	return nil
 }
 
+// PopBack removes the last element from the deque and returns it.
 func (dq *ListDeque[T]) PopBack() (T, error) {
 	back := dq.list.Back()
 	if back == nil {
@@ -282,11 +324,13 @@ func (dq *ListDeque[T]) PopBack() (T, error) {
 	}
 }
 
+// PushFront adds an element to the front of the deque.
 func (dq *ListDeque[T]) PushFront(v T) error {
 	dq.list.PushFront(v)
 	return nil
 }
 
+// PopFront removes the first element from the deque and returns it.
 func (dq *ListDeque[T]) PopFront() (T, error) {
 	front := dq.list.Front()
 	if front == nil {
@@ -300,11 +344,13 @@ func (dq *ListDeque[T]) PopFront() (T, error) {
 	}
 }
 
+// BlocksDeque is a double-ended queue that is implemented using a linked list of blocks.
 type BlocksDeque[T any] struct {
 	blocks    ListDeque[*ArrayDeque[T]]
 	blocksize int
 }
 
+// NewBlocksDeque creates a new BlocksDeque.
 func NewBlocksDeque[T any](blocksize int) *BlocksDeque[T] {
 	result := &BlocksDeque[T]{
 		*NewListDeque[*ArrayDeque[T]](),
@@ -314,6 +360,7 @@ func NewBlocksDeque[T any](blocksize int) *BlocksDeque[T] {
 	return result
 }
 
+// Capacity returns the maximum number of elements that can be stored in the deque.
 func (dq *BlocksDeque[T]) Capacity() int {
 	return -1
 }
@@ -326,14 +373,17 @@ func (dq *BlocksDeque[T]) backBlock() *ArrayDeque[T] {
 	return *dq.blocks.Back()
 }
 
+// Back returns the last element of the deque or a nil pointer.
 func (dq *BlocksDeque[T]) Back() *T {
 	return dq.backBlock().Back()
 }
 
+// Front returns the first element of the deque or a nil pointer.
 func (dq *BlocksDeque[T]) Front() *T {
 	return dq.frontBlock().Front()
 }
 
+// Len returns the number of elements in the deque.
 func (dq *BlocksDeque[T]) Len() int {
 	if dq.blocks.Len() == 1 {
 		return dq.frontBlock().Len()
@@ -341,6 +391,7 @@ func (dq *BlocksDeque[T]) Len() int {
 	return dq.frontBlock().Len() + dq.backBlock().Len() + dq.blocksize*(dq.blocks.Len()-2)
 }
 
+// PushBack adds an element to the back of the deque.
 func (dq *BlocksDeque[T]) PushBack(v T) error {
 	if err := dq.backBlock().PushBack(v); err == ErrListFull {
 		dq.blocks.PushBack(NewArrayDeque[T](dq.blocksize))
@@ -350,6 +401,7 @@ func (dq *BlocksDeque[T]) PushBack(v T) error {
 	}
 }
 
+// PopBack removes the last element from the deque and returns it.
 func (dq *BlocksDeque[T]) PopBack() (T, error) {
 	if result, err := dq.backBlock().PopBack(); err != nil {
 		return result, err
@@ -361,6 +413,7 @@ func (dq *BlocksDeque[T]) PopBack() (T, error) {
 	}
 }
 
+// PushFront adds an element to the front of the deque.
 func (dq *BlocksDeque[T]) PushFront(v T) error {
 	if err := dq.frontBlock().PushFront(v); err == ErrListFull {
 		dq.blocks.PushFront(NewArrayDeque[T](dq.blocksize))
@@ -370,6 +423,7 @@ func (dq *BlocksDeque[T]) PushFront(v T) error {
 	}
 }
 
+// PopFront removes the first element from the deque and returns it.
 func (dq *BlocksDeque[T]) PopFront() (T, error) {
 	if result, err := dq.frontBlock().PopFront(); err != nil {
 		return result, err

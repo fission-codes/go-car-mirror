@@ -11,17 +11,20 @@ import (
 var ErrExpectedByteString = errors.New("expected byte string")
 var ErrWrongCborTagNumber = errors.New("wrong CBOR tag for CID")
 
-// The purpose of this is really just to add CBOR serialization/deserialization to the base CID type
+// Cid wraps cid.Cid, in order to add CBOR serialization and deserialization.
 type Cid struct{ cid.Cid }
 
+// Unwrap returns the underlying cid.Cid.
 func (ipfsCid Cid) Unwrap() cid.Cid {
 	return ipfsCid.Cid
 }
 
+// WrapCid wraps a cid.Cid in a Cid.
 func WrapCid(cid cid.Cid) Cid {
 	return Cid{cid}
 }
 
+// MarshalCBOR implements the CBOR marshaler interface.
 func (ipfsCid Cid) MarshalCBOR() ([]byte, error) {
 	cidBytes := make([]byte, 0, ipfsCid.ByteLen()+1)
 	cidBytes = append(cidBytes, 0)
@@ -33,6 +36,7 @@ func (ipfsCid Cid) MarshalCBOR() ([]byte, error) {
 	})
 }
 
+// UnmarshalCBOR implements the CBOR unmarshaler interface.
 func (ipfsCid *Cid) UnmarshalCBOR(bytes []byte) error {
 	tag := cbor.Tag{}
 	if err := cbor.Unmarshal(bytes, &tag); err != nil {
