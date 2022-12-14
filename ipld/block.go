@@ -63,7 +63,7 @@ func (blk *Block) Size() int64 {
 }
 
 // GetChildren returns the Cids of the children of the block.
-func (blk *Block) GetChildren() []Cid {
+func (blk *Block) Children() []Cid {
 	links := blk.Links()
 	result := make([]Cid, len(links))
 	for i, node := range blk.Links() {
