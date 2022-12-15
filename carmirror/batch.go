@@ -95,7 +95,7 @@ func (sbbr *SimpleBatchBlockReceiver[I]) HandleList(flags BatchState, list []Raw
 	return nil
 }
 
-// SimpleBatchBlockSender is a simple implementation of BatchBlockSender.
+// SimpleBatchBlockSender is a simple implementation of BlockSender which wraps a BatchBlockSender
 type SimpleBatchBlockSender[I BlockId] struct {
 	orchestrator Orchestrator[BatchState]
 	list         []RawBlock[I]
