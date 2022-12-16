@@ -9,8 +9,8 @@ import (
 )
 
 type ClientSourceSessionData[I core.BlockId, R core.BlockIdRef[I]] struct {
-	Connection *ClientSenderConnection[I,R]  
-	Session *core.SenderSession[I, core.BatchState]
+	Connection *ClientSenderConnection[I, R]
+	Session    *core.SenderSession[I, core.BatchState]
 }
 
 func NewClientSourceSessionData[I core.BlockId, R core.BlockIdRef[I]](target string, store core.BlockStore[I], maxBatchSize uint32, allocator func() filter.Filter[I]) *ClientSourceSessionData[I, R] {
@@ -29,8 +29,8 @@ func NewClientSourceSessionData[I core.BlockId, R core.BlockIdRef[I]](target str
 }
 
 type ClientSinkSessionData[I core.BlockId, R core.BlockIdRef[I]] struct {
-	Connection *ClientReceiverConnection[I,R]  
-	Session *core.ReceiverSession[I, core.BatchState]
+	Connection *ClientReceiverConnection[I, R]
+	Session    *core.ReceiverSession[I, core.BatchState]
 }
 
 func NewClientSinkSessionData[I core.BlockId, R core.BlockIdRef[I]](target string, store core.BlockStore[I], maxBatchSize uint32, allocator func() filter.Filter[I]) *ClientSinkSessionData[I, R] {
@@ -56,62 +56,72 @@ type Client[I core.BlockId, R core.BlockIdRef[I]] struct {
 	allocator      func() filter.Filter[I]
 }
 
-func NewClient[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], config Config) *Client[I,R] {
-	return &Client[I,R] {
+func NewClient[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], config Config) *Client[I, R] {
+	return &Client[I, R]{
 		store,
-		util.NewSynchronizedMap[string, *ClientSourceSessionData[I,R]](),
-		util.NewSynchronizedMap[string, *ClientSinkSessionData[I,R]](),
+		util.NewSynchronizedMap[string, *ClientSourceSessionData[I, R]](),
+		util.NewSynchronizedMap[string, *ClientSinkSessionData[I, R]](),
 		config.MaxBatchSize,
 		NewBloomAllocator[I](&config),
 	}
 }
 
-func (c *Client[I,R]) GetSourceSession(url string) (*ClientSourceSessionData[I,R], error) {
+func (c *Client[I, R]) GetSourceSession(url string) (*ClientSourceSessionData[I, R], error) {
 	if session, ok := c.sourceSessions.Get(url); ok {
 		return session, nil
 	} else {
 		session = c.sourceSessions.GetOrInsert(
 			url,
-			NewClientSourceSessionData[I,R](
-				url + "/cm/blocks",
+			NewClientSourceSessionData[I, R](
+				url+"/cm/blocks",
 				c.store,
 				c.maxBatchSize,
 				c.allocator,
-			)
+			),
 		)
 		return session, nil
 	}
 }
 
-func (c *Client[I,R]) GetSinkSession(url string) (*ClientSinkSessionData[I,R], error) {
+func (c *Client[I, R]) GetSinkSession(url string) (*ClientSinkSessionData[I, R], error) {
 	if session, ok := c.sinkSessions.Get(url); ok {
 		return session, nil
 	} else {
 		session = c.sinkSessions.GetOrInsert(
 			url,
-			NewClientSinkSessionData[I,R](
-				url + "/cm/status",
+			NewClientSinkSessionData[I, R](
+				url+"/cm/status",
 				c.store,
 				c.maxBatchSize,
 				c.allocator,
-			)
+			),
 		)
 		return session, nil
 	}
 }
 
-func (c *Client[I,R]) SourceSessions() []string {
+func (c *Client[I, R]) SourceSessions() []string {
 	return c.sourceSessions.Keys()
 }
 
-func (c *Client[I,R]) SinkSessions() []string {
+func (c *Client[I, R]) SinkSessions() []string {
 	return c.sinkSessions.Keys()
 }
 
-func (c *Client[I,R]) Send(url string, id I) error {
+func (c *Client[I, R]) Send(url string, id I) error {
 	session, err := c.GetSourceSession(url)
-	if (err != nil) {
+	if err != nil {
 		return err
 	}
 	session.Session.Enqueue(id)
+	return nil
+}
+
+func (c *Client[I, R]) Receive(url string, id I) error {
+	_, err := c.GetSinkSession(url)
+	if err != nil {
+		return err
+	}
+	// TODO: Need something here
+	return nil
 }
