@@ -2,6 +2,8 @@ package http
 
 import (
 	"bufio"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"net/http"
 	"time"
@@ -9,10 +11,11 @@ import (
 	core "github.com/fission-codes/go-car-mirror/carmirror"
 	"github.com/fission-codes/go-car-mirror/filter"
 	"github.com/fission-codes/go-car-mirror/messages"
+	"github.com/fission-codes/go-car-mirror/util"
 	golog "github.com/ipfs/go-log/v2"
 )
 
-var log = golog.Logger("server")
+var log = golog.Logger("http")
 
 type SessionToken string
 
@@ -40,10 +43,46 @@ func NewBloomAllocator[I core.BlockId](config *Config) func() filter.Filter[I] {
 	}
 }
 
+type ServerSourceSessionData[I core.BlockId, R core.BlockIdRef[I]] struct {
+	Connection *ServerSenderConnection[I, R]
+	Session    *core.SenderSession[I, core.BatchState]
+}
+
+func NewServerSourceSessionData[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], maxBatchSize uint32, allocator func() filter.Filter[I]) *ServerSourceSessionData[I, R] {
+	connection := NewServerSenderConnection[I, R](maxBatchSize)
+	return &ServerSourceSessionData[I, R]{
+		connection,
+		core.NewSenderSession[I, core.BatchState](
+			store,
+			connection,
+			filter.NewSynchronizedFilter[I](filter.NewEmptyFilter[I](allocator)),
+			core.NewBatchSendOrchestrator(),
+		),
+	}
+}
+
+type ServerSinkSessionData[I core.BlockId, R core.BlockIdRef[I]] struct {
+	Connection *ServerReceiverConnection[I, R]
+	Session    *core.ReceiverSession[I, core.BatchState]
+}
+
+func NewServerSinkSessionData[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], maxBatchSize uint32, allocator func() filter.Filter[I]) *ServerSinkSessionData[I, R] {
+	connection := NewServerReceiverConnection[I, R](maxBatchSize)
+	return &ServerSinkSessionData[I, R]{
+		connection,
+		core.NewReceiverSession[I, core.BatchState](
+			store,
+			connection,
+			core.NewSimpleStatusAccumulator(allocator()),
+			core.NewBatchReceiveOrchestrator(),
+		),
+	}
+}
+
 type Server[I core.BlockId, R core.BlockIdRef[I]] struct {
 	store          core.BlockStore[I]
-	sourceSessions map[SessionToken]*core.SenderSession[I, core.BatchState]
-	sinkSessions   map[SessionToken]*core.ReceiverSession[I, core.BatchState]
+	sourceSessions *util.SynchronizedMap[SessionToken, *ServerSourceSessionData[I, R]]
+	sinkSessions   *util.SynchronizedMap[SessionToken, *ServerSinkSessionData[I, R]]
 	maxBatchSize   uint32
 	allocator      func() filter.Filter[I]
 	http           *http.Server
@@ -52,8 +91,8 @@ type Server[I core.BlockId, R core.BlockIdRef[I]] struct {
 func NewServer[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], config Config) *Server[I, R] {
 	server := &Server[I, R]{
 		store,
-		make(map[SessionToken]*core.SenderSession[I, core.BatchState]),
-		make(map[SessionToken]*core.ReceiverSession[I, core.BatchState]),
+		util.NewSynchronizedMap[SessionToken, *ServerSourceSessionData[I, R]](),
+		util.NewSynchronizedMap[SessionToken, *ServerSinkSessionData[I, R]](),
 		config.MaxBatchSize,
 		NewBloomAllocator[I](&config),
 		nil,
@@ -80,48 +119,108 @@ func NewServer[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], c
 	return server
 }
 
+func (srv *Server[I, R]) GenerateToken(remoteAddr string) SessionToken {
+	// We might at some stage do something to verify session tokens, but for now they are
+	// just 128 bit random numbers
+	token := make([]byte, 16)
+	_, err := rand.Read(token)
+	if err != nil {
+		panic(err)
+	}
+	return SessionToken(base64.URLEncoding.EncodeToString(token))
+}
+
 func (srv *Server[I, R]) HandleStatus(response http.ResponseWriter, request *http.Request) {
-	sourceCookie, err := request.Cookie("sourceCookie")
+
+	// First get a session token from a cookie; if no such cookie exists, create one
+	var sessionToken SessionToken
+	sourceCookie, err := request.Cookie("sourceSessionToken")
 	if err != nil {
 		switch {
 		case errors.Is(err, http.ErrNoCookie):
-			http.Error(response, "cookie not found", http.StatusBadRequest)
+			sessionToken = srv.GenerateToken(request.RemoteAddr)
+			http.SetCookie(response, &http.Cookie{Name: "sourceSessionToken", Value: (string)(sessionToken)})
 		default:
 			log.Errorf("unexpected error: %v", err)
 			http.Error(response, "server error", http.StatusInternalServerError)
+			return
 		}
-		return
+	} else {
+		sessionToken = SessionToken(sourceCookie.Value)
 	}
 
-	sourceSession, ok := srv.sourceSessions[SessionToken(sourceCookie.Value)]
+	// Find the session from the session token, or create one
+	sourceSession, ok := srv.sourceSessions.Get(sessionToken)
 	if !ok {
-		sourceSession = core.NewSenderSession[I, core.BatchState](
-			srv.store,
-			NewServerSenderConnection[I, R](srv.maxBatchSize),
-			filter.NewSynchronizedFilter[I](filter.NewEmptyFilter[I](srv.allocator)),
-			core.NewBatchSendOrchestrator(),
-		)
-		// TODO: synchronize sourceSessions
-		// TODO: add sourceSession to map
-		// TODO: figure out how to provide access to the response channel
+		sourceSession = NewServerSourceSessionData[I, R](srv.store, srv.maxBatchSize, srv.allocator)
+		srv.sourceSessions.Add(sessionToken, sourceSession)
 	}
 
+	// Parse the request to get the status message
 	message := messages.StatusMessage[I, R, core.BatchState]{}
 	messageReader := bufio.NewReader(request.Body)
 	if err := message.Read(messageReader); err != nil {
-		log.Errorf("could not parse state message for: %v", sourceCookie)
+		log.Errorf("could not parse state message for: %v", sessionToken)
 		http.Error(response, "bad message format", http.StatusBadRequest)
 		return
 	}
 
-	sourceSession.HandleStatus(message.Have.Any(), message.Want)
-	sourceSession.HandleState(message.State)
-	sourceSession.
-		request.Body.Close()
+	// Send the status message to the session
+	sourceSession.Session.HandleStatus(message.Have.Any(), message.Want)
+	sourceSession.Session.HandleState(message.State)
+	request.Body.Close()
 
+	// Wait for a response from the session
+	blocks := <-sourceSession.Connection.ResponseChannel()
+
+	// Write the response
 	response.WriteHeader(http.StatusAccepted)
+	blocks.Write(response)
 }
 
-func (*Server[I]) HandleBlocks(response http.ResponseWriter, request *http.Request) {
+func (srv *Server[I, R]) HandleBlocks(response http.ResponseWriter, request *http.Request) {
+	// First get a session token from a cookie; if no such cookie exists, create one
+	var sessionToken SessionToken
+	sinkCookie, err := request.Cookie("sinkSessionToken")
+	if err != nil {
+		switch {
+		case errors.Is(err, http.ErrNoCookie):
+			sessionToken = srv.GenerateToken(request.RemoteAddr)
+			http.SetCookie(response, &http.Cookie{Name: "sinkSessionToken", Value: (string)(sessionToken)})
+		default:
+			log.Errorf("unexpected error: %v", err)
+			http.Error(response, "server error", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		sessionToken = SessionToken(sinkCookie.Value)
+	}
 
+	// Find the session from the session token, or create one
+	sinkSession, ok := srv.sinkSessions.Get(sessionToken)
+	if !ok {
+		sinkSession = NewServerSinkSessionData[I, R](srv.store, srv.maxBatchSize, srv.allocator)
+		srv.sinkSessions.Add(sessionToken, sinkSession)
+	}
+
+	// Parse the request to get the blocks message
+	message := messages.BlocksMessage[I, R, core.BatchState]{}
+	messageReader := bufio.NewReader(request.Body)
+	if err := message.Read(messageReader); err != nil {
+		log.Errorf("could not parse blocks message for: %v", sessionToken)
+		http.Error(response, "bad message format", http.StatusBadRequest)
+		return
+	}
+	request.Body.Close()
+
+	// Send the blocks to the sessions
+	receiver := core.NewSimpleBatchBlockReceiver[I](sinkSession.Session)
+	receiver.HandleList(message.State, message.Car.Blocks)
+
+	// Wait for a response from the session
+	status := <-sinkSession.Connection.ResponseChannel()
+
+	// Write the response
+	response.WriteHeader(http.StatusAccepted)
+	status.Write(response)
 }
