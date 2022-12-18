@@ -8,10 +8,13 @@ clean:
 	go clean ./...
 	rm -rf testdata
 
-build:
+generate:
+	go generate ./...
+
+build: generate
 	go build ./...
 
-test:
+test: generate
 	go test -count=1 ./...
 	./fuzz.sh
 

@@ -444,3 +444,5 @@ func (ir *InstrumentedStatusReceiver[I, F]) HandleState(state F) {
 	ir.stats.Logger().Debugw("InstrumentedStatusReceiver", "method", "HandleStatus", "state", state)
 	ir.receiver.HandleState(state)
 }
+
+//go:generate go run gen.go

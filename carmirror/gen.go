@@ -1,0 +1,109 @@
+//go:build ignore
+
+package main
+
+import (
+	"fmt"
+	"os"
+	"reflect"
+	"strings"
+
+	"go/format"
+
+	"github.com/fission-codes/go-car-mirror/carmirror"
+)
+
+func main() {
+	var code strings.Builder
+
+	fmt.Fprintln(&code, "package carmirror")
+	fmt.Fprintln(&code)
+
+	// We have to use a pointer here, or else we won't get any methods.
+	t := reflect.TypeOf(&carmirror.BatchSendOrchestrator{})
+
+	// Generate the instrumented struct.
+	// Note that since t is a pointer, we need to use t.Elem() to get the underlying type.
+	// If t was not a pointer, we could use t directly.
+	fmt.Fprintf(&code, "type Instrumented%s struct {\n", t.Elem().Name())
+	fmt.Fprintf(&code, "	original *%s\n", t.Elem().Name())
+	fmt.Fprintf(&code, "	stats Stats\n")
+	fmt.Fprintf(&code, "}\n")
+
+	fmt.Fprintln(&code)
+
+	// Generate the New method.
+	fmt.Fprintf(&code, "func NewInstrumented%s(original *%s, stats Stats) *Instrumented%s {\n", t.Elem().Name(), t.Elem().Name(), t.Elem().Name())
+	fmt.Fprintf(&code, "	return &Instrumented%s{\n", t.Elem().Name())
+	fmt.Fprintf(&code, "		original: original,\n")
+	fmt.Fprintf(&code, "		stats: stats,\n")
+	fmt.Fprintf(&code, "	}\n")
+	fmt.Fprintf(&code, "}\n")
+
+	fmt.Fprintln(&code)
+
+	// Generate the instrumented methods.
+	for i := 0; i < t.NumMethod(); i++ {
+		method := t.Method(i)
+
+		fmt.Fprintf(&code, "func (i *Instrumented%s) %s(", t.Elem().Name(), method.Name)
+		mType := method.Type
+		for j := 1; j < mType.NumIn(); j++ {
+			param := mType.In(j)
+			fmt.Fprintf(&code, "%s %s", lowerFirstLetter(param.Name()), param.Name())
+			if j < mType.NumIn()-1 {
+				fmt.Fprintf(&code, ", ")
+			}
+		}
+		fmt.Fprintf(&code, ")")
+		if mType.NumOut() > 0 {
+			fmt.Fprintf(&code, " ")
+			for j := 0; j < mType.NumOut(); j++ {
+				ret := mType.Out(j)
+				fmt.Fprintf(&code, "%s", ret.Name())
+				if j < mType.NumOut()-1 {
+					fmt.Fprintf(&code, ", ")
+				}
+			}
+		}
+		fmt.Fprintf(&code, " {\n")
+		fmt.Fprintf(&code, "	i.stats.Logger().Debugw(\"Instrumented%s\", \"method\", \"%s\")\n", t.Elem().Name(), method.Name)
+		fmt.Fprintf(&code, "	return i.original.%s(", method.Name)
+		for j := 1; j < mType.NumIn(); j++ {
+			param := mType.In(j)
+			fmt.Fprintf(&code, "%s", lowerFirstLetter(param.Name()))
+			if j < mType.NumIn()-1 {
+				fmt.Fprintf(&code, ", ")
+			}
+		}
+		fmt.Fprintf(&code, ")\n")
+		fmt.Fprintf(&code, "}\n")
+
+		fmt.Fprintln(&code)
+	}
+
+	// fmt.Printf("%s", code.String())
+
+	formattedCode, err := format.Source([]byte(code.String()))
+	if err != nil {
+		fmt.Println("Error formatting code:", err)
+		return
+	}
+
+	newFilename := "instrumented_gen.go"
+	out, err := os.Create(newFilename)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	defer out.Close()
+
+	fmt.Fprintf(out, "%s", formattedCode)
+}
+
+func lowerFirstLetter(s string) string {
+	if len(s) == 0 {
+		return s
+	}
+	return strings.ToLower(s[:1]) + s[1:]
+}
