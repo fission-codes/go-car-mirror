@@ -14,13 +14,35 @@ import (
 )
 
 func main() {
+
+	if len(os.Args) != 3 {
+		fmt.Println("Usage: go run gen.go <struct name> <output file>")
+		os.Exit(1)
+	}
+	structName := os.Args[1]
+	newStructName := "Instrumented" + structName
+	outputFile := os.Args[2]
+
+	fmt.Printf("Writing struct %s to file %s.\n", newStructName, outputFile)
+
 	var code strings.Builder
+
+	// Can't find a way to go from string to struct reference, without building my own registry.
+	structNameToInstance := map[string]interface{}{
+		"BatchSendOrchestrator":    &carmirror.BatchSendOrchestrator{},
+		"BatchReceiveOrchestrator": &carmirror.BatchReceiveOrchestrator{},
+	}
+	s, ok := structNameToInstance[structName]
+	if !ok {
+		fmt.Println("Unknown struct name:", structName)
+		os.Exit(1)
+	}
+
+	// We have to use a pointer here, or else we won't get any methods.
+	t := reflect.TypeOf(s)
 
 	fmt.Fprintln(&code, "package carmirror")
 	fmt.Fprintln(&code)
-
-	// We have to use a pointer here, or else we won't get any methods.
-	t := reflect.TypeOf(&carmirror.BatchSendOrchestrator{})
 
 	// Generate the instrumented struct.
 	// Note that since t is a pointer, we need to use t.Elem() to get the underlying type.
@@ -90,8 +112,7 @@ func main() {
 		return
 	}
 
-	newFilename := "instrumented_gen.go"
-	out, err := os.Create(newFilename)
+	out, err := os.Create(outputFile)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)

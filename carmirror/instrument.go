@@ -445,4 +445,5 @@ func (ir *InstrumentedStatusReceiver[I, F]) HandleState(state F) {
 	ir.receiver.HandleState(state)
 }
 
-//go:generate go run gen.go
+//go:generate go run gen.go BatchSendOrchestrator batch_send_orchestrator_gen.go
+//go:generate go run gen.go BatchReceiveOrchestrator batch_receive_orchestrator_gen.go
