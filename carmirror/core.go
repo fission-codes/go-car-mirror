@@ -357,8 +357,8 @@ func NewReceiverSession[I BlockId, F Flags](
 	}
 }
 
-func (rs *ReceiverSession[I, F]) GetInfo() ReceiverSessionInfo[F] {
-	return ReceiverSessionInfo[F]{
+func (rs *ReceiverSession[I, F]) GetInfo() *ReceiverSessionInfo[F] {
+	return &ReceiverSessionInfo[F]{
 		PendingCount:  uint(rs.pending.Len()),
 		Status:        rs.orchestrator.State(),
 		HavesEstimate: rs.accumulator.HaveCount(),
@@ -505,8 +505,8 @@ func NewSenderSession[I BlockId, F Flags](store BlockStore[I], filter filter.Fil
 	}
 }
 
-func (ss *SenderSession[I, F]) GetInfo() SenderSessionInfo[F] {
-	return SenderSessionInfo[F]{
+func (ss *SenderSession[I, F]) GetInfo() *SenderSessionInfo[F] {
+	return &SenderSessionInfo[F]{
 		PendingCount:  uint(ss.pending.Len()),
 		Status:        ss.orchestrator.State(),
 		HavesEstimate: uint(ss.filter.Count()),
@@ -573,17 +573,18 @@ func (ss *SenderSession[I, F]) Run(connection SenderConnection[F, I]) error {
 // receiverHave, receiverWant?
 func (ss *SenderSession[I, F]) HandleStatus(have filter.Filter[I], want []I) {
 	if err := ss.orchestrator.Notify(BEGIN_RECEIVE); err != nil {
-		ss.log.Errorw("SenderSession", "method", "HandleStatus", "error", err)
+		ss.log.Errorw("error notifying BEGIN_RECEIVE", "object", "SenderSession", "method", "HandleStatus", "error", err)
+		return
 	}
 	defer ss.orchestrator.Notify(END_RECEIVE)
-	ss.log.Debugw("SenderSession", "method", "HandleStatus", "pending", ss.pending.Len(), "filter", ss.filter.Count())
+	ss.log.Debugw("begin processing", "object", "SenderSession", "method", "HandleStatus", "pending", ss.pending.Len(), "filter", ss.filter.Count())
 	ss.filter = ss.filter.AddAll(have)
-	ss.log.Debugw("SenderSession", "method", "HandleStatus", "filter", ss.filter.Count())
-	ss.filter.Dump(ss.log, "SenderSession filter - ")
+	ss.log.Debugw("incoming have filter merged", "object", "SenderSession", "method", "HandleStatus", "filter", ss.filter.Count())
+	//ss.filter.Dump(ss.log, "SenderSession filter - ")
 	for _, id := range want {
 		ss.pending.PushFront(id) // send wants to the front of the queue
 	}
-	ss.log.Debugw("SenderSession", "method", "HandleStatus", "pending", ss.pending.Len())
+	ss.log.Debugw("incoming want list merged", "obect", "SenderSession", "method", "HandleStatus", "pending", ss.pending.Len())
 }
 
 // Close closes the sender session.
