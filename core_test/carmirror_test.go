@@ -234,7 +234,6 @@ func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, roo
 
 	sender_session := NewSenderSession[mock.BlockId, BatchState](
 		NewInstrumentedBlockStore[mock.BlockId](sender_store, GLOBAL_STATS.WithContext("SenderStore")),
-		connection,
 		filter.NewSynchronizedFilter(makeBloom(1024)),
 		NewInstrumentedOrchestrator[BatchState](NewBatchSendOrchestrator(), GLOBAL_STATS.WithContext("BatchSendOrchestrator")),
 	)
@@ -243,7 +242,6 @@ func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, roo
 
 	receiver_session := NewReceiverSession[mock.BlockId, BatchState](
 		NewInstrumentedBlockStore[mock.BlockId](NewSynchronizedBlockStore[mock.BlockId](receiver_store), GLOBAL_STATS.WithContext("ReceiverStore")),
-		connection,
 		NewSimpleStatusAccumulator[mock.BlockId](filter.NewSynchronizedFilter(makeBloom(1024))),
 		NewInstrumentedOrchestrator[BatchState](NewBatchReceiveOrchestrator(), GLOBAL_STATS.WithContext("BatchReceiveOrchestrator")),
 	)
@@ -258,13 +256,13 @@ func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, roo
 	err_chan := make(chan error)
 	go func() {
 		log.Debugf("sender session started")
-		err_chan <- sender_session.Run()
+		err_chan <- sender_session.Run(connection)
 		log.Debugf("sender session terminated")
 	}()
 
 	go func() {
 		log.Debugf("receiver session started")
-		err_chan <- receiver_session.Run()
+		err_chan <- receiver_session.Run(connection)
 		log.Debugf("receiver session terminated")
 	}()
 

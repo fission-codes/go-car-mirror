@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding"
 	"encoding/json"
+	"fmt"
 	"io"
 	"sync"
 
@@ -203,10 +204,14 @@ type StatusReceiver[I BlockId, F Flags] interface {
 
 // StatusAccumulator is responsible for collecting status.
 type StatusAccumulator[I BlockId] interface {
-	// Have records that the ??? has a block.
+	// Have records that the Sink has a block.
 	Have(I) error
-	// Want records that the ??? wants a block.
+	// Get the number of unique Haves since the last Send
+	HaveCount() uint
+	// Want records that the Sink wants a block.
 	Want(I) error
+	// Get the number of unique Wants since the last Send
+	WantCount() uint
 
 	// Send sends the status to the StatusSender.
 	Send(StatusSender[I]) error
@@ -319,27 +324,45 @@ type ReceiverSession[
 	F Flags,
 ] struct {
 	accumulator  StatusAccumulator[I]
-	connection   ReceiverConnection[F, I]
 	orchestrator Orchestrator[F]
 	store        BlockStore[I]
 	pending      *util.SynchronizedDeque[Block[I]]
 	log          *zap.SugaredLogger
 }
 
+// Struct for returning summary information about the session
+type ReceiverSessionInfo[F Flags] struct {
+	PendingCount  uint
+	Status        F
+	HavesEstimate uint
+	Wants         uint
+}
+
+func (inf *ReceiverSessionInfo[F]) String() string {
+	return fmt.Sprintf("pnd:%6v have:%6v want:%6v %v", inf.PendingCount, inf.HavesEstimate, inf.Wants, inf.Status)
+}
+
 // NewReceiverSession creates a new ReceiverSession.
 func NewReceiverSession[I BlockId, F Flags](
 	store BlockStore[I],
-	connection ReceiverConnection[F, I],
 	accumulator StatusAccumulator[I],
 	orchestrator Orchestrator[F],
 ) *ReceiverSession[I, F] {
 	return &ReceiverSession[I, F]{
 		accumulator,
-		connection,
 		orchestrator,
 		store,
 		util.NewSynchronizedDeque[Block[I]](util.NewBlocksDeque[Block[I]](2048)),
 		&log.SugaredLogger,
+	}
+}
+
+func (rs *ReceiverSession[I, F]) GetInfo() ReceiverSessionInfo[F] {
+	return ReceiverSessionInfo[F]{
+		PendingCount:  uint(rs.pending.Len()),
+		Status:        rs.orchestrator.State(),
+		HavesEstimate: rs.accumulator.HaveCount(),
+		Wants:         rs.accumulator.WantCount(),
 	}
 }
 
@@ -389,8 +412,8 @@ func (rs *ReceiverSession[I, F]) HandleBlock(rawBlock RawBlock[I]) {
 // Run runs the receiver session.
 // TODO: Is start a better name?  Starting a session?
 // Or begin, to match the event names?
-func (rs *ReceiverSession[I, F]) Run() error {
-	sender := rs.connection.OpenStatusSender(rs.orchestrator)
+func (rs *ReceiverSession[I, F]) Run(connection ReceiverConnection[F, I]) error {
+	sender := connection.OpenStatusSender(rs.orchestrator)
 
 	rs.orchestrator.Notify(BEGIN_SESSION)
 	defer func() {
@@ -446,13 +469,23 @@ func (rs *ReceiverSession[I, F]) IsClosed() bool {
 	return rs.orchestrator.IsClosed()
 }
 
+// Struct for returting summary information about the session
+type SenderSessionInfo[F Flags] struct {
+	PendingCount  uint
+	Status        F
+	HavesEstimate uint
+}
+
+func (inf *SenderSessionInfo[F]) String() string {
+	return fmt.Sprintf("pnd:%6v have:%6v %v", inf.PendingCount, inf.HavesEstimate, inf.Status)
+}
+
 // SenderSession is a session for sending blocks.
 type SenderSession[
 	I BlockId,
 	F Flags,
 ] struct {
 	store        BlockStore[I]
-	connection   SenderConnection[F, I]
 	orchestrator Orchestrator[F]
 	filter       filter.Filter[I]
 	sent         sync.Map
@@ -461,10 +494,9 @@ type SenderSession[
 }
 
 // NewSenderSession creates a new SenderSession.
-func NewSenderSession[I BlockId, F Flags](store BlockStore[I], connection SenderConnection[F, I], filter filter.Filter[I], orchestrator Orchestrator[F]) *SenderSession[I, F] {
+func NewSenderSession[I BlockId, F Flags](store BlockStore[I], filter filter.Filter[I], orchestrator Orchestrator[F]) *SenderSession[I, F] {
 	return &SenderSession[I, F]{
 		store,
-		connection,
 		orchestrator,
 		filter,
 		sync.Map{},
@@ -473,10 +505,18 @@ func NewSenderSession[I BlockId, F Flags](store BlockStore[I], connection Sender
 	}
 }
 
+func (ss *SenderSession[I, F]) GetInfo() SenderSessionInfo[F] {
+	return SenderSessionInfo[F]{
+		PendingCount:  uint(ss.pending.Len()),
+		Status:        ss.orchestrator.State(),
+		HavesEstimate: uint(ss.filter.Count()),
+	}
+}
+
 // Run runs the sender session.
 // TODO: Consider renaming to Start or Begin or Open to match Close/IsClosed?
-func (ss *SenderSession[I, F]) Run() error {
-	sender := ss.connection.OpenBlockSender(ss.orchestrator)
+func (ss *SenderSession[I, F]) Run(connection SenderConnection[F, I]) error {
+	sender := connection.OpenBlockSender(ss.orchestrator)
 	if err := ss.orchestrator.Notify(BEGIN_SESSION); err != nil {
 		return err
 	}
