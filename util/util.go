@@ -146,6 +146,12 @@ func (m *SynchronizedMap[K, V]) Add(key K, value V) {
 	m.data[key] = value
 }
 
+func (m *SynchronizedMap[K, V]) Remove(key K) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	delete(m.data, key)
+}
+
 func (m *SynchronizedMap[K, V]) Get(key K) (V, bool) {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
@@ -153,13 +159,13 @@ func (m *SynchronizedMap[K, V]) Get(key K) (V, bool) {
 	return datum, ok
 }
 
-func (m *SynchronizedMap[K, V]) GetOrInsert(key K, value V) V {
+func (m *SynchronizedMap[K, V]) GetOrInsert(key K, creator func() V) V {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	datum, ok := m.data[key]
 	if !ok {
-		m.data[key] = value
-		datum = value
+		datum = creator()
+		m.data[key] = datum
 	}
 	return datum
 }
