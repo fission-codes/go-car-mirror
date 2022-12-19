@@ -3,7 +3,9 @@ package http
 import (
 	"context"
 	"testing"
+	"time"
 
+	core "github.com/fission-codes/go-car-mirror/carmirror"
 	"github.com/fission-codes/go-car-mirror/filter"
 	mock "github.com/fission-codes/go-car-mirror/fixtures"
 	"github.com/fission-codes/go-car-mirror/util"
@@ -45,8 +47,31 @@ func TestClientSend(t *testing.T) {
 	server := NewServer[mock.BlockId](serverStore, config)
 	client := NewClient[mock.BlockId](clientStore, config)
 
-	server.http.ListenAndServe()
-	client.Send("localhost:8080", rootId)
+	errChan := make(chan error)
 
-	// Figure out how to close down
+	go func() { errChan <- server.http.ListenAndServe() }()
+
+	// Give the server time to start up
+	time.Sleep(100 * time.Millisecond)
+
+	client.Send("http://localhost:8021", rootId)
+	client.CloseSource("http://localhost:8021") // will close session when finished
+
+	var err error
+	var info core.SenderSessionInfo[core.BatchState]
+	// Wait for the session to go away
+	for info, err = client.SourceInfo("http://localhost:8021"); err == nil; {
+		log.Debugf("client info: %s", info.String())
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if err != ErrInvalidSession {
+		t.Errorf("Closed with unexpected error %v", err)
+	}
+
+	server.http.Close()
+
+	if err = <-errChan; err != nil {
+		t.Errorf("Server closed with error %v", err)
+	}
 }
