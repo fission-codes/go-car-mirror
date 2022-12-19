@@ -40,7 +40,7 @@ func (bbs *RequestBatchBlockSender[I, R]) SendList(state core.BatchState, blocks
 			log.Debugw("post response", "object", "RequestBatchBlockSender", "method", "SendList", "url", bbs.url)
 			responseMessage := messages.StatusMessage[I, R, core.BatchState]{}
 			bufferedReader := bufio.NewReader(resp.Body)
-			if err := responseMessage.Read(bufferedReader); !(err == io.EOF || err == nil) {
+			if err := responseMessage.Read(bufferedReader); err != nil {
 				log.Debugw("exit", "object", "RequestBatchBlockSender", "method", "SendList", "error", err)
 				return err
 			}
@@ -75,7 +75,7 @@ func (bbs *ResponseBatchBlockSender[I, R]) SendList(state core.BatchState, block
 }
 
 func (bbs *ResponseBatchBlockSender[I, R]) Close() error {
-	close(bbs.messages)
+	//close(bbs.messages)
 	return nil
 }
 
@@ -117,13 +117,16 @@ type ResponseStatusSender[I core.BlockId, R core.BlockIdRef[I]] struct {
 }
 
 func (ss *ResponseStatusSender[I, R]) SendStatus(have filter.Filter[I], want []I) error {
+	log.Debugw("enter", "object", "ResponseStatusSender", "method", "SendStatus", "have", have.Count(), "want", len(want))
 	state := ss.orchestrator.State()
-	ss.messages <- messages.NewStatusMessage[I, R, core.BatchState](state, have, want)
+	log.Debugw("returning message", "object", "ResponseStatusSender", "method", "SendStatus", "state", state)
+	ss.messages <- messages.NewStatusMessage[I, R](state, have, want)
+	log.Debugw("exit", "object", "ResponseStatusSender", "method", "SendStatus")
 	return nil
 }
 
 func (ss *ResponseStatusSender[I, R]) Close() error {
-	close(ss.messages)
+	//close(ss.messages)
 	return nil
 }
 

@@ -58,7 +58,7 @@ func TestClientSend(t *testing.T) {
 	client.CloseSource("http://localhost:8021") // will close session when finished
 
 	var err error
-	var info core.SenderSessionInfo[core.BatchState]
+	var info *core.SenderSessionInfo[core.BatchState]
 	// Wait for the session to go away
 	for info, err = client.SourceInfo("http://localhost:8021"); err == nil; {
 		log.Debugf("client info: %s", info.String())

@@ -70,7 +70,10 @@ func NewServerSinkSessionData[I core.BlockId, R core.BlockIdRef[I]](store core.B
 		core.NewReceiverSession[I, core.BatchState](
 			store,
 			core.NewSimpleStatusAccumulator(allocator()),
-			core.NewBatchReceiveOrchestrator(),
+			core.NewInstrumentedOrchestrator[core.BatchState](
+				core.NewBatchReceiveOrchestrator(),
+				core.GLOBAL_STATS.WithContext("BatchReceiveOrchestrator"),
+			),
 		),
 	}
 }
@@ -137,7 +140,13 @@ func (srv *Server[I, R]) HandleStatus(response http.ResponseWriter, request *htt
 		switch {
 		case errors.Is(err, http.ErrNoCookie):
 			sessionToken = srv.generateToken(request.RemoteAddr)
-			http.SetCookie(response, &http.Cookie{Name: "sourceSessionToken", Value: (string)(sessionToken)})
+			http.SetCookie(response, &http.Cookie{
+				Name:     "sinkSessionToken",
+				Value:    (string)(sessionToken),
+				Secure:   false,
+				SameSite: http.SameSiteDefaultMode,
+				MaxAge:   0,
+			})
 		default:
 			log.Errorf("unexpected error: %v", err)
 			http.Error(response, "server error", http.StatusInternalServerError)
@@ -192,8 +201,15 @@ func (srv *Server[I, R]) HandleBlocks(response http.ResponseWriter, request *htt
 	if err != nil {
 		switch {
 		case errors.Is(err, http.ErrNoCookie):
+			log.Debugw("generating cookie", "object", "Server", "method", "HandleBlocks")
 			sessionToken = srv.generateToken(request.RemoteAddr)
-			http.SetCookie(response, &http.Cookie{Name: "sinkSessionToken", Value: (string)(sessionToken)})
+			http.SetCookie(response, &http.Cookie{
+				Name:     "sinkSessionToken",
+				Value:    (string)(sessionToken),
+				Secure:   false,
+				SameSite: http.SameSiteDefaultMode,
+				MaxAge:   0,
+			})
 		default:
 			log.Errorw("could not retrieve cookie", "object", "Server", "method", "HandleBlocks", "error", err)
 			http.Error(response, "server error", http.StatusInternalServerError)
@@ -221,6 +237,7 @@ func (srv *Server[I, R]) HandleBlocks(response http.ResponseWriter, request *htt
 		}()
 
 	}
+	log.Debugw("have session for token", "object", "Server", "method", "HandleBlocks", "session", sessionToken)
 
 	// Parse the request to get the blocks message
 	message := messages.BlocksMessage[I, R, core.BatchState]{}
@@ -232,6 +249,8 @@ func (srv *Server[I, R]) HandleBlocks(response http.ResponseWriter, request *htt
 	}
 	request.Body.Close()
 
+	log.Debugw("processed blocks", "object", "Server", "method", "HandleBlocks", "session", sessionToken, "count", len(message.Car.Blocks))
+
 	// Send the blocks to the sessions
 	receiver := core.NewSimpleBatchBlockReceiver[I](sinkSession.Session)
 	err = receiver.HandleList(message.State, message.Car.Blocks)
@@ -240,12 +259,16 @@ func (srv *Server[I, R]) HandleBlocks(response http.ResponseWriter, request *htt
 	}
 
 	// Wait for a response from the session
+	log.Debugw("waiting on session", "object", "Server", "method", "HandleBlocks", "session", sessionToken)
 	status := <-sinkSession.Connection.ResponseChannel()
-	log.Debugw("session returned status", "object", "Server", "method", "HandleBlocks")
+	log.Debugw("session returned status", "object", "Server", "method", "HandleBlocks", "status", status)
 
 	// Write the response
 	response.WriteHeader(http.StatusAccepted)
-	status.Write(response)
+	err = status.Write(response)
+	if err != nil {
+		log.Errorf("unexpected error writing response", "object", "Server", "method", "HandleBlocks", "error", err)
+	}
 	log.Debugw("exit", "object", "Server", "method", "HandleBlocks")
 }
 
@@ -253,11 +276,11 @@ func (srv *Server[I, R]) SourceSessions() []SessionToken {
 	return srv.sourceSessions.Keys()
 }
 
-func (srv *Server[I, R]) SourceInfo(token SessionToken) (core.SenderSessionInfo[core.BatchState], error) {
+func (srv *Server[I, R]) SourceInfo(token SessionToken) (*core.SenderSessionInfo[core.BatchState], error) {
 	if session, ok := srv.sourceSessions.Get(token); ok {
 		return session.Session.GetInfo(), nil
 	} else {
-		return core.SenderSessionInfo[core.BatchState]{}, ErrInvalidSession
+		return nil, ErrInvalidSession
 	}
 }
 
@@ -265,10 +288,10 @@ func (srv *Server[I, R]) SinkSessions() []SessionToken {
 	return srv.sinkSessions.Keys()
 }
 
-func (srv *Server[I, R]) SinkInfo(token SessionToken) (core.ReceiverSessionInfo[core.BatchState], error) {
+func (srv *Server[I, R]) SinkInfo(token SessionToken) (*core.ReceiverSessionInfo[core.BatchState], error) {
 	if session, ok := srv.sinkSessions.Get(token); ok {
 		return session.Session.GetInfo(), nil
 	} else {
-		return core.ReceiverSessionInfo[core.BatchState]{}, ErrInvalidSession
+		return nil, ErrInvalidSession
 	}
 }

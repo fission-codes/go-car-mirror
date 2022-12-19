@@ -2,6 +2,7 @@ package http
 
 import (
 	"net/http"
+	"net/http/cookiejar"
 
 	core "github.com/fission-codes/go-car-mirror/carmirror"
 	"github.com/fission-codes/go-car-mirror/filter"
@@ -25,7 +26,17 @@ func NewClientSourceSessionData[I core.BlockId, R core.BlockIdRef[I]](target str
 		core.NewBatchSendOrchestrator(),
 	)
 
-	connection := NewClientSenderConnection[I, R](maxBatchSize, &http.Client{}, target, session)
+	jar, err := cookiejar.New(&cookiejar.Options{}) // TODO: set public suffix list
+	if err != nil {
+		panic(err)
+	}
+
+	connection := NewClientSenderConnection[I, R](
+		maxBatchSize,
+		&http.Client{Jar: jar},
+		target,
+		session,
+	)
 
 	return &ClientSourceSessionData[I, R]{
 		connection,
@@ -48,7 +59,12 @@ func NewClientSinkSessionData[I core.BlockId, R core.BlockIdRef[I]](target strin
 
 	receiver := core.NewSimpleBatchBlockReceiver[I](session)
 
-	connection := NewClientReceiverConnection[I, R](&http.Client{}, target, receiver)
+	jar, err := cookiejar.New(&cookiejar.Options{}) // TODO: set public suffix list
+	if err != nil {
+		panic(err)
+	}
+
+	connection := NewClientReceiverConnection[I, R](&http.Client{Jar: jar}, target, receiver)
 
 	return &ClientSinkSessionData[I, R]{
 		connection,
@@ -148,11 +164,11 @@ func (c *Client[I, R]) SourceSessions() []string {
 	return c.sourceSessions.Keys()
 }
 
-func (c *Client[I, R]) SourceInfo(url string) (core.SenderSessionInfo[core.BatchState], error) {
+func (c *Client[I, R]) SourceInfo(url string) (*core.SenderSessionInfo[core.BatchState], error) {
 	if session, ok := c.sourceSessions.Get(url); ok {
 		return session.Session.GetInfo(), nil
 	} else {
-		return core.SenderSessionInfo[core.BatchState]{}, ErrInvalidSession
+		return nil, ErrInvalidSession
 	}
 }
 
@@ -160,11 +176,11 @@ func (c *Client[I, R]) SinkSessions() []string {
 	return c.sinkSessions.Keys()
 }
 
-func (c *Client[I, R]) SinkInfo(url string) (core.ReceiverSessionInfo[core.BatchState], error) {
+func (c *Client[I, R]) SinkInfo(url string) (*core.ReceiverSessionInfo[core.BatchState], error) {
 	if session, ok := c.sinkSessions.Get(url); ok {
 		return session.Session.GetInfo(), nil
 	} else {
-		return core.ReceiverSessionInfo[core.BatchState]{}, ErrInvalidSession
+		return nil, ErrInvalidSession
 	}
 }
 
