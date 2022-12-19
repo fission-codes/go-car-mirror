@@ -23,7 +23,7 @@ func main() {
 	newStructName := "Instrumented" + structName
 	outputFile := os.Args[2]
 
-	fmt.Printf("Writing struct %s to file %s.\n", newStructName, outputFile)
+	fmt.Printf("Writing struct %s to file carmirror/%s\n", newStructName, outputFile)
 
 	var code strings.Builder
 
@@ -89,8 +89,14 @@ func main() {
 			}
 		}
 		fmt.Fprintf(&code, " {\n")
-		fmt.Fprintf(&code, "	i.stats.Logger().Debugw(\"%s\", \"method\", \"%s\")\n", newStructName, method.Name)
-		fmt.Fprintf(&code, "	return i.original.%s(", method.Name)
+		if method.Name == "Notify" {
+			fmt.Fprintf(&code, "	i.stats.Logger().Debugw(\"%s\", \"method\", \"%s\", \"event\", sessionEvent, \"state\", i.original.State())\n", newStructName, method.Name)
+			fmt.Fprintf(&code, "	i.stats.Log(sessionEvent.String())\n")
+		} else {
+			fmt.Fprintf(&code, "	i.stats.Logger().Debugw(\"%s\", \"method\", \"%s\")\n", newStructName, method.Name)
+		}
+
+		fmt.Fprintf(&code, "	err := i.original.%s(", method.Name)
 		for j := 1; j < mType.NumIn(); j++ {
 			param := mType.In(j)
 			fmt.Fprintf(&code, "%s", lowerFirstLetter(param.Name()))
@@ -99,11 +105,20 @@ func main() {
 			}
 		}
 		fmt.Fprintf(&code, ")\n")
+
+		if method.Name == "Notify" {
+			fmt.Fprintf(&code, "	i.stats.Logger().Debugw(\"%s\", \"method\", \"%s\", \"event\", sessionEvent, \"err\", err, \"state\", i.original.State())\n", newStructName, method.Name)
+		} else {
+			fmt.Fprintf(&code, "	i.stats.Logger().Debugw(\"%s\", \"method\", \"%s\", \"err\", err)\n", newStructName, method.Name)
+		}
+
+		fmt.Fprintf(&code, "	return err\n")
 		fmt.Fprintf(&code, "}\n")
 
 		fmt.Fprintln(&code)
 	}
 
+	// Uncomment to see the generated code.
 	// fmt.Printf("%s", code.String())
 
 	formattedCode, err := format.Source([]byte(code.String()))

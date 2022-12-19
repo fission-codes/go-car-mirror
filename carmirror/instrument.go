@@ -205,53 +205,6 @@ func InitDefault() error {
 	return Init(defaultStats, defaultStats)
 }
 
-// InstrumentedOrchestrator is an Orchestrator that records stats for events.
-type InstrumentedOrchestrator[F Flags, O Orchestrator[F]] struct {
-	orchestrator O
-	stats        Stats
-}
-
-// NewInstrumentedOrchestrator returns a new InstrumentedOrchestrator instance.
-func NewInstrumentedOrchestrator[F Flags, O Orchestrator[F]](orchestrator O, stats Stats) *InstrumentedOrchestrator[F, O] {
-	return &InstrumentedOrchestrator[F, O]{
-		orchestrator: orchestrator,
-		stats:        stats,
-	}
-}
-
-// Notify calls the underlying orchestrator's Notify method and records stats.
-func (io *InstrumentedOrchestrator[F, O]) Notify(event SessionEvent) error {
-	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "Notify", "event", event, "state", io.orchestrator.State())
-	io.stats.Log(event.String())
-	err := io.orchestrator.Notify(event)
-	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "Notify", "event", event, "result", err, "state", io.orchestrator.State())
-	return err
-}
-
-// State calls the underlying orchestrator's State method and records stats.
-func (io *InstrumentedOrchestrator[F, O]) State() F {
-	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "State")
-	result := io.orchestrator.State()
-	io.stats.Logger().Debugw("InstrumentedOrchestrator", "result", result)
-	return result
-}
-
-// ReceiveState calls the underlying orchestrator's ReceiveState method and records stats.
-func (io *InstrumentedOrchestrator[F, O]) ReceiveState(state F) error {
-	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "ReceiveState", "state", state)
-	err := io.orchestrator.ReceiveState(state)
-	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "ReceiveState", "err", err)
-	return err
-}
-
-// IsClosed calls the underlying orchestrator's IsClosed method and records stats.
-func (io *InstrumentedOrchestrator[F, O]) IsClosed() bool {
-	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "IsClosed")
-	result := io.orchestrator.IsClosed()
-	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "IsClosed", "result", result)
-	return result
-}
-
 // InstrumentedBlockStore is a BlockStore that records stats for events.
 type InstrumentedBlockStore[I BlockId] struct {
 	store BlockStore[I]

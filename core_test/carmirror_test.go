@@ -236,7 +236,7 @@ func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, roo
 		NewInstrumentedBlockStore[mock.BlockId](sender_store, GLOBAL_STATS.WithContext("SenderStore")),
 		connection,
 		filter.NewSynchronizedFilter(makeBloom(1024)),
-		NewInstrumentedOrchestrator[BatchState](NewBatchSendOrchestrator(), GLOBAL_STATS.WithContext("BatchSendOrchestrator")),
+		NewInstrumentedBatchSendOrchestrator(NewBatchSendOrchestrator(), GLOBAL_STATS.WithContext("BatchSendOrchestrator")),
 	)
 
 	log.Debugf("created sender_session")
@@ -245,7 +245,7 @@ func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, roo
 		NewInstrumentedBlockStore[mock.BlockId](NewSynchronizedBlockStore[mock.BlockId](receiver_store), GLOBAL_STATS.WithContext("ReceiverStore")),
 		connection,
 		NewSimpleStatusAccumulator[mock.BlockId](filter.NewSynchronizedFilter(makeBloom(1024))),
-		NewInstrumentedOrchestrator[BatchState](NewBatchReceiveOrchestrator(), GLOBAL_STATS.WithContext("BatchReceiveOrchestrator")),
+		NewInstrumentedBatchReceiveOrchestrator(NewBatchReceiveOrchestrator(), GLOBAL_STATS.WithContext("BatchReceiveOrchestrator")),
 	)
 
 	log.Debugf("created receiver_session")
