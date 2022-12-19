@@ -47,7 +47,7 @@ func main() {
 	// Generate the instrumented struct.
 	// Note that since t is a pointer, we need to use t.Elem() to get the underlying type.
 	// If t was not a pointer, we could use t directly.
-	fmt.Fprintf(&code, "type Instrumented%s struct {\n", t.Elem().Name())
+	fmt.Fprintf(&code, "type %s struct {\n", newStructName)
 	fmt.Fprintf(&code, "	original *%s\n", t.Elem().Name())
 	fmt.Fprintf(&code, "	stats Stats\n")
 	fmt.Fprintf(&code, "}\n")
@@ -55,8 +55,8 @@ func main() {
 	fmt.Fprintln(&code)
 
 	// Generate the New method.
-	fmt.Fprintf(&code, "func NewInstrumented%s(original *%s, stats Stats) *Instrumented%s {\n", t.Elem().Name(), t.Elem().Name(), t.Elem().Name())
-	fmt.Fprintf(&code, "	return &Instrumented%s{\n", t.Elem().Name())
+	fmt.Fprintf(&code, "func New%s(original *%s, stats Stats) *%s {\n", newStructName, t.Elem().Name(), newStructName)
+	fmt.Fprintf(&code, "	return &%s{\n", newStructName)
 	fmt.Fprintf(&code, "		original: original,\n")
 	fmt.Fprintf(&code, "		stats: stats,\n")
 	fmt.Fprintf(&code, "	}\n")
@@ -68,7 +68,7 @@ func main() {
 	for i := 0; i < t.NumMethod(); i++ {
 		method := t.Method(i)
 
-		fmt.Fprintf(&code, "func (i *Instrumented%s) %s(", t.Elem().Name(), method.Name)
+		fmt.Fprintf(&code, "func (i *%s) %s(", newStructName, method.Name)
 		mType := method.Type
 		for j := 1; j < mType.NumIn(); j++ {
 			param := mType.In(j)
@@ -89,7 +89,7 @@ func main() {
 			}
 		}
 		fmt.Fprintf(&code, " {\n")
-		fmt.Fprintf(&code, "	i.stats.Logger().Debugw(\"Instrumented%s\", \"method\", \"%s\")\n", t.Elem().Name(), method.Name)
+		fmt.Fprintf(&code, "	i.stats.Logger().Debugw(\"%s\", \"method\", \"%s\")\n", newStructName, method.Name)
 		fmt.Fprintf(&code, "	return i.original.%s(", method.Name)
 		for j := 1; j < mType.NumIn(); j++ {
 			param := mType.In(j)
