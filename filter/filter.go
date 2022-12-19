@@ -390,15 +390,17 @@ func (f *BloomFilter[K]) TryAddAll(other Filter[K]) error {
 	other = Desynchronize(other)
 	obf, ok := other.(*BloomFilter[K])
 	if ok {
-		log.Debugw("BloomFilter", "method", "TryAddAll", "other.bitCount", obf.filter.BitCount(), "hashCount", obf.filter.HashCount())
+		log.Debugw("enter", "object", "BloomFilter", "method", "TryAddAll", "other.bitCount", obf.filter.BitCount(), "hashCount", obf.filter.HashCount())
 		if f.capacity < f.count+obf.count {
 			working_bloom := f.filter.Copy()
 			err := working_bloom.Union(obf.filter)
 			if err != nil {
+				log.Debugw("exit", "object", "BloomFilter", "method", "TryAddAll", "error", err)
 				return err
 			}
 			new_count := int(working_bloom.EstimateEntries())
 			if new_count >= f.capacity {
+				log.Debugw("exit", "object", "BloomFilter", "method", "TryAddAll", "error", ErrBloomOverflow)
 				return ErrBloomOverflow
 			}
 			f.filter = working_bloom
@@ -406,15 +408,19 @@ func (f *BloomFilter[K]) TryAddAll(other Filter[K]) error {
 		} else {
 			err := f.filter.Union(obf.filter)
 			if err != nil {
+				log.Debugw("exit", "object", "BloomFilter", "method", "TryAddAll", "error", err)
 				return err
 			}
 			f.count = int(f.filter.EstimateEntries())
 		}
-		log.Debugw("BloomFilter", "method", "TryAddAll", "result", nil)
+		log.Debugw("exit", "object", "BloomFilter", "method", "TryAddAll", "error", nil)
 		return nil
 	} else if _, ok := other.(*EmptyFilter[K]); ok {
+		log.Debugw("exit", "object", "BloomFilter", "method", "TryAddAll", "error", nil)
+
 		return nil
 	} else {
+		log.Debugw("exit", "object", "BloomFilter", "method", "TryAddAll", "error", ErrIncompatibleFilter)
 		return ErrIncompatibleFilter
 	}
 }
@@ -449,7 +455,15 @@ func (f *BloomFilter[K]) Count() int {
 
 // Clear returns a new filter with the same capacity and hash function as the current one, but with no items.
 func (f *BloomFilter[K]) Clear() Filter[K] {
-	return NewBloomFilter(uint(f.capacity), f.filter.HashFunction())
+	if f.hashFunction == 0 {
+		return NewBloomFilter(uint(f.capacity), f.filter.HashFunction())
+	} else {
+		empty, err := TryNewBloomFilter[K](uint(f.capacity), f.hashFunction)
+		if err != nil {
+			panic(err)
+		}
+		return empty
+	}
 }
 
 // Copy returns a copy of the filter.
