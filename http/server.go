@@ -17,30 +17,6 @@ import (
 
 type SessionToken string
 
-type Config struct {
-	MaxBatchSize  uint32
-	Address       string
-	BloomCapacity uint
-	BloomFunction uint64
-}
-
-func DefaultConfig() Config {
-	return Config{
-		MaxBatchSize: 32,
-		Address:      ":8080",
-	}
-}
-
-func NewBloomAllocator[I core.BlockId](config *Config) func() filter.Filter[I] {
-	return func() filter.Filter[I] {
-		filter, err := filter.TryNewBloomFilter[I](config.BloomCapacity, config.BloomFunction)
-		if err != nil {
-			log.Errorf("Invalid hash function specified %v", config.BloomFunction)
-		}
-		return filter
-	}
-}
-
 type ServerSourceSessionData[I core.BlockId, R core.BlockIdRef[I]] struct {
 	Connection *ServerSenderConnection[I, R]
 	Session    *core.SenderSession[I, core.BatchState]
@@ -63,17 +39,21 @@ type ServerSinkSessionData[I core.BlockId, R core.BlockIdRef[I]] struct {
 	Session    *core.ReceiverSession[I, core.BatchState]
 }
 
-func NewServerSinkSessionData[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], maxBatchSize uint32, allocator func() filter.Filter[I]) *ServerSinkSessionData[I, R] {
+func NewServerSinkSessionData[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], maxBatchSize uint32, allocator func() filter.Filter[I], instrumented bool) *ServerSinkSessionData[I, R] {
 	connection := NewServerReceiverConnection[I, R](maxBatchSize)
+
+	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchReceiveOrchestrator()
+
+	if instrumented {
+		orchestrator = core.NewInstrumentedOrchestrator[core.BatchState](orchestrator, core.GLOBAL_STATS.WithContext("BatchReceiveOrchestrator"))
+	}
+
 	return &ServerSinkSessionData[I, R]{
 		connection,
 		core.NewReceiverSession[I, core.BatchState](
 			store,
 			core.NewSimpleStatusAccumulator(allocator()),
-			core.NewInstrumentedOrchestrator[core.BatchState](
-				core.NewBatchReceiveOrchestrator(),
-				core.GLOBAL_STATS.WithContext("BatchReceiveOrchestrator"),
-			),
+			orchestrator,
 		),
 	}
 }
@@ -85,6 +65,7 @@ type Server[I core.BlockId, R core.BlockIdRef[I]] struct {
 	maxBatchSize   uint32
 	allocator      func() filter.Filter[I]
 	http           *http.Server
+	instrumented   bool
 }
 
 func NewServer[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], config Config) *Server[I, R] {
@@ -95,6 +76,7 @@ func NewServer[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], c
 		config.MaxBatchSize,
 		NewBloomAllocator[I](&config),
 		nil,
+		config.Instrument,
 	}
 
 	mux := http.NewServeMux()
@@ -225,7 +207,7 @@ func (srv *Server[I, R]) HandleBlocks(response http.ResponseWriter, request *htt
 	sinkSession, ok := srv.sinkSessions.Get(sessionToken)
 	if !ok {
 		log.Debugw("no session found for token", "object", "Server", "method", "HandleBlocks", "session", sessionToken)
-		sinkSession = NewServerSinkSessionData[I, R](srv.store, srv.maxBatchSize, srv.allocator)
+		sinkSession = NewServerSinkSessionData[I, R](srv.store, srv.maxBatchSize, srv.allocator, srv.instrumented)
 		srv.sinkSessions.Add(sessionToken, sinkSession)
 		// Start the new session running; when it stops, remove it from the session map
 		go func() {

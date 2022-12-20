@@ -2,10 +2,10 @@ package http
 
 import (
 	"context"
+	"net/http"
 	"testing"
 	"time"
 
-	core "github.com/fission-codes/go-car-mirror/carmirror"
 	"github.com/fission-codes/go-car-mirror/filter"
 	mock "github.com/fission-codes/go-car-mirror/fixtures"
 	"github.com/fission-codes/go-car-mirror/util"
@@ -33,10 +33,11 @@ func assertBytesEqual(a []byte, b []byte, t *testing.T) {
 func TestClientSend(t *testing.T) {
 
 	config := Config{
-		MaxBatchSize:  20,
+		MaxBatchSize:  100,
 		Address:       ":8021",
-		BloomCapacity: 1024,
+		BloomCapacity: 256,
 		BloomFunction: MOCK_ID_HASH,
+		Instrument:    false,
 	}
 
 	serverStore := mock.NewStore()
@@ -57,12 +58,12 @@ func TestClientSend(t *testing.T) {
 	client.Send("http://localhost:8021", rootId)
 	client.CloseSource("http://localhost:8021") // will close session when finished
 
-	var err error
-	var info *core.SenderSessionInfo[core.BatchState]
 	// Wait for the session to go away
-	for info, err = client.SourceInfo("http://localhost:8021"); err == nil; {
+	info, err := client.SourceInfo("http://localhost:8021")
+	for err == nil {
 		log.Debugf("client info: %s", info.String())
 		time.Sleep(100 * time.Millisecond)
+		info, err = client.SourceInfo("http://localhost:8021")
 	}
 
 	if err != ErrInvalidSession {
@@ -71,7 +72,11 @@ func TestClientSend(t *testing.T) {
 
 	server.http.Close()
 
-	if err = <-errChan; err != nil {
+	if err = <-errChan; err != http.ErrServerClosed && err != nil {
 		t.Errorf("Server closed with error %v", err)
+	}
+
+	if !serverStore.HasAll(rootId) {
+		t.Errorf("Expected server store to have all children of %v", rootId)
 	}
 }

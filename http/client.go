@@ -98,15 +98,15 @@ func (c *Client[I, R]) startSourceSession(url string) *ClientSourceSessionData[I
 		c.allocator,
 	)
 	go func() {
-		log.Debugw("Client - starting source session", "url", url)
+		log.Debugw("starting source session", "object", "Client", "method", "startSourceSession", "url", url)
 		if err := newSession.Session.Run(newSession.Connection); err != nil {
-			log.Errorf("source session ended with error %v", err)
+			log.Errorw("source session ended with error", "object", "Client", "method", "startSourceSession", "url", url, "error", err)
 		}
 		// TODO: potential race condition if Run() completes before the
 		// session is added to the list of sink sessions (which happens
-		// when startSinkSession returns)
+		// when startSourceSession returns)
 		c.sourceSessions.Remove(url)
-		log.Debugw("ended source session")
+		log.Debugw("source session ended", "object", "Client", "method", "startSourceSession", "url", url)
 	}()
 
 	return newSession
@@ -134,13 +134,15 @@ func (c *Client[I, R]) startSinkSession(url string) *ClientSinkSessionData[I, R]
 		c.allocator,
 	)
 	go func() {
+		log.Debugw("starting sink session", "object", "Client", "method", "startSinkSession", "url", url)
 		if err := newSession.Session.Run(newSession.Connection); err != nil {
-			log.Errorf("sink session ended with error %v", err)
+			log.Errorw("sink session ended with error", "object", "Client", "method", "startSinkSession", "url", url, "error", err)
 		}
 		// TODO: potential race condition if Run() completes before the
 		// session is added to the list of sink sessions (which happens
 		// when startSinkSession returns)
 		c.sinkSessions.Remove(url)
+		log.Debugw("ended sink session", "object", "Client", "method", "startSinkSession", "url", url)
 	}()
 
 	return newSession
