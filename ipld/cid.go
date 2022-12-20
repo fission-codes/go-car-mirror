@@ -3,6 +3,7 @@ package ipld
 //import core "github.com/fission-codes/go-car-mirror/carmirror"
 import (
 	"errors"
+	"io"
 
 	cbor "github.com/fxamacker/cbor/v2"
 	cid "github.com/ipfs/go-cid"
@@ -51,4 +52,14 @@ func (ipfsCid *Cid) UnmarshalCBOR(bytes []byte) error {
 		ipfsCid.UnmarshalBinary(content[1:])
 		return nil
 	}
+}
+
+// Read implements the io.ByteReader interface.
+func (ipfsCid *Cid) Read(reader io.ByteReader) (int, error) {
+	var err error
+	cid := ipfsCid.Cid.Bytes()
+	for i := 0; i < 32 && err == nil; i++ {
+		cid[i], err = reader.ReadByte()
+	}
+	return 32, err
 }
