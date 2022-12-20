@@ -21,8 +21,9 @@ const (
 	SENDER_READY
 	SENDER_CLOSING
 	SENDER_CLOSED
-	RECEIVER = RECEIVER_READY | RECEIVER_CLOSING | RECEIVER_CHECKING | RECEIVER_CLOSED
-	SENDER   = SENDER_READY | SENDER_CLOSING | SENDER_CLOSED
+	CANCELLED
+	RECEIVER = CANCELLED | RECEIVER_READY | RECEIVER_CLOSING | RECEIVER_CHECKING | RECEIVER_CLOSED
+	SENDER   = CANCELLED | SENDER_READY | SENDER_CLOSING | SENDER_CLOSED
 )
 
 // Strings returns a slice of strings describing the given BatchState.
@@ -48,6 +49,9 @@ func (bs BatchState) Strings() []string {
 	}
 	if bs&SENDER_CLOSED != 0 {
 		strings = append(strings, "SENDER_CLOSED")
+	}
+	if bs&CANCELLED != 0 {
+		strings = append(strings, "CANCELLED")
 	}
 	return strings
 }
@@ -169,9 +173,9 @@ func (bso *BatchSendOrchestrator) Notify(event SessionEvent) error {
 	case BEGIN_SESSION:
 		bso.flags.Set(SENDER_READY)
 	case BEGIN_SEND:
-		state := bso.flags.WaitAny(SENDER_READY|SENDER_CLOSED, 0)
-		if state&SENDER_CLOSED != 0 {
-			bso.log.Errorf("Orchestrator waiting for SENDER_READY when SENDER_CLOSED seen")
+		state := bso.flags.WaitAny(SENDER_READY|CANCELLED, 0)
+		if state&CANCELLED != 0 {
+			bso.log.Errorf("Orchestrator waiting for SENDER_READY when CANCELLED seen")
 			return errors.ErrStateError
 		}
 	case END_RECEIVE:
@@ -181,13 +185,13 @@ func (bso *BatchSendOrchestrator) Notify(event SessionEvent) error {
 	case BEGIN_FLUSH:
 		bso.flags.Unset(SENDER_READY)
 	case BEGIN_DRAINING:
-		if bso.flags.Contains(RECEIVER_CLOSING) {
+		if bso.flags.ContainsAny(RECEIVER_CLOSED | SENDER_CLOSING) {
 			bso.flags.Set(SENDER_CLOSED)
 		}
 	case END_SESSION:
 		bso.flags.Update(SENDER, SENDER_CLOSED)
 	case CANCEL:
-		bso.flags.Update(SENDER, SENDER_CLOSED)
+		bso.flags.Update(SENDER, CANCELLED)
 	}
 
 	return nil
@@ -206,7 +210,7 @@ func (bso *BatchSendOrchestrator) ReceiveState(batchState BatchState) error {
 
 // IsClosed returns true if the sender is closed.
 func (bso *BatchSendOrchestrator) IsClosed() bool {
-	return bso.flags.Contains(SENDER_CLOSED)
+	return bso.flags.Contains(SENDER_CLOSED|RECEIVER_CLOSED) || bso.flags.Contains(CANCELLED)
 }
 
 // BatchReceiveOrchestrator is an orchestrator for receiving batches of blocks.
@@ -231,19 +235,19 @@ func (bro *BatchReceiveOrchestrator) Notify(event SessionEvent) error {
 	case END_SESSION:
 		bro.flags.Update(RECEIVER_READY, RECEIVER_CLOSED)
 	case BEGIN_CHECK:
-		state := bro.flags.WaitAny(RECEIVER_CHECKING|RECEIVER_CLOSED, 0)
-		if state&RECEIVER_CLOSED != 0 {
-			bro.log.Errorf("Orchestrator waiting for RECEIVER_CHECKING when RECEIVER_CLOSED seen")
+		state := bro.flags.WaitAny(RECEIVER_CHECKING|CANCELLED, 0)
+		if state&CANCELLED != 0 {
+			bro.log.Errorf("Orchestrator waiting for RECEIVER_CHECKING when CANCELLED seen")
 			return errors.ErrStateError
 		}
 	case BEGIN_SEND:
-		if bro.flags.Contains(SENDER_CLOSING) {
-			bro.flags.Set(RECEIVER_CLOSING)
+		if bro.flags.ContainsAny(SENDER_CLOSED | RECEIVER_CLOSING) {
+			bro.flags.Set(RECEIVER_CLOSED)
 		}
 	case END_SEND:
 		bro.flags.Unset(RECEIVER_CHECKING)
 	case CANCEL:
-		bro.flags.Update(RECEIVER, RECEIVER_CLOSED)
+		bro.flags.Update(RECEIVER, CANCELLED)
 	}
 
 	return nil
@@ -263,5 +267,5 @@ func (bro *BatchReceiveOrchestrator) ReceiveState(batchState BatchState) error {
 
 // IsClosed returns true if the receiver is closed.
 func (bro *BatchReceiveOrchestrator) IsClosed() bool {
-	return bro.flags.ContainsAny(SENDER_CLOSED | RECEIVER_CLOSED)
+	return bro.flags.Contains(SENDER_CLOSED|RECEIVER_CLOSED) || bro.flags.Contains(CANCELLED)
 }

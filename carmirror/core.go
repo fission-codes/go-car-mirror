@@ -455,7 +455,7 @@ func (rs *ReceiverSession[I, F]) Run(connection ReceiverConnection[F, I]) error 
 func (ss *ReceiverSession[I, F]) HandleState(state F) {
 	err := ss.orchestrator.ReceiveState(state)
 	if err != nil {
-		ss.log.Errorw("ReceiverSession", "method", "HandleState", "error", err)
+		ss.log.Errorw("receiving state", "object", "ReceiverSession", "method", "HandleState", "error", err)
 	}
 }
 
@@ -574,7 +574,6 @@ func (ss *SenderSession[I, F]) Run(connection SenderConnection[F, I]) error {
 func (ss *SenderSession[I, F]) HandleStatus(have filter.Filter[I], want []I) {
 	if err := ss.orchestrator.Notify(BEGIN_RECEIVE); err != nil {
 		ss.log.Errorw("error notifying BEGIN_RECEIVE", "object", "SenderSession", "method", "HandleStatus", "error", err)
-		return
 	}
 	defer ss.orchestrator.Notify(END_RECEIVE)
 	ss.log.Debugw("begin processing", "object", "SenderSession", "method", "HandleStatus", "pending", ss.pending.Len(), "filter", ss.filter.Count())
