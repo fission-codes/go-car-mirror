@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 
 	"golang.org/x/exp/constraints"
+	"golang.org/x/exp/maps"
 )
 
 // NextPowerOfTwo returns i if it is a power of 2, otherwise the next power of two greater than i.
@@ -125,4 +126,52 @@ func Map[T any, U any](ts []T, mapper func(T) U) []U {
 		result[i] = mapper(v)
 	}
 	return result
+}
+
+type SynchronizedMap[K comparable, V any] struct {
+	data  map[K]V
+	mutex sync.RWMutex
+}
+
+func NewSynchronizedMap[K comparable, V any]() *SynchronizedMap[K, V] {
+	return &SynchronizedMap[K, V]{
+		make(map[K]V),
+		sync.RWMutex{},
+	}
+}
+
+func (m *SynchronizedMap[K, V]) Add(key K, value V) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.data[key] = value
+}
+
+func (m *SynchronizedMap[K, V]) Remove(key K) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	delete(m.data, key)
+}
+
+func (m *SynchronizedMap[K, V]) Get(key K) (V, bool) {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	datum, ok := m.data[key]
+	return datum, ok
+}
+
+func (m *SynchronizedMap[K, V]) GetOrInsert(key K, creator func() V) V {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	datum, ok := m.data[key]
+	if !ok {
+		datum = creator()
+		m.data[key] = datum
+	}
+	return datum
+}
+
+func (m *SynchronizedMap[K, V]) Keys() []K {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	return maps.Keys(m.data)
 }
