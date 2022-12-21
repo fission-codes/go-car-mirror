@@ -67,7 +67,10 @@ func (ipfsCid *Cid) Read(reader io.ByteReader) (int, error) {
 		}
 		buf[i] = b
 	}
-	ipfsCid.Cid, err = cid.Decode(string(buf[:i]))
+	ipfsCid.Cid, err = cid.Decode(string(buf[:32]))
+	if err != nil {
+		return i, err
+	}
 
 	return 32, err
 }
