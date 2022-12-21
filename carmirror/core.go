@@ -23,7 +23,7 @@ import (
 	golog "github.com/ipfs/go-log/v2"
 )
 
-var log = golog.Logger("carmirror")
+var log = golog.Logger("go-car-mirror")
 
 // BlockId represents a unique identifier for a Block.
 // This interface only represents the identifier, not the Block. The interface is chosen for compatibility

@@ -22,7 +22,7 @@ import (
 	golog "github.com/ipfs/go-log/v2"
 )
 
-var log = golog.Logger("fixtures")
+var log = golog.Logger("go-car-mirror")
 
 const BLOCK_ID_SIZE = 32
 

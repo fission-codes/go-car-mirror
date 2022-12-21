@@ -26,4 +26,10 @@ make build
 make test
 ```
 
+## Logging
+
+```
+export GOLOG_LOG_LEVEL="go-car-mirror=debug"
+```
+
 

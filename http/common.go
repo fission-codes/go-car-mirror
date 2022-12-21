@@ -8,7 +8,7 @@ import (
 	golog "github.com/ipfs/go-log/v2"
 )
 
-var log = golog.Logger("http")
+var log = golog.Logger("go-car-mirror")
 
 var (
 	ErrInvalidSession  = errors.New("invalid session")

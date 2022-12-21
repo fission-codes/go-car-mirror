@@ -19,7 +19,7 @@ import (
 	"golang.org/x/exp/maps"
 )
 
-var log = golog.Logger("filter")
+var log = golog.Logger("go-car-mirror")
 
 // Filter is a space-efficient, probabilistic data structure that can be used to test whether an element is a member of a set.
 // The test is probabilistic in that it may return false positives, but will never return a false negative.

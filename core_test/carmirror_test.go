@@ -17,7 +17,7 @@ import (
 	"github.com/zeebo/xxh3"
 )
 
-var log = golog.Logger("core-test")
+var log = golog.Logger("go-car-mirror")
 
 const TYPICAL_LATENCY = 20
 const GBIT_SECOND = (1 << 30) / 8 / 1000 // Gigabit per second -> to bytes per second -> to bytes per millisecond
