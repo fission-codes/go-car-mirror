@@ -54,12 +54,19 @@ func (ipfsCid *Cid) UnmarshalCBOR(bytes []byte) error {
 	}
 }
 
-// Read implements the io.ByteReader interface.
+// Read reads the CID from the reader into the Cid.
 func (ipfsCid *Cid) Read(reader io.ByteReader) (int, error) {
 	var err error
-	cid := ipfsCid.Cid.Bytes()
+	var i int
+	buf := make([]byte, 32)
 	for i := 0; i < 32 && err == nil; i++ {
-		cid[i], err = reader.ReadByte()
+		b, err := reader.ReadByte()
+		if err != nil {
+			return i, err
+		}
+		buf[i] = b
 	}
-	return 32, err
+	ipfsCid.Cid, err = cid.Decode(string(buf[:i]))
+
+	return i, err
 }

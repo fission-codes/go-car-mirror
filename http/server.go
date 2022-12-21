@@ -104,11 +104,13 @@ func NewServer[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], c
 
 // Start starts the server
 func (srv *Server[I, R]) Start() error {
+	log.Debugw("Server", "method", "Start")
 	return srv.http.ListenAndServe()
 }
 
 // Stop stops the server
 func (srv *Server[I, R]) Stop() error {
+	log.Debugw("Server", "method", "Stop")
 	return srv.http.Close()
 }
 
