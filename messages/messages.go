@@ -10,7 +10,10 @@ import (
 	"github.com/fission-codes/go-car-mirror/filter"
 	"github.com/fission-codes/go-car-mirror/util"
 	"github.com/fxamacker/cbor/v2"
+	golog "github.com/ipfs/go-log/v2"
 )
+
+var log = golog.Logger("go-car-mirror")
 
 func writeUvarint(writer io.Writer, v uint64) error {
 	buf := make([]byte, binary.MaxVarintLen64)
@@ -123,6 +126,7 @@ func (b *BlockWireFormat[T, R]) Read(reader ByteAndBlockReader) error {
 		b.IdRef = new(T)
 	}
 	if count, err = b.IdRef.Read(reader); err != nil {
+		log.Debugw("failed to read block id", "error", err)
 		return err
 	}
 	b.Data = make([]byte, int(size)-count)
