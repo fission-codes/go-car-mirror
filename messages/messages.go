@@ -30,13 +30,7 @@ func writeBufferWithPrefix(writer io.Writer, buf []byte) error {
 	return err
 }
 
-// ByteAndBlockReader is an io.Reader that also implements io.ByteReader.
-type ByteAndBlockReader interface {
-	io.Reader
-	io.ByteReader
-}
-
-func readBufferWithPrefix(reader ByteAndBlockReader) ([]byte, error) {
+func readBufferWithPrefix(reader carmirror.ByteAndBlockReader) ([]byte, error) {
 	if size, err := binary.ReadUvarint(reader); err != nil {
 		return nil, err
 	} else {
@@ -65,7 +59,7 @@ func (ah *ArchiveHeader[T]) Write(writer io.Writer) error {
 }
 
 // Read reads the archive header from the reader.
-func (ah *ArchiveHeader[T]) Read(reader ByteAndBlockReader) error {
+func (ah *ArchiveHeader[T]) Read(reader carmirror.ByteAndBlockReader) error {
 	if buf, err := readBufferWithPrefix(reader); err == nil {
 		return cbor.Unmarshal(buf, (*ArchiveHeaderWireFormat[T])(ah))
 	} else {
@@ -112,7 +106,7 @@ func (b *BlockWireFormat[T, R]) Write(writer io.Writer) error {
 }
 
 // Read reads from the reader into the block wire format.
-func (b *BlockWireFormat[T, R]) Read(reader ByteAndBlockReader) error {
+func (b *BlockWireFormat[T, R]) Read(reader carmirror.ByteAndBlockReader) error {
 	var (
 		err   error
 		size  uint64
@@ -194,7 +188,7 @@ func (car *Archive[T, R]) Write(writer io.Writer) error {
 }
 
 // Read reads the archive from the reader.
-func (car *Archive[T, R]) Read(reader ByteAndBlockReader) error {
+func (car *Archive[T, R]) Read(reader carmirror.ByteAndBlockReader) error {
 	var err error
 	err = car.Header.Read(reader)
 	car.Blocks = make([]carmirror.RawBlock[T], 0)
@@ -257,7 +251,7 @@ func (msg *BlocksMessage[T, B, F]) Write(writer io.Writer) error {
 }
 
 // Read reads the blocks message from the reader.
-func (msg *BlocksMessage[T, B, F]) Read(reader ByteAndBlockReader) error {
+func (msg *BlocksMessage[T, B, F]) Read(reader carmirror.ByteAndBlockReader) error {
 	if data, err := readBufferWithPrefix(reader); err != nil {
 		return err
 	} else {
@@ -309,7 +303,7 @@ func (msg *StatusMessage[I, R, S]) Write(writer io.Writer) error {
 }
 
 // Read reads the status message from the reader.
-func (msg *StatusMessage[I, R, S]) Read(reader ByteAndBlockReader) error {
+func (msg *StatusMessage[I, R, S]) Read(reader carmirror.ByteAndBlockReader) error {
 	if data, err := readBufferWithPrefix(reader); err != nil {
 		return err
 	} else {

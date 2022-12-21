@@ -11,6 +11,7 @@ import (
 	"io"
 	"math/rand"
 
+	"github.com/fission-codes/go-car-mirror/carmirror"
 	core "github.com/fission-codes/go-car-mirror/carmirror"
 	cmerrors "github.com/fission-codes/go-car-mirror/errors"
 	"github.com/fission-codes/go-car-mirror/util"
@@ -96,7 +97,7 @@ func (id *BlockId) UnmarshalJSON(bytes []byte) error {
 	}
 }
 
-func (id *BlockId) Read(reader io.ByteReader) (int, error) {
+func (id *BlockId) Read(reader carmirror.ByteAndBlockReader) (int, error) {
 	var err error
 	for i := 0; i < 32 && err == nil; i++ {
 		id[i], err = reader.ReadByte()

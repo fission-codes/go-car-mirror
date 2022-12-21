@@ -54,7 +54,7 @@ type BlockIdRef[T BlockId] interface {
 	encoding.BinaryUnmarshaler
 	json.Unmarshaler
 	cbor.Unmarshaler
-	Read(io.ByteReader) (int, error)
+	Read(ByteAndBlockReader) (int, error)
 }
 
 // RawBlock represents a raw block before any association with a blockstore.
@@ -619,4 +619,10 @@ func (ss *SenderSession[I, F]) HandleState(state F) {
 // IsClosed returns true if the session is closed.
 func (ss *SenderSession[I, F]) IsClosed() bool {
 	return ss.orchestrator.IsClosed()
+}
+
+// ByteAndBlockReader is an io.Reader that also implements io.ByteReader.
+type ByteAndBlockReader interface {
+	io.Reader
+	io.ByteReader
 }
