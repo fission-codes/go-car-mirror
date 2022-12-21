@@ -50,7 +50,7 @@ func TestClientSend(t *testing.T) {
 
 	errChan := make(chan error)
 
-	go func() { errChan <- server.http.ListenAndServe() }()
+	go func() { errChan <- server.Start() }()
 
 	// Give the server time to start up
 	time.Sleep(100 * time.Millisecond)
@@ -70,7 +70,7 @@ func TestClientSend(t *testing.T) {
 		t.Errorf("Closed with unexpected error %v", err)
 	}
 
-	server.http.Close()
+	server.Stop()
 
 	if err = <-errChan; err != http.ErrServerClosed && err != nil {
 		t.Errorf("Server closed with error %v", err)

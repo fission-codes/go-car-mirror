@@ -102,6 +102,16 @@ func NewServer[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], c
 	return server
 }
 
+// Start starts the server
+func (srv *Server[I, R]) Start() error {
+	return srv.http.ListenAndServe()
+}
+
+// Stop stops the server
+func (srv *Server[I, R]) Stop() error {
+	return srv.http.Close()
+}
+
 func (srv *Server[I, R]) generateToken(remoteAddr string) SessionToken {
 	// We might at some stage do something to verify session tokens, but for now they are
 	// just 128 bit random numbers
