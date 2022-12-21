@@ -62,11 +62,12 @@ func (ipfsCid *Cid) Read(reader io.ByteReader) (int, error) {
 	for i := 0; i < 32 && err == nil; i++ {
 		b, err := reader.ReadByte()
 		if err != nil {
+			// Note: we return i here, not i+1, because we want to return the number of bytes successfully read.
 			return i, err
 		}
 		buf[i] = b
 	}
 	ipfsCid.Cid, err = cid.Decode(string(buf[:i]))
 
-	return i, err
+	return 32, err
 }
