@@ -3,6 +3,7 @@ package stats
 import (
 	"context"
 	"fmt"
+	"time"
 
 	core "github.com/fission-codes/go-car-mirror/carmirror"
 
@@ -73,6 +74,7 @@ func NewInstrumentedBlockStore[I core.BlockId](store core.BlockStore[I], stats S
 // Get calls the underlying block store's Get method and records stats.
 func (ibs *InstrumentedBlockStore[I]) Get(ctx context.Context, id I) (core.Block[I], error) {
 	ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Get", "id", id)
+	begin := time.Now()
 	result, err := ibs.store.Get(ctx, id)
 	if err == nil {
 		ibs.stats.Log("Get.Ok")
@@ -80,12 +82,14 @@ func (ibs *InstrumentedBlockStore[I]) Get(ctx context.Context, id I) (core.Block
 		ibs.stats.Log("Get." + err.Error())
 		ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Get", "error", err)
 	}
+	ibs.stats.LogInterval("Get", time.Since(begin))
 	return result, err
 }
 
 // Has calls the underlying block store's Has method and records stats.
 func (ibs *InstrumentedBlockStore[I]) Has(ctx context.Context, id I) (bool, error) {
 	ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Has", "id", id)
+	begin := time.Now()
 	result, err := ibs.store.Has(ctx, id)
 	if err == nil {
 		ibs.stats.Log(fmt.Sprintf("Has.%v", result))
@@ -93,6 +97,7 @@ func (ibs *InstrumentedBlockStore[I]) Has(ctx context.Context, id I) (bool, erro
 		ibs.stats.Log(fmt.Sprintf("Has.%v", err))
 		ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Has", "result", result, "error", err)
 	}
+	ibs.stats.LogInterval("Has", time.Since(begin))
 	return result, err
 }
 
@@ -120,6 +125,7 @@ func (ibs *InstrumentedBlockStore[I]) All(ctx context.Context) (<-chan I, error)
 // Add calls the underlying block store's Add method and records stats.
 func (ibs *InstrumentedBlockStore[I]) Add(ctx context.Context, rawBlock core.RawBlock[I]) (core.Block[I], error) {
 	ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Add", "id", rawBlock.Id())
+	begin := time.Now()
 	block, err := ibs.store.Add(ctx, rawBlock)
 	if err == nil {
 		ibs.stats.Log("Add.Ok")
@@ -127,6 +133,7 @@ func (ibs *InstrumentedBlockStore[I]) Add(ctx context.Context, rawBlock core.Raw
 		ibs.stats.Log("Add." + err.Error())
 		ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Add", "error", err)
 	}
+	ibs.stats.LogInterval("Add", time.Since(begin))
 	return block, err
 }
 
@@ -147,19 +154,23 @@ func NewInstrumentedBlockSender[I core.BlockId](sender core.BlockSender[I], stat
 // SendBlock calls the underlying block sender's SendBlock method and records stats.
 func (ibs *InstrumentedBlockSender[I]) SendBlock(block core.RawBlock[I]) error {
 	ibs.stats.Logger().Debugw("InstrumentedBlockSender", "method", "SendBlock", "id", block.Id())
+	begin := time.Now()
 	err := ibs.sender.SendBlock(block)
 	if err == nil {
 		ibs.stats.Log("SendBlock.Ok")
+		ibs.stats.LogBytes("SendBlock", uint64(block.Size()))
 	} else {
 		ibs.stats.Log("SendBlock." + err.Error())
 		ibs.stats.Logger().Debugw("InstrumentedBlockSender", "method", "SendBlock", "error", err)
 	}
+	ibs.stats.LogInterval("SendBlock", time.Since(begin))
 	return err
 }
 
 // Flush calls the underlying block sender's Flush method and records stats.
 func (ibs *InstrumentedBlockSender[I]) Flush() error {
 	ibs.stats.Logger().Debugw("InstrumentedBlockSender", "method", "Flush")
+	begin := time.Now()
 	err := ibs.sender.Flush()
 	if err == nil {
 		ibs.stats.Log("Flush.Ok")
@@ -167,6 +178,7 @@ func (ibs *InstrumentedBlockSender[I]) Flush() error {
 		ibs.stats.Log("Flush." + err.Error())
 		ibs.stats.Logger().Debugw("InstrumentedBlockSender", "method", "Flush", "error", err)
 	}
+	ibs.stats.LogInterval("Flush", time.Since(begin))
 	return err
 }
 
@@ -200,6 +212,7 @@ func NewInstrumentedStatusSender[I core.BlockId](sender core.StatusSender[I], st
 // SendStatus calls the underlying status sender's SendStatus method and records stats.
 func (ibs *InstrumentedStatusSender[I]) SendStatus(have filter.Filter[I], want []I) error {
 	ibs.stats.Logger().Debugw("InstrumentedStatusSender", "method", "SendStatus", "haves", have.Count(), "wants", len(want))
+	begin := time.Now()
 	err := ibs.sender.SendStatus(have, want)
 	if err == nil {
 		ibs.stats.Log("SendStatus.Ok")
@@ -207,6 +220,7 @@ func (ibs *InstrumentedStatusSender[I]) SendStatus(have filter.Filter[I], want [
 		ibs.stats.Log("SendStatus." + err.Error())
 		ibs.stats.Logger().Debugw("InstrumentedStatusSender", "method", "SendStatus", "error", err)
 	}
+	ibs.stats.LogInterval("SendStatus", time.Since(begin))
 	return err
 }
 
