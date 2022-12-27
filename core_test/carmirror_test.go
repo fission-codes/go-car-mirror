@@ -13,6 +13,7 @@ import (
 	"github.com/fission-codes/go-car-mirror/filter"
 	mock "github.com/fission-codes/go-car-mirror/fixtures"
 	"github.com/fission-codes/go-car-mirror/messages"
+	"github.com/fission-codes/go-car-mirror/stats"
 	golog "github.com/ipfs/go-log/v2"
 	"github.com/zeebo/xxh3"
 )
@@ -25,7 +26,7 @@ const GBIT_SECOND = (1 << 30) / 8 / 1000 // Gigabit per second -> to bytes per s
 func init() {
 	rand.Seed(time.Now().UnixNano())
 
-	InitDefault()
+	stats.InitDefault()
 }
 
 var ErrReceiverNotSet error = errors.New("receiver not set")
@@ -195,16 +196,16 @@ func NewMockConnection(maxBatchSize uint, rate int64, latency int64) *MockConnec
 }
 
 func (conn *MockConnection) OpenBlockSender(orchestrator Orchestrator[BatchState]) BlockSender[mock.BlockId] {
-	return NewInstrumentedBlockSender[mock.BlockId](
+	return stats.NewInstrumentedBlockSender[mock.BlockId](
 		NewSimpleBatchBlockSender[mock.BlockId](&conn.batchBlockChannel, orchestrator, uint32(conn.maxBatchSize)),
-		GLOBAL_STATS.WithContext("MockBlockSender"),
+		stats.GLOBAL_STATS.WithContext("MockBlockSender"),
 	)
 }
 
 func (conn *MockConnection) OpenStatusSender(orchestrator Orchestrator[BatchState]) StatusSender[mock.BlockId] {
-	return NewInstrumentedStatusSender[mock.BlockId](
+	return stats.NewInstrumentedStatusSender[mock.BlockId](
 		NewMockStatusSender(&conn.statusChannel, orchestrator),
-		GLOBAL_STATS.WithContext("MockStatusSender"),
+		stats.GLOBAL_STATS.WithContext("MockStatusSender"),
 	)
 }
 
@@ -229,21 +230,21 @@ func (conn *MockConnection) ListenBlocks(receiver BlockReceiver[mock.BlockId, Ba
 
 func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, root mock.BlockId, max_batch_size uint, bytes_per_ms int64, latency_ms int64) error {
 
-	snapshotBefore := GLOBAL_REPORTING.Snapshot()
+	snapshotBefore := stats.GLOBAL_REPORTING.Snapshot()
 	connection := NewMockConnection(max_batch_size, bytes_per_ms, latency_ms)
 
 	sender_session := NewSenderSession[mock.BlockId, BatchState](
-		NewInstrumentedBlockStore[mock.BlockId](sender_store, GLOBAL_STATS.WithContext("SenderStore")),
+		stats.NewInstrumentedBlockStore[mock.BlockId](sender_store, stats.GLOBAL_STATS.WithContext("SenderStore")),
 		filter.NewSynchronizedFilter(makeBloom(1024)),
-		NewInstrumentedOrchestrator[BatchState](NewBatchSendOrchestrator(), GLOBAL_STATS.WithContext("BatchSendOrchestrator")),
+		stats.NewInstrumentedOrchestrator[BatchState](NewBatchSendOrchestrator(), stats.GLOBAL_STATS.WithContext("BatchSendOrchestrator")),
 	)
 
 	log.Debugf("created sender_session")
 
 	receiver_session := NewReceiverSession[mock.BlockId, BatchState](
-		NewInstrumentedBlockStore[mock.BlockId](NewSynchronizedBlockStore[mock.BlockId](receiver_store), GLOBAL_STATS.WithContext("ReceiverStore")),
+		stats.NewInstrumentedBlockStore[mock.BlockId](NewSynchronizedBlockStore[mock.BlockId](receiver_store), stats.GLOBAL_STATS.WithContext("ReceiverStore")),
 		NewSimpleStatusAccumulator[mock.BlockId](filter.NewSynchronizedFilter(makeBloom(1024))),
-		NewInstrumentedOrchestrator[BatchState](NewBatchReceiveOrchestrator(), GLOBAL_STATS.WithContext("BatchReceiveOrchestrator")),
+		stats.NewInstrumentedOrchestrator[BatchState](NewBatchReceiveOrchestrator(), stats.GLOBAL_STATS.WithContext("BatchReceiveOrchestrator")),
 	)
 
 	log.Debugf("created receiver_session")
@@ -274,7 +275,7 @@ func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, roo
 
 	go func() {
 		log.Debugf("status listener started")
-		err_chan <- connection.ListenStatus(NewInstrumentedStatusReceiver[mock.BlockId, BatchState](sender_session, GLOBAL_STATS.WithContext("StatusListener")))
+		err_chan <- connection.ListenStatus(stats.NewInstrumentedStatusReceiver[mock.BlockId, BatchState](sender_session, stats.GLOBAL_STATS.WithContext("StatusListener")))
 		log.Debugf("status listener terminated")
 	}()
 
@@ -297,7 +298,7 @@ func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, roo
 		log.Debugf("goroutine terminated with %v", err)
 	}
 
-	snapshotAfter := GLOBAL_REPORTING.Snapshot()
+	snapshotAfter := stats.GLOBAL_REPORTING.Snapshot()
 	diff := snapshotBefore.Diff(snapshotAfter)
 	diff.Write(&log.SugaredLogger)
 	return nil

@@ -1,4 +1,4 @@
-package carmirror
+package stats
 
 import (
 	"context"
@@ -7,12 +7,16 @@ import (
 	"strings"
 	"sync"
 
+	core "github.com/fission-codes/go-car-mirror/carmirror"
 	"github.com/fission-codes/go-car-mirror/errors"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 
 	"github.com/fission-codes/go-car-mirror/filter"
+	golog "github.com/ipfs/go-log/v2"
 )
+
+var log = golog.Logger("go-car-mirror")
 
 // Stats is an interface for recording events.
 type Stats interface {
@@ -206,13 +210,13 @@ func InitDefault() error {
 }
 
 // InstrumentedOrchestrator is an Orchestrator that records stats for events.
-type InstrumentedOrchestrator[F Flags, O Orchestrator[F]] struct {
+type InstrumentedOrchestrator[F core.Flags, O core.Orchestrator[F]] struct {
 	orchestrator O
 	stats        Stats
 }
 
 // NewInstrumentedOrchestrator returns a new InstrumentedOrchestrator instance.
-func NewInstrumentedOrchestrator[F Flags, O Orchestrator[F]](orchestrator O, stats Stats) *InstrumentedOrchestrator[F, O] {
+func NewInstrumentedOrchestrator[F core.Flags, O core.Orchestrator[F]](orchestrator O, stats Stats) *InstrumentedOrchestrator[F, O] {
 	return &InstrumentedOrchestrator[F, O]{
 		orchestrator: orchestrator,
 		stats:        stats,
@@ -220,7 +224,7 @@ func NewInstrumentedOrchestrator[F Flags, O Orchestrator[F]](orchestrator O, sta
 }
 
 // Notify calls the underlying orchestrator's Notify method and records stats.
-func (io *InstrumentedOrchestrator[F, O]) Notify(event SessionEvent) error {
+func (io *InstrumentedOrchestrator[F, O]) Notify(event core.SessionEvent) error {
 	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "Notify", "event", event, "state", io.orchestrator.State())
 	io.stats.Log(event.String())
 	err := io.orchestrator.Notify(event)
@@ -253,13 +257,13 @@ func (io *InstrumentedOrchestrator[F, O]) IsClosed() bool {
 }
 
 // InstrumentedBlockStore is a BlockStore that records stats for events.
-type InstrumentedBlockStore[I BlockId] struct {
-	store BlockStore[I]
+type InstrumentedBlockStore[I core.BlockId] struct {
+	store core.BlockStore[I]
 	stats Stats
 }
 
 // NewInstrumentedBlockStore returns a new InstrumentedBlockStore instance.
-func NewInstrumentedBlockStore[I BlockId](store BlockStore[I], stats Stats) *InstrumentedBlockStore[I] {
+func NewInstrumentedBlockStore[I core.BlockId](store core.BlockStore[I], stats Stats) *InstrumentedBlockStore[I] {
 	return &InstrumentedBlockStore[I]{
 		store: store,
 		stats: stats,
@@ -267,7 +271,7 @@ func NewInstrumentedBlockStore[I BlockId](store BlockStore[I], stats Stats) *Ins
 }
 
 // Get calls the underlying block store's Get method and records stats.
-func (ibs *InstrumentedBlockStore[I]) Get(ctx context.Context, id I) (Block[I], error) {
+func (ibs *InstrumentedBlockStore[I]) Get(ctx context.Context, id I) (core.Block[I], error) {
 	ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Get", "id", id)
 	result, err := ibs.store.Get(ctx, id)
 	if err == nil {
@@ -314,7 +318,7 @@ func (ibs *InstrumentedBlockStore[I]) All(ctx context.Context) (<-chan I, error)
 }
 
 // Add calls the underlying block store's Add method and records stats.
-func (ibs *InstrumentedBlockStore[I]) Add(ctx context.Context, rawBlock RawBlock[I]) (Block[I], error) {
+func (ibs *InstrumentedBlockStore[I]) Add(ctx context.Context, rawBlock core.RawBlock[I]) (core.Block[I], error) {
 	ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Add", "id", rawBlock.Id())
 	block, err := ibs.store.Add(ctx, rawBlock)
 	if err == nil {
@@ -327,13 +331,13 @@ func (ibs *InstrumentedBlockStore[I]) Add(ctx context.Context, rawBlock RawBlock
 }
 
 // InstrumentedBlockSender is a BlockSender that records stats for events.
-type InstrumentedBlockSender[I BlockId] struct {
-	sender BlockSender[I]
+type InstrumentedBlockSender[I core.BlockId] struct {
+	sender core.BlockSender[I]
 	stats  Stats
 }
 
 // NewInstrumentedBlockSender returns a new InstrumentedBlockSender instance.
-func NewInstrumentedBlockSender[I BlockId](sender BlockSender[I], stats Stats) *InstrumentedBlockSender[I] {
+func NewInstrumentedBlockSender[I core.BlockId](sender core.BlockSender[I], stats Stats) *InstrumentedBlockSender[I] {
 	return &InstrumentedBlockSender[I]{
 		sender,
 		stats,
@@ -341,7 +345,7 @@ func NewInstrumentedBlockSender[I BlockId](sender BlockSender[I], stats Stats) *
 }
 
 // SendBlock calls the underlying block sender's SendBlock method and records stats.
-func (ibs *InstrumentedBlockSender[I]) SendBlock(block RawBlock[I]) error {
+func (ibs *InstrumentedBlockSender[I]) SendBlock(block core.RawBlock[I]) error {
 	ibs.stats.Logger().Debugw("InstrumentedBlockSender", "method", "SendBlock", "id", block.Id())
 	err := ibs.sender.SendBlock(block)
 	if err == nil {
@@ -380,13 +384,13 @@ func (ibs *InstrumentedBlockSender[I]) Close() error {
 }
 
 // InstrumentedStatusSender is a StatusSender that records stats for events.
-type InstrumentedStatusSender[I BlockId] struct {
-	sender StatusSender[I]
+type InstrumentedStatusSender[I core.BlockId] struct {
+	sender core.StatusSender[I]
 	stats  Stats
 }
 
 // NewInstrumentedStatusSender returns a new InstrumentedStatusSender instance.
-func NewInstrumentedStatusSender[I BlockId](sender StatusSender[I], stats Stats) *InstrumentedStatusSender[I] {
+func NewInstrumentedStatusSender[I core.BlockId](sender core.StatusSender[I], stats Stats) *InstrumentedStatusSender[I] {
 	return &InstrumentedStatusSender[I]{
 		sender,
 		stats,
@@ -420,13 +424,13 @@ func (ibs *InstrumentedStatusSender[I]) Close() error {
 }
 
 // InstrumentedStatusReceiver is a StatusReceiver that records stats for events.
-type InstrumentedStatusReceiver[I BlockId, F Flags] struct {
-	receiver StatusReceiver[I, F]
+type InstrumentedStatusReceiver[I core.BlockId, F core.Flags] struct {
+	receiver core.StatusReceiver[I, F]
 	stats    Stats
 }
 
 // NewInstrumentedStatusReceiver returns a new InstrumentedStatusReceiver instance.
-func NewInstrumentedStatusReceiver[I BlockId, F Flags](receiver StatusReceiver[I, F], stats Stats) StatusReceiver[I, F] {
+func NewInstrumentedStatusReceiver[I core.BlockId, F core.Flags](receiver core.StatusReceiver[I, F], stats Stats) core.StatusReceiver[I, F] {
 	return &InstrumentedStatusReceiver[I, F]{
 		receiver,
 		stats,

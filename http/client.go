@@ -6,11 +6,12 @@ import (
 
 	core "github.com/fission-codes/go-car-mirror/carmirror"
 	"github.com/fission-codes/go-car-mirror/filter"
+	"github.com/fission-codes/go-car-mirror/stats"
 	"github.com/fission-codes/go-car-mirror/util"
 )
 
 func init() {
-	core.InitDefault()
+	stats.InitDefault()
 }
 
 type ClientSourceSessionData[I core.BlockId, R core.BlockIdRef[I]] struct {

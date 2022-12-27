@@ -12,6 +12,7 @@ import (
 	core "github.com/fission-codes/go-car-mirror/carmirror"
 	"github.com/fission-codes/go-car-mirror/filter"
 	"github.com/fission-codes/go-car-mirror/messages"
+	"github.com/fission-codes/go-car-mirror/stats"
 	"github.com/fission-codes/go-car-mirror/util"
 )
 
@@ -45,7 +46,7 @@ func NewServerSinkSessionData[I core.BlockId, R core.BlockIdRef[I]](store core.B
 	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchReceiveOrchestrator()
 
 	if instrumented {
-		orchestrator = core.NewInstrumentedOrchestrator[core.BatchState](orchestrator, core.GLOBAL_STATS.WithContext("BatchReceiveOrchestrator"))
+		orchestrator = stats.NewInstrumentedOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchReceiveOrchestrator"))
 	}
 
 	return &ServerSinkSessionData[I, R]{
