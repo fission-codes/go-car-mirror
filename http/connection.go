@@ -90,7 +90,15 @@ func (ss *RequestStatusSender[I, R]) SendStatus(have filter.Filter[I], want []I)
 	state := ss.orchestrator.State()
 	message := messages.NewStatusMessage[I, R](state, have, want)
 	reader, writer := io.Pipe()
-	message.Write(writer)
+
+	go func() {
+		defer writer.Close()
+		if err := message.Write(writer); err != nil {
+			log.Debugw("write error", "object", "RequestStatusSender", "method", "SendStatus", "error", err)
+		} else {
+			log.Debugw("finished writing batch to request", "object", "RequestStatusSender", "method", "SendStatus")
+		}
+	}()
 
 	if resp, err := ss.client.Post(ss.url, CONTENT_TYPE_CBOR, reader); err != nil {
 		return err
@@ -214,8 +222,7 @@ func NewClientReceiverConnection[I core.BlockId, R core.BlockIdRef[I]](
 	}
 }
 
-// OpenBlockSender opens a block sender
-// we are on the server side here, so the message will actually be sent in response to a status message
+// OpenStatusSender opens a client-side status sender
 func (conn *ClientReceiverConnection[I, R]) OpenStatusSender(orchestrator core.Orchestrator[core.BatchState]) core.StatusSender[I] {
 	return &RequestStatusSender[I, R]{
 		orchestrator,
@@ -244,8 +251,8 @@ func (conn *ServerReceiverConnection[I, R]) ResponseChannel() <-chan *messages.S
 	return conn.messages
 }
 
-// OpenBlockSender opens a block sender
-// we are on the server side here, so the message will actually be sent in response to a status message
+// OpenStatuskSender opens a status sender
+// we are on the server side here, so the message will actually be sent in response to a blocks message
 func (conn *ServerReceiverConnection[I, R]) OpenStatusSender(orchestrator core.Orchestrator[core.BatchState]) core.StatusSender[I] {
 	return &ResponseStatusSender[I, R]{
 		orchestrator,

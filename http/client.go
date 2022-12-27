@@ -197,12 +197,11 @@ func (c *Client[I, R]) Send(url string, id I) error {
 }
 
 func (c *Client[I, R]) Receive(url string, id I) error {
-	_, err := c.GetSinkSession(url)
+	session, err := c.GetSinkSession(url)
 	if err != nil {
 		return err
 	}
-	// TODO: Need something here
-	return nil
+	return session.Session.AccumulateStatus(id)
 }
 
 func (c *Client[I, R]) CloseSource(url string) error {
