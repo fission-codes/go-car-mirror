@@ -119,6 +119,13 @@ func Max[T constraints.Ordered](a, b T) T {
 	return b
 }
 
+func Diff[T constraints.Integer](a, b T) T {
+	if a > b {
+		return a - b
+	}
+	return b - a
+}
+
 // Map applies the given mapper function to each element of the given slice.
 func Map[T any, U any](ts []T, mapper func(T) U) []U {
 	var result = make([]U, len(ts))
