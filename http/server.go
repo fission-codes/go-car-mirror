@@ -254,7 +254,7 @@ func (srv *Server[I, R]) HandleBlocks(response http.ResponseWriter, request *htt
 	log.Debugw("processed blocks", "object", "Server", "method", "HandleBlocks", "session", sessionToken, "count", len(message.Car.Blocks))
 
 	// Send the blocks to the sessions
-	receiver := core.NewSimpleBatchBlockReceiver[I](sinkSession.Session)
+	receiver := core.NewSimpleBatchBlockReceiver[I](sinkSession.Session, sinkSession.Session.Orchestrator())
 	err = receiver.HandleList(message.State, message.Car.Blocks)
 	if err != nil {
 		log.Errorw("could not handle block list", "object", "server", "method", "HandleBlocks", "session", sessionToken, "error", err)

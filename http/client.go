@@ -70,7 +70,7 @@ func NewClientSinkSessionData[I core.BlockId, R core.BlockIdRef[I]](target strin
 		orchestrator,
 	)
 
-	receiver := core.NewSimpleBatchBlockReceiver[I](session)
+	receiver := core.NewSimpleBatchBlockReceiver[I](session, orchestrator)
 
 	jar, err := cookiejar.New(&cookiejar.Options{}) // TODO: set public suffix list
 	if err != nil {

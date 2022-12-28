@@ -240,6 +240,8 @@ const (
 	END_RECEIVE
 	BEGIN_CHECK
 	END_CHECK
+	BEGIN_BATCH
+	END_BATCH
 	CANCEL
 )
 
@@ -270,6 +272,10 @@ func (se SessionEvent) String() string {
 		return "BEGIN_RECEIVE"
 	case END_RECEIVE:
 		return "END_RECEIVE"
+	case BEGIN_BATCH:
+		return "BEGIN_BATCH"
+	case END_BATCH:
+		return "END_BATCH"
 	case BEGIN_CHECK:
 		return "BEGIN_CHECK"
 	case END_CHECK:
@@ -355,6 +361,16 @@ func NewReceiverSession[I BlockId, F Flags](
 		util.NewSynchronizedDeque[Block[I]](util.NewBlocksDeque[Block[I]](2048)),
 		&log.SugaredLogger,
 	}
+}
+
+// Provide access to orchestrator
+// TODO - refactor to make SenderSession support the Orchestrator interface:
+// HandleState = ReceiveState
+// IsClosed is implemented anyway
+// Implementing State and Notify will not appreciably complicate things
+// We can probably the completely get rid of Connection.
+func (rs *ReceiverSession[I, F]) Orchestrator() Orchestrator[F] {
+	return rs.orchestrator
 }
 
 func (rs *ReceiverSession[I, F]) GetInfo() *ReceiverSessionInfo[F] {
@@ -511,6 +527,16 @@ func NewSenderSession[I BlockId, F Flags](store BlockStore[I], filter filter.Fil
 		util.NewSynchronizedDeque[I](util.NewBlocksDeque[I](1024)),
 		&log.SugaredLogger,
 	}
+}
+
+// Provide access to orchestrator
+// TODO - refactor to make SenderSession support the Orchestrator interface:
+// HandleState = ReceiveState
+// IsClosed is implemented anyway
+// Implementing State and Notify will not appreciably complicate things
+// We can probably the completely get rid of Connection.
+func (ss *SenderSession[I, F]) Orchestrator() Orchestrator[F] {
+	return ss.orchestrator
 }
 
 func (ss *SenderSession[I, F]) GetInfo() *SenderSessionInfo[F] {

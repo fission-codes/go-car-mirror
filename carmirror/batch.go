@@ -78,24 +78,26 @@ type BatchBlockSender[I BlockId] interface {
 
 // SimpleBatchBlockReceiver is a simple implementation of BatchBlockReceiver.
 type SimpleBatchBlockReceiver[I BlockId] struct {
-	session BlockReceiver[I, BatchState]
+	session      BlockReceiver[I, BatchState]
+	orchestrator Orchestrator[BatchState]
 }
 
 // NewSimpleBatchBlockReceiver creates a new SimpleBatchBlockReceiver.
-func NewSimpleBatchBlockReceiver[I BlockId](rs BlockReceiver[I, BatchState]) *SimpleBatchBlockReceiver[I] {
+func NewSimpleBatchBlockReceiver[I BlockId](rs BlockReceiver[I, BatchState], orchestrator Orchestrator[BatchState]) *SimpleBatchBlockReceiver[I] {
 	return &SimpleBatchBlockReceiver[I]{
-		session: rs,
+		session:      rs,
+		orchestrator: orchestrator,
 	}
 }
 
 // HandleList handles a list of raw blocks.
 func (sbbr *SimpleBatchBlockReceiver[I]) HandleList(flags BatchState, list []RawBlock[I]) error {
+	sbbr.orchestrator.Notify(BEGIN_BATCH)
+	defer sbbr.orchestrator.Notify(END_BATCH)
 	for _, block := range list {
 		sbbr.session.HandleBlock(block)
 	}
-
-	sbbr.session.HandleState(flags | RECEIVER_CHECKING)
-
+	sbbr.session.HandleState(flags)
 	return nil
 }
 
@@ -246,6 +248,8 @@ func (bro *BatchReceiveOrchestrator) Notify(event SessionEvent) error {
 		if bro.flags.ContainsAny(SENDER_CLOSED | RECEIVER_CLOSING) {
 			bro.flags.Set(RECEIVER_CLOSED)
 		}
+	case END_BATCH:
+		bro.flags.Set(RECEIVER_CHECKING)
 	case END_SEND:
 		bro.flags.Unset(RECEIVER_CHECKING)
 	case CANCEL:
@@ -262,8 +266,7 @@ func (bro *BatchReceiveOrchestrator) State() BatchState {
 
 // ReceiveState unsets any current sender state flags, and sets the specified state flags.
 func (bro *BatchReceiveOrchestrator) ReceiveState(batchState BatchState) error {
-	// Slight hack here to allow ReceiverChecking to be updated by SimpleBatchBlockReceiver
-	bro.flags.Update(SENDER|RECEIVER_CHECKING, batchState)
+	bro.flags.Update(SENDER, batchState)
 	return nil
 }
 
