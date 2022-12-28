@@ -422,10 +422,8 @@ func (rs *ReceiverSession[I, F]) Run(connection ReceiverConnection[F, I]) error 
 	}()
 
 	for !rs.orchestrator.IsClosed() {
-		// TODO: Look into use of defer for this.
 		rs.orchestrator.Notify(BEGIN_CHECK)
 
-		// TODO: Any concerns with hangs here if nothing in pending?  Need goroutines?
 		if rs.pending.Len() > 0 {
 			block := rs.pending.PollFront()
 
@@ -457,6 +455,16 @@ func (ss *ReceiverSession[I, F]) HandleState(state F) {
 	if err != nil {
 		ss.log.Errorw("receiving state", "object", "ReceiverSession", "method", "HandleState", "error", err)
 	}
+}
+
+// Close closes the sender session.
+func (rs *ReceiverSession[I, F]) Close() error {
+	if err := rs.orchestrator.Notify(BEGIN_CLOSE); err != nil {
+		return err
+	}
+	defer rs.orchestrator.Notify(END_CLOSE)
+
+	return nil
 }
 
 // Cancel cancels the session.

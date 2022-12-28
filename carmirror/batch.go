@@ -234,6 +234,8 @@ func (bro *BatchReceiveOrchestrator) Notify(event SessionEvent) error {
 		bro.flags.Set(RECEIVER_READY)
 	case END_SESSION:
 		bro.flags.Update(RECEIVER_READY, RECEIVER_CLOSED)
+	case BEGIN_CLOSE:
+		bro.flags.Set(RECEIVER_CLOSING)
 	case BEGIN_CHECK:
 		state := bro.flags.WaitAny(RECEIVER_CHECKING|CANCELLED, 0)
 		if state&CANCELLED != 0 {
