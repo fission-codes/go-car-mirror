@@ -110,11 +110,11 @@ func TestClientReceive(t *testing.T) {
 	client.CloseSink("http://localhost:8021") // will close session when finished
 
 	// Wait for the session to go away
-	info, err := client.SourceInfo("http://localhost:8021")
+	info, err := client.SinkInfo("http://localhost:8021")
 	for err == nil {
 		log.Debugf("client info: %s", info.String())
 		time.Sleep(100 * time.Millisecond)
-		info, err = client.SourceInfo("http://localhost:8021")
+		info, err = client.SinkInfo("http://localhost:8021")
 	}
 
 	if err != ErrInvalidSession {
