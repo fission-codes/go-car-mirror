@@ -306,7 +306,7 @@ func NewBloomFilter[K comparable](capacity uint, function bloom.HashFunction[K])
 	bitCount, hashCount := bloom.EstimateParameters(uint64(capacity), bloom.EstimateFPP(uint64(capacity)))
 	filter, _ := bloom.NewFilter(bitCount, hashCount, function)
 
-	log.Debugw("BloomFilter", "method", "NewBloomFilter", "bitCount", bitCount, "hashCount", hashCount)
+	log.Debugw("calculated parameters", "object", "BloomFilter", "method", "NewBloomFilter", "bitCount", bitCount, "hashCount", hashCount)
 
 	return &BloomFilter[K]{
 		filter:       filter,

@@ -19,12 +19,18 @@ type ClientSourceSessionData[I core.BlockId, R core.BlockIdRef[I]] struct {
 	Session    *core.SenderSession[I, core.BatchState]
 }
 
-func NewClientSourceSessionData[I core.BlockId, R core.BlockIdRef[I]](target string, store core.BlockStore[I], maxBatchSize uint32, allocator func() filter.Filter[I]) *ClientSourceSessionData[I, R] {
+func NewClientSourceSessionData[I core.BlockId, R core.BlockIdRef[I]](target string, store core.BlockStore[I], maxBatchSize uint32, allocator func() filter.Filter[I], instrumented bool) *ClientSourceSessionData[I, R] {
+
+	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSendOrchestrator()
+
+	if instrumented {
+		orchestrator = stats.NewInstrumentedOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchSendOrchestrator"))
+	}
 
 	session := core.NewSenderSession[I, core.BatchState](
 		store,
 		filter.NewSynchronizedFilter[I](filter.NewEmptyFilter(allocator)),
-		core.NewBatchSendOrchestrator(),
+		orchestrator,
 	)
 
 	jar, err := cookiejar.New(&cookiejar.Options{}) // TODO: set public suffix list
@@ -50,12 +56,18 @@ type ClientSinkSessionData[I core.BlockId, R core.BlockIdRef[I]] struct {
 	Session    *core.ReceiverSession[I, core.BatchState]
 }
 
-func NewClientSinkSessionData[I core.BlockId, R core.BlockIdRef[I]](target string, store core.BlockStore[I], maxBatchSize uint32, allocator func() filter.Filter[I]) *ClientSinkSessionData[I, R] {
+func NewClientSinkSessionData[I core.BlockId, R core.BlockIdRef[I]](target string, store core.BlockStore[I], maxBatchSize uint32, allocator func() filter.Filter[I], instrumented bool) *ClientSinkSessionData[I, R] {
+
+	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchReceiveOrchestrator()
+
+	if instrumented {
+		orchestrator = stats.NewInstrumentedOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchReceiveOrchestrator"))
+	}
 
 	session := core.NewReceiverSession[I, core.BatchState](
 		store,
 		core.NewSimpleStatusAccumulator(allocator()),
-		core.NewBatchReceiveOrchestrator(),
+		orchestrator,
 	)
 
 	receiver := core.NewSimpleBatchBlockReceiver[I](session)
@@ -79,6 +91,7 @@ type Client[I core.BlockId, R core.BlockIdRef[I]] struct {
 	sinkSessions   *util.SynchronizedMap[string, *ClientSinkSessionData[I, R]]
 	maxBatchSize   uint32
 	allocator      func() filter.Filter[I]
+	instrumented   bool
 }
 
 func NewClient[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], config Config) *Client[I, R] {
@@ -88,6 +101,7 @@ func NewClient[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], c
 		util.NewSynchronizedMap[string, *ClientSinkSessionData[I, R]](),
 		config.MaxBatchSize,
 		NewBloomAllocator[I](&config),
+		config.Instrument,
 	}
 }
 
@@ -97,6 +111,7 @@ func (c *Client[I, R]) startSourceSession(url string) *ClientSourceSessionData[I
 		c.store,
 		c.maxBatchSize,
 		c.allocator,
+		c.instrumented,
 	)
 	go func() {
 		log.Debugw("starting source session", "object", "Client", "method", "startSourceSession", "url", url)
@@ -133,6 +148,7 @@ func (c *Client[I, R]) startSinkSession(url string) *ClientSinkSessionData[I, R]
 		c.store,
 		c.maxBatchSize,
 		c.allocator,
+		c.instrumented,
 	)
 	go func() {
 		log.Debugw("starting sink session", "object", "Client", "method", "startSinkSession", "url", url)
@@ -205,19 +221,25 @@ func (c *Client[I, R]) Receive(url string, id I) error {
 }
 
 func (c *Client[I, R]) CloseSource(url string) error {
+	log.Debugw("enter", "object", "Client", "method", "CloseSource", "url", url)
 	session, err := c.GetSourceSession(url)
 	if err != nil {
+		log.Debugw("exit", "object", "Client", "method", "CloseSource", "err", err)
 		return err
 	}
-	session.Session.Close()
-	return nil
+	err = session.Session.Close()
+	log.Debugw("exit", "object", "Client", "method", "CloseSource", "err", err)
+	return err
 }
 
 func (c *Client[I, R]) CloseSink(url string) error {
+	log.Debugw("enter", "object", "Client", "method", "CloseSink", "url", url)
 	session, err := c.GetSinkSession(url)
 	if err != nil {
+		log.Debugw("exit", "object", "Client", "method", "CloseSink", "err", err)
 		return err
 	}
-	session.Session.Cancel() // TODO: Implement graceful shutdown from Sink
-	return nil
+	err = session.Session.Close()
+	log.Debugw("exit", "object", "Client", "method", "CloseSink", "err", err)
+	return err
 }

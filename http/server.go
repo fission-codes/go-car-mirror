@@ -23,14 +23,21 @@ type ServerSourceSessionData[I core.BlockId, R core.BlockIdRef[I]] struct {
 	Session    *core.SenderSession[I, core.BatchState]
 }
 
-func NewServerSourceSessionData[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], maxBatchSize uint32, allocator func() filter.Filter[I]) *ServerSourceSessionData[I, R] {
+func NewServerSourceSessionData[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], maxBatchSize uint32, allocator func() filter.Filter[I], instrumented bool) *ServerSourceSessionData[I, R] {
 	connection := NewServerSenderConnection[I, R](maxBatchSize)
+
+	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSendOrchestrator()
+
+	if instrumented {
+		orchestrator = stats.NewInstrumentedOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchSendOrchestrator"))
+	}
+
 	return &ServerSourceSessionData[I, R]{
 		connection,
 		core.NewSenderSession[I, core.BatchState](
 			store,
 			filter.NewSynchronizedFilter[I](filter.NewEmptyFilter(allocator)),
-			core.NewBatchSendOrchestrator(),
+			orchestrator,
 		),
 	}
 }
@@ -105,13 +112,13 @@ func NewServer[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], c
 
 // Start starts the server
 func (srv *Server[I, R]) Start() error {
-	log.Debugw("Server", "method", "Start")
+	log.Debugw("enter", "object", "Server", "method", "Start")
 	return srv.http.ListenAndServe()
 }
 
 // Stop stops the server
 func (srv *Server[I, R]) Stop() error {
-	log.Debugw("Server", "method", "Stop")
+	log.Debugw("enter", "object", "Server", "method", "Stop")
 	return srv.http.Close()
 }
 
@@ -154,7 +161,7 @@ func (srv *Server[I, R]) HandleStatus(response http.ResponseWriter, request *htt
 	// Find the session from the session token, or create one
 	sourceSession, ok := srv.sourceSessions.Get(sessionToken)
 	if !ok {
-		sourceSession = NewServerSourceSessionData[I, R](srv.store, srv.maxBatchSize, srv.allocator)
+		sourceSession = NewServerSourceSessionData[I, R](srv.store, srv.maxBatchSize, srv.allocator, srv.instrumented)
 		srv.sourceSessions.Add(sessionToken, sourceSession)
 		// Start the new session running; when it stops, remove it from the session map
 		go func() {

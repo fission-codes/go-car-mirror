@@ -88,7 +88,7 @@ func TestClientReceive(t *testing.T) {
 		Address:       ":8021",
 		BloomCapacity: 256,
 		BloomFunction: MOCK_ID_HASH,
-		Instrument:    false,
+		Instrument:    true,
 	}
 
 	serverStore := mock.NewStore()
