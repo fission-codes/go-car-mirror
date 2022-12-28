@@ -107,7 +107,7 @@ func TestClientReceive(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	client.Receive("http://localhost:8021", rootId)
-	client.CloseSource("http://localhost:8021") // will close session when finished
+	client.CloseSink("http://localhost:8021") // will close session when finished
 
 	// Wait for the session to go away
 	info, err := client.SourceInfo("http://localhost:8021")
