@@ -51,7 +51,7 @@ func NewServerSinkSessionData[I core.BlockId, R core.BlockIdRef[I]](store core.B
 
 	return &ServerSinkSessionData[I, R]{
 		connection,
-		core.NewReceiverSession[I, core.BatchState](
+		core.NewReceiverSession[I](
 			store,
 			core.NewSimpleStatusAccumulator(allocator()),
 			orchestrator,
