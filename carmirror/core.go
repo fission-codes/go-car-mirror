@@ -242,6 +242,8 @@ const (
 	END_CHECK
 	BEGIN_BATCH
 	END_BATCH
+	BEGIN_ENQUEUE
+	END_ENQUEUE
 	CANCEL
 )
 
@@ -406,6 +408,15 @@ func (rs *ReceiverSession[I, F]) AccumulateStatus(id I) error {
 	}
 
 	return nil
+}
+
+func (rs *ReceiverSession[I, F]) Enqueue(id I) error {
+	// When is it safe to do this?
+	// if we are currently checking (e.g. the polling loop is running)
+	// if we are not currently checking *and* we are not currently sending?
+	rs.orchestrator.Notify(BEGIN_ENQUEUE)     // This should block if status is RECEIVER_SENDING
+	defer rs.orchestrator.Notify(END_ENQUEUE) // This should set RECEIVER_CHECKING
+	return rs.AccumulateStatus(id)            // This is recursive so it may take some time
 }
 
 // HandleBlock handles a block that is being received.
