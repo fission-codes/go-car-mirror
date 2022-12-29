@@ -282,6 +282,10 @@ func (se SessionEvent) String() string {
 		return "BEGIN_CHECK"
 	case END_CHECK:
 		return "END_CHECK"
+	case BEGIN_ENQUEUE:
+		return "BEGIN_ENQUEUE"
+	case END_ENQUEUE:
+		return "END_ENQUEUE"
 	case CANCEL:
 		return "CANCEL"
 	default:
