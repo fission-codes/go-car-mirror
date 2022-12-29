@@ -141,43 +141,47 @@ func (srv *Server[I, R]) HandleStatus(response http.ResponseWriter, request *htt
 	if err != nil {
 		switch {
 		case errors.Is(err, http.ErrNoCookie):
+			log.Debugw("generating cookie", "object", "Server", "method", "HandleStatus")
 			sessionToken = srv.generateToken(request.RemoteAddr)
 			http.SetCookie(response, &http.Cookie{
-				Name:     "sinkSessionToken",
+				Name:     "sourceSessionToken",
 				Value:    (string)(sessionToken),
 				Secure:   false,
 				SameSite: http.SameSiteDefaultMode,
 				MaxAge:   0,
 			})
 		default:
-			log.Errorf("unexpected error: %v", err)
+			log.Errorw("could not retrieve cookie", "object", "Server", "method", "HandleStatus", "error", err)
 			http.Error(response, "server error", http.StatusInternalServerError)
 			return
 		}
 	} else {
 		sessionToken = SessionToken(sourceCookie.Value)
 	}
+	log.Debugw("have session token", "object", "Server", "method", "HandleStatus", "token", sessionToken)
 
 	// Find the session from the session token, or create one
 	sourceSession, ok := srv.sourceSessions.Get(sessionToken)
 	if !ok {
+		log.Debugw("no session found for token", "object", "Server", "method", "HandleStatus", "session", sessionToken)
 		sourceSession = NewServerSourceSessionData[I, R](srv.store, srv.maxBatchSize, srv.allocator, srv.instrumented)
 		srv.sourceSessions.Add(sessionToken, sourceSession)
 		// Start the new session running; when it stops, remove it from the session map
 		go func() {
 			err := sourceSession.Session.Run(sourceSession.Connection)
 			if err != nil {
-				log.Errorf("source session %v returned error %v", sessionToken, err)
+				log.Errorw("session returned error", "object", "Server", "method", "HandleStatus", "session", sessionToken, "error", err)
 			}
 			srv.sourceSessions.Remove(sessionToken)
 		}()
 	}
+	log.Debugw("have session for token", "object", "Server", "method", "HandleStatus", "session", sessionToken)
 
 	// Parse the request to get the status message
 	message := messages.StatusMessage[I, R, core.BatchState]{}
 	messageReader := bufio.NewReader(request.Body)
 	if err := message.Read(messageReader); err != nil {
-		log.Errorf("could not parse state message for: %v", sessionToken)
+		log.Errorw("parsing status message", "object", "Server", "method", "HandleStatus", "session", sessionToken, "error", err)
 		http.Error(response, "bad message format", http.StatusBadRequest)
 		return
 	}
@@ -188,11 +192,18 @@ func (srv *Server[I, R]) HandleStatus(response http.ResponseWriter, request *htt
 	request.Body.Close()
 
 	// Wait for a response from the session
+	log.Debugw("waiting on session", "object", "Server", "method", "HandleStatus", "session", sessionToken)
 	blocks := <-sourceSession.Connection.ResponseChannel()
+	log.Debugw("session returned blocks", "object", "Server", "method", "HandleStatus", "len", len(blocks.Car.Blocks))
 
 	// Write the response
 	response.WriteHeader(http.StatusAccepted)
-	blocks.Write(response)
+	err = blocks.Write(response)
+
+	if err != nil {
+		log.Errorf("unexpected error writing response", "object", "Server", "method", "HandleStatus", "error", err)
+	}
+	log.Debugw("exit", "object", "Server", "method", "HandleStatus")
 }
 
 func (srv *Server[I, R]) HandleBlocks(response http.ResponseWriter, request *http.Request) {

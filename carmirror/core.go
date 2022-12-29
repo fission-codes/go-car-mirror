@@ -654,6 +654,8 @@ func (ss *SenderSession[I, F]) Cancel() error {
 
 // Enqueue enqueues a block id to be sent.
 func (ss *SenderSession[I, F]) Enqueue(id I) error {
+	ss.orchestrator.Notify(BEGIN_ENQUEUE)
+	defer ss.orchestrator.Notify(END_ENQUEUE)
 	return ss.pending.PushBack(id)
 }
 

@@ -21,12 +21,14 @@ const (
 	RECEIVER_SENDING   // Receiver is in the process of sending a status message
 	RECEIVER_WAITING   // Receiver is waiting for a batch of blocks
 	RECEIVER_ENQUEUING // Receiver is processing a block id that has been explicitly requested
-	SENDER_READY
+	SENDER_READY       // Sender is processing a batch of blocks
+	SENDER_FLUSHING    // Sender is flushing blocks
+	SENDER_WAITING     // Sender is waiting for a status message
 	SENDER_CLOSING
 	SENDER_CLOSED
 	CANCELLED
 	RECEIVER = CANCELLED | RECEIVER_READY | RECEIVER_CLOSING | RECEIVER_CHECKING | RECEIVER_CLOSED | RECEIVER_SENDING | RECEIVER_ENQUEUING | RECEIVER_WAITING
-	SENDER   = CANCELLED | SENDER_READY | SENDER_CLOSING | SENDER_CLOSED
+	SENDER   = CANCELLED | SENDER_READY | SENDER_FLUSHING | SENDER_WAITING | SENDER_CLOSING | SENDER_CLOSED
 )
 
 // Strings returns a slice of strings describing the given BatchState.
@@ -182,10 +184,14 @@ func NewBatchSendOrchestrator() *BatchSendOrchestrator {
 
 // Notify notifies the orchestrator of a session event.
 // Events lead to state transitions in the orchestrator.
+//
+// Current problem - we start this running before we have anything in the pending queue and it
+// goes straight to draining. This means we wind up sending an empty batch etc. Need something to
+// manage this, like the ENQUEUE states.
 func (bso *BatchSendOrchestrator) Notify(event SessionEvent) error {
 	switch event {
 	case BEGIN_SESSION:
-		bso.flags.Set(SENDER_READY)
+		// bso.flags.Set(SENDER_READY) - now set by END_ENQUEUE
 	case BEGIN_SEND:
 		state := bso.flags.WaitAny(SENDER_READY|CANCELLED, 0)
 		if state&CANCELLED != 0 {
@@ -193,14 +199,23 @@ func (bso *BatchSendOrchestrator) Notify(event SessionEvent) error {
 			return errors.ErrStateError
 		}
 	case END_RECEIVE:
-		bso.flags.Set(SENDER_READY)
+		bso.flags.Update(SENDER_WAITING, SENDER_READY)
 	case BEGIN_CLOSE:
 		bso.flags.Set(SENDER_CLOSING)
 	case BEGIN_FLUSH:
-		bso.flags.Unset(SENDER_READY)
+		bso.flags.Update(SENDER_READY, SENDER_FLUSHING)
+	case END_FLUSH:
+		bso.flags.Update(SENDER_FLUSHING, SENDER_WAITING)
 	case BEGIN_DRAINING:
-		if bso.flags.ContainsAny(RECEIVER_CLOSED | SENDER_CLOSING) {
+		if bso.flags.ContainsAny(RECEIVER_CLOSING | SENDER_CLOSING) {
 			bso.flags.Set(SENDER_CLOSED)
+		}
+	case END_ENQUEUE:
+		// This is necesarry because if the session is quiescent (e.g. has no in-flight exchange)
+		// the session Run loop will be waiting on SENDER_READY, and we need to set it to wake
+		// up the session.If the receiver is not flushing, waiting, or ready, it is quiescant.
+		if !bso.flags.ContainsAny(SENDER_FLUSHING | SENDER_WAITING | SENDER_READY) {
+			bso.flags.Set(SENDER_READY)
 		}
 	case END_SESSION:
 		bso.flags.Update(SENDER, SENDER_CLOSED)
@@ -260,7 +275,7 @@ func (bro *BatchReceiveOrchestrator) Notify(event SessionEvent) error {
 	case BEGIN_SEND:
 		bro.flags.WaitExact(RECEIVER_ENQUEUING, 0) // Can't send while enqueuing
 		bro.flags.Update(RECEIVER_CHECKING, RECEIVER_SENDING)
-		if bro.flags.ContainsAny(SENDER_CLOSED | RECEIVER_CLOSING) {
+		if bro.flags.Contains(SENDER_CLOSED) {
 			bro.flags.Set(RECEIVER_CLOSED)
 		}
 	case END_BATCH:

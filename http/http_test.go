@@ -8,6 +8,7 @@ import (
 
 	"github.com/fission-codes/go-car-mirror/filter"
 	mock "github.com/fission-codes/go-car-mirror/fixtures"
+	"github.com/fission-codes/go-car-mirror/stats"
 	"github.com/fission-codes/go-car-mirror/util"
 )
 
@@ -97,7 +98,7 @@ func TestClientReceive(t *testing.T) {
 	rootId := mock.AddRandomTree(context.Background(), serverStore, 12, 5, 0.0)
 
 	server := NewServer[mock.BlockId](serverStore, config)
-	client := NewClient[mock.BlockId](clientStore, config)
+	client := NewClient[mock.BlockId](stats.NewInstrumentedBlockStore[mock.BlockId](clientStore, stats.GLOBAL_STATS.WithContext("clientStore")), config)
 
 	errChan := make(chan error)
 
@@ -105,6 +106,8 @@ func TestClientReceive(t *testing.T) {
 
 	// Give the server time to start up
 	time.Sleep(100 * time.Millisecond)
+
+	snapshotBefore := stats.GLOBAL_REPORTING.Snapshot()
 
 	client.Receive("http://localhost:8021", rootId)
 	client.CloseSink("http://localhost:8021") // will close session when finished
@@ -127,7 +130,13 @@ func TestClientReceive(t *testing.T) {
 		t.Errorf("Server closed with error %v", err)
 	}
 
+	snapshotAfter := stats.GLOBAL_REPORTING.Snapshot()
+	diff := snapshotBefore.Diff(snapshotAfter)
+	diff.Write(&log.SugaredLogger)
+
 	if !clientStore.HasAll(rootId) {
-		t.Errorf("Expected server store to have all children of %v", rootId)
+		t.Errorf("Expected client store to have all children of %v", rootId)
+		clientStore.Dump(rootId, &log.SugaredLogger, "")
+
 	}
 }

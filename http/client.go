@@ -27,7 +27,7 @@ func NewClientSourceSessionData[I core.BlockId, R core.BlockIdRef[I]](target str
 		orchestrator = stats.NewInstrumentedOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchSendOrchestrator"))
 	}
 
-	session := core.NewSenderSession[I, core.BatchState](
+	session := core.NewSenderSession[I](
 		store,
 		filter.NewSynchronizedFilter[I](filter.NewEmptyFilter(allocator)),
 		orchestrator,
@@ -217,7 +217,7 @@ func (c *Client[I, R]) Receive(url string, id I) error {
 	if err != nil {
 		return err
 	}
-	return session.Session.AccumulateStatus(id)
+	return session.Session.Enqueue(id)
 }
 
 func (c *Client[I, R]) CloseSource(url string) error {

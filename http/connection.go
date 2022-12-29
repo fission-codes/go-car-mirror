@@ -87,6 +87,7 @@ type RequestStatusSender[I core.BlockId, R core.BlockIdRef[I]] struct {
 }
 
 func (ss *RequestStatusSender[I, R]) SendStatus(have filter.Filter[I], want []I) error {
+	log.Debugw("enter", "object", "RequestStatusSender", "method", "SendStatus", "have", have.Count(), "want", len(want))
 	state := ss.orchestrator.State()
 	message := messages.NewStatusMessage[I, R](state, have, want)
 	reader, writer := io.Pipe()
@@ -99,19 +100,30 @@ func (ss *RequestStatusSender[I, R]) SendStatus(have filter.Filter[I], want []I)
 			log.Debugw("finished writing batch to request", "object", "RequestStatusSender", "method", "SendStatus")
 		}
 	}()
-
+	log.Debugw("post", "object", "RequestStatusSender", "method", "SendStatus", "url", ss.url)
 	if resp, err := ss.client.Post(ss.url, CONTENT_TYPE_CBOR, reader); err != nil {
+		log.Debugw("exit", "object", "RequestStatusSender", "method", "SendStatus", "error", err)
 		return err
 	} else {
-		responseMessage := messages.BlocksMessage[I, R, core.BatchState]{}
-		if err := responseMessage.Read(bufio.NewReader(resp.Body)); err != nil {
+		if resp.StatusCode == http.StatusAccepted {
+			log.Debugw("post response", "object", "RequestStatusSender", "method", "SendStatus", "url", ss.url)
+			responseMessage := messages.BlocksMessage[I, R, core.BatchState]{}
+			bufferedReader := bufio.NewReader(resp.Body)
+			if err := responseMessage.Read(bufferedReader); err != io.EOF { // read expected to terminate with EOF
+				log.Debugw("exit", "object", "RequestStatusSender", "method", "SendStatus", "error", err)
+				return err
+			}
+			if err := resp.Body.Close(); err != nil {
+				log.Debugw("exit", "object", "RequestStatusSender", "method", "SendStatus", "error", err)
+				return err
+			}
+			err := ss.responseHandler.HandleList(responseMessage.State, responseMessage.Car.Blocks)
+			log.Debugw("exit", "object", "RequestStatusSender", "method", "SendStatus", "error", err)
 			return err
+		} else {
+			log.Debugw("Unexpected response", "object", "RequestBatchBlockSender", "status", resp.Status)
+			return ErrInvalidResponse
 		}
-		if err := resp.Body.Close(); err != nil {
-			return err
-		}
-		ss.responseHandler.HandleList(responseMessage.State, responseMessage.Car.Blocks)
-		return nil
 	}
 }
 
