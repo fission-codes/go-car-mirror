@@ -208,9 +208,9 @@ func (bso *BatchSendOrchestrator) Notify(event SessionEvent) error {
 			bso.flags.Set(SENDER_CLOSED)
 		}
 	case END_ENQUEUE:
-		// This is necesarry because if the session is quiescent (e.g. has no in-flight exchange)
+		// This is necessary because if the session is quiescent (e.g. has no in-flight exchange)
 		// the session Run loop will be waiting on SENDER_READY, and we need to set it to wake
-		// up the session.If the receiver is not flushing, waiting, or ready, it is quiescant.
+		// up the session.  If the receiver is not flushing, waiting, or ready, it is quiescent.
 		if !bso.flags.ContainsAny(SENDER_FLUSHING | SENDER_WAITING | SENDER_READY) {
 			bso.flags.Set(SENDER_READY)
 		}
@@ -286,10 +286,10 @@ func (bro *BatchReceiveOrchestrator) Notify(event SessionEvent) error {
 		bro.flags.Set(RECEIVER_ENQUEUING)
 	case END_ENQUEUE:
 		bro.flags.Unset(RECEIVER_ENQUEUING)
-		// This is necesarry because if the session is quiescent (e.g. has no in-flight exchange)
+		// This is necessary because if the session is quiescent (e.g. has no in-flight exchange)
 		// the session Run loop will be waiting on RECEIVER_CHECKING, and we need to set it to send
 		// an initial 'want' message to the block source. If the receiver is not sending, waiting,
-		// or checking, it is quiescant.
+		// or checking, it is quiescent.
 		if !bro.flags.ContainsAny(RECEIVER_SENDING | RECEIVER_WAITING | RECEIVER_CHECKING) {
 			bro.flags.Set(RECEIVER_CHECKING)
 		}

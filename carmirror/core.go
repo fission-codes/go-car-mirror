@@ -369,12 +369,12 @@ func NewReceiverSession[I BlockId, F Flags](
 	}
 }
 
-// Provide access to orchestrator
+// Orchestrator provides access to the orchestrator.
 // TODO - refactor to make SenderSession support the Orchestrator interface:
 // HandleState = ReceiveState
 // IsClosed is implemented anyway
 // Implementing State and Notify will not appreciably complicate things
-// We can probably the completely get rid of Connection.
+// We can probably completely get rid of Connection.
 func (rs *ReceiverSession[I, F]) Orchestrator() Orchestrator[F] {
 	return rs.orchestrator
 }
@@ -544,7 +544,7 @@ func NewSenderSession[I BlockId, F Flags](store BlockStore[I], filter filter.Fil
 	}
 }
 
-// Provide access to orchestrator
+// Orchestrator provides access to the orchestrator.
 // TODO - refactor to make SenderSession support the Orchestrator interface:
 // HandleState = ReceiveState
 // IsClosed is implemented anyway
