@@ -211,7 +211,7 @@ func (bso *BatchSendOrchestrator) Notify(event SessionEvent) error {
 			bso.flags.Set(SENDER_CLOSED)
 		}
 	case END_ENQUEUE:
-		// This is necesarry because if the session is quiescent (e.g. has no in-flight exchange)
+		// This is necessary because if the session is quiescent (e.g. has no in-flight exchange)
 		// the session Run loop will be waiting on SENDER_READY, and we need to set it to wake
 		// up the session.If the receiver is not flushing, waiting, or ready, it is quiescant.
 		if !bso.flags.ContainsAny(SENDER_FLUSHING | SENDER_WAITING | SENDER_READY) {
