@@ -369,7 +369,7 @@ func NewReceiverSession[I BlockId, F Flags](
 	}
 }
 
-// Provide access to orchestrator
+// Orchestrator provides access to the orchestrator.
 // TODO - refactor to make SenderSession support the Orchestrator interface:
 // HandleState = ReceiveState
 // IsClosed is implemented anyway
