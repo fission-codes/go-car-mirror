@@ -289,7 +289,7 @@ func (bro *BatchReceiveOrchestrator) Notify(event SessionEvent) error {
 		bro.flags.Set(RECEIVER_ENQUEUING)
 	case END_ENQUEUE:
 		bro.flags.Unset(RECEIVER_ENQUEUING)
-		// This is necesarry because if the session is quiescent (e.g. has no in-flight exchange)
+		// This is necessary because if the session is quiescent (e.g. has no in-flight exchange)
 		// the session Run loop will be waiting on RECEIVER_CHECKING, and we need to set it to send
 		// an initial 'want' message to the block source. If the receiver is not sending, waiting,
 		// or checking, it is quiescant.
