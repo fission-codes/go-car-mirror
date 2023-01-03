@@ -185,9 +185,6 @@ func NewBatchSendOrchestrator() *BatchSendOrchestrator {
 // Notify notifies the orchestrator of a session event.
 // Events lead to state transitions in the orchestrator.
 //
-// Current problem - we start this running before we have anything in the pending queue and it
-// goes straight to draining. This means we wind up sending an empty batch etc. Need something to
-// manage this, like the ENQUEUE states.
 func (bso *BatchSendOrchestrator) Notify(event SessionEvent) error {
 	switch event {
 	case BEGIN_SESSION:
