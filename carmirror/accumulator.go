@@ -68,14 +68,14 @@ func (ssa *SimpleStatusAccumulator[I]) Receive(id I) error {
 // Send sends the current status using the given StatusSender.
 func (ssa *SimpleStatusAccumulator[I]) Send(sender StatusSender[I]) error {
 	ssa.mutex.Lock()
-	send_have := ssa.have
-	send_want := maps.Keys(ssa.want)
+	sendHave := ssa.have
+	sendWant := maps.Keys(ssa.want)
 	ssa.have = ssa.have.Clear() // this aways creates an empty copy
 	ssa.want = make(map[I]bool)
-	for _, k := range send_want {
+	for _, k := range sendWant {
 		ssa.wanted[k] = true
 	}
 	ssa.mutex.Unlock()
 	// avoid holding the mutex for the duration of the send operation.
-	return sender.SendStatus(send_have, send_want)
+	return sender.SendStatus(sendHave, sendWant)
 }
