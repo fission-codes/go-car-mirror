@@ -8,6 +8,7 @@ import (
 
 	"github.com/fission-codes/go-car-mirror/filter"
 	mock "github.com/fission-codes/go-car-mirror/fixtures"
+	"github.com/fission-codes/go-car-mirror/stats"
 	"github.com/fission-codes/go-car-mirror/util"
 )
 
@@ -78,5 +79,64 @@ func TestClientSend(t *testing.T) {
 
 	if !serverStore.HasAll(rootId) {
 		t.Errorf("Expected server store to have all children of %v", rootId)
+	}
+}
+
+func TestClientReceive(t *testing.T) {
+
+	config := Config{
+		MaxBatchSize:  100,
+		Address:       ":8021",
+		BloomCapacity: 256,
+		BloomFunction: MOCK_ID_HASH,
+		Instrument:    true,
+	}
+
+	serverStore := mock.NewStore()
+	clientStore := mock.NewStore()
+
+	rootId := mock.AddRandomTree(context.Background(), serverStore, 12, 5, 0.0)
+
+	server := NewServer[mock.BlockId](serverStore, config)
+	client := NewClient[mock.BlockId](stats.NewInstrumentedBlockStore[mock.BlockId](clientStore, stats.GLOBAL_STATS.WithContext("clientStore")), config)
+
+	errChan := make(chan error)
+
+	go func() { errChan <- server.Start() }()
+
+	// Give the server time to start up
+	time.Sleep(100 * time.Millisecond)
+
+	snapshotBefore := stats.GLOBAL_REPORTING.Snapshot()
+
+	client.Receive("http://localhost:8021", rootId)
+	client.CloseSink("http://localhost:8021") // will close session when finished
+
+	// Wait for the session to go away
+	info, err := client.SinkInfo("http://localhost:8021")
+	for err == nil {
+		log.Debugf("client info: %s", info.String())
+		time.Sleep(100 * time.Millisecond)
+		info, err = client.SinkInfo("http://localhost:8021")
+	}
+
+	if err != ErrInvalidSession {
+		t.Errorf("Closed with unexpected error %v", err)
+	}
+
+	server.Stop()
+
+	if err = <-errChan; err != http.ErrServerClosed && err != nil {
+		t.Errorf("Server closed with error %v", err)
+	}
+
+	snapshotAfter := stats.GLOBAL_REPORTING.Snapshot()
+	diff := snapshotBefore.Diff(snapshotAfter)
+	diff.Write(&log.SugaredLogger)
+
+	if !clientStore.HasAll(rootId) {
+		t.Errorf("Expected client store to have all children of %v", rootId)
+		clientStore.Dump(rootId, &log.SugaredLogger, "")
+
 	}
 }

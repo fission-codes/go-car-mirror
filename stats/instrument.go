@@ -26,34 +26,32 @@ func NewInstrumentedOrchestrator[F core.Flags, O core.Orchestrator[F]](orchestra
 
 // Notify calls the underlying orchestrator's Notify method and records stats.
 func (io *InstrumentedOrchestrator[F, O]) Notify(event core.SessionEvent) error {
-	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "Notify", "event", event, "state", io.orchestrator.State())
+	io.stats.Logger().Debugw("enter", "method", "Notify", "event", event, "state", io.orchestrator.State())
 	io.stats.Log(event.String())
 	err := io.orchestrator.Notify(event)
-	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "Notify", "event", event, "result", err, "state", io.orchestrator.State())
+	io.stats.Logger().Debugw("exit", "method", "Notify", "event", event, "error", err, "state", io.orchestrator.State())
 	return err
 }
 
 // State calls the underlying orchestrator's State method and records stats.
 func (io *InstrumentedOrchestrator[F, O]) State() F {
-	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "State")
 	result := io.orchestrator.State()
-	io.stats.Logger().Debugw("InstrumentedOrchestrator", "result", result)
+	io.stats.Logger().Debugw("exit", "method", "State", "result", result)
 	return result
 }
 
 // ReceiveState calls the underlying orchestrator's ReceiveState method and records stats.
 func (io *InstrumentedOrchestrator[F, O]) ReceiveState(state F) error {
-	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "ReceiveState", "state", state)
+	io.stats.Logger().Debugw("enter", "method", "ReceiveState", "state", state)
 	err := io.orchestrator.ReceiveState(state)
-	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "ReceiveState", "err", err)
+	io.stats.Logger().Debugw("exit", "method", "ReceiveState", "err", err)
 	return err
 }
 
 // IsClosed calls the underlying orchestrator's IsClosed method and records stats.
 func (io *InstrumentedOrchestrator[F, O]) IsClosed() bool {
-	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "IsClosed")
 	result := io.orchestrator.IsClosed()
-	io.stats.Logger().Debugw("InstrumentedOrchestrator", "method", "IsClosed", "result", result)
+	io.stats.Logger().Debugw("exit", "method", "IsClosed", "result", result)
 	return result
 }
 
@@ -73,14 +71,14 @@ func NewInstrumentedBlockStore[I core.BlockId](store core.BlockStore[I], stats S
 
 // Get calls the underlying block store's Get method and records stats.
 func (ibs *InstrumentedBlockStore[I]) Get(ctx context.Context, id I) (core.Block[I], error) {
-	ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Get", "id", id)
+	ibs.stats.Logger().Debugw("enter", "method", "Get", "id", id)
 	begin := time.Now()
 	result, err := ibs.store.Get(ctx, id)
 	if err == nil {
 		ibs.stats.Log("Get.Ok")
 	} else {
 		ibs.stats.Log("Get." + err.Error())
-		ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Get", "error", err)
+		ibs.stats.Logger().Debugw("exit", "method", "Get", "error", err)
 	}
 	ibs.stats.LogInterval("Get", time.Since(begin))
 	return result, err
@@ -88,14 +86,14 @@ func (ibs *InstrumentedBlockStore[I]) Get(ctx context.Context, id I) (core.Block
 
 // Has calls the underlying block store's Has method and records stats.
 func (ibs *InstrumentedBlockStore[I]) Has(ctx context.Context, id I) (bool, error) {
-	ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Has", "id", id)
+	ibs.stats.Logger().Debugw("enter", "method", "Has", "id", id)
 	begin := time.Now()
 	result, err := ibs.store.Has(ctx, id)
 	if err == nil {
 		ibs.stats.Log(fmt.Sprintf("Has.%v", result))
 	} else {
 		ibs.stats.Log(fmt.Sprintf("Has.%v", err))
-		ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Has", "result", result, "error", err)
+		ibs.stats.Logger().Debugw("exit", "method", "Has", "result", result, "error", err)
 	}
 	ibs.stats.LogInterval("Has", time.Since(begin))
 	return result, err
@@ -103,7 +101,7 @@ func (ibs *InstrumentedBlockStore[I]) Has(ctx context.Context, id I) (bool, erro
 
 // All calls the underlying block store's All method and records stats.
 func (ibs *InstrumentedBlockStore[I]) All(ctx context.Context) (<-chan I, error) {
-	ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "All")
+	ibs.stats.Logger().Debugw("enter", "method", "All")
 	blocks, err := ibs.store.All(ctx)
 	result := make(chan I)
 	if err == nil {
@@ -116,7 +114,7 @@ func (ibs *InstrumentedBlockStore[I]) All(ctx context.Context) (<-chan I, error)
 		}(blocks)
 	} else {
 		ibs.stats.Log(fmt.Sprintf("All.%v", err))
-		ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "All", "error", err)
+		ibs.stats.Logger().Debugw("exit", "method", "All", "error", err)
 	}
 	return result, err
 
@@ -124,14 +122,14 @@ func (ibs *InstrumentedBlockStore[I]) All(ctx context.Context) (<-chan I, error)
 
 // Add calls the underlying block store's Add method and records stats.
 func (ibs *InstrumentedBlockStore[I]) Add(ctx context.Context, rawBlock core.RawBlock[I]) (core.Block[I], error) {
-	ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Add", "id", rawBlock.Id())
+	ibs.stats.Logger().Debugw("enter", "method", "Add", "id", rawBlock.Id())
 	begin := time.Now()
 	block, err := ibs.store.Add(ctx, rawBlock)
 	if err == nil {
 		ibs.stats.Log("Add.Ok")
 	} else {
 		ibs.stats.Log("Add." + err.Error())
-		ibs.stats.Logger().Debugw("InstrumentedBlockStore", "method", "Add", "error", err)
+		ibs.stats.Logger().Debugw("exit", "method", "Add", "error", err)
 	}
 	ibs.stats.LogInterval("Add", time.Since(begin))
 	return block, err

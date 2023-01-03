@@ -87,23 +87,43 @@ type RequestStatusSender[I core.BlockId, R core.BlockIdRef[I]] struct {
 }
 
 func (ss *RequestStatusSender[I, R]) SendStatus(have filter.Filter[I], want []I) error {
+	log.Debugw("enter", "object", "RequestStatusSender", "method", "SendStatus", "have", have.Count(), "want", len(want))
 	state := ss.orchestrator.State()
 	message := messages.NewStatusMessage[I, R](state, have, want)
 	reader, writer := io.Pipe()
-	message.Write(writer)
 
+	go func() {
+		defer writer.Close()
+		if err := message.Write(writer); err != nil {
+			log.Debugw("write error", "object", "RequestStatusSender", "method", "SendStatus", "error", err)
+		} else {
+			log.Debugw("finished writing batch to request", "object", "RequestStatusSender", "method", "SendStatus")
+		}
+	}()
+	log.Debugw("post", "object", "RequestStatusSender", "method", "SendStatus", "url", ss.url)
 	if resp, err := ss.client.Post(ss.url, CONTENT_TYPE_CBOR, reader); err != nil {
+		log.Debugw("exit", "object", "RequestStatusSender", "method", "SendStatus", "error", err)
 		return err
 	} else {
-		responseMessage := messages.BlocksMessage[I, R, core.BatchState]{}
-		if err := responseMessage.Read(bufio.NewReader(resp.Body)); err != nil {
+		if resp.StatusCode == http.StatusAccepted {
+			log.Debugw("post response", "object", "RequestStatusSender", "method", "SendStatus", "url", ss.url)
+			responseMessage := messages.BlocksMessage[I, R, core.BatchState]{}
+			bufferedReader := bufio.NewReader(resp.Body)
+			if err := responseMessage.Read(bufferedReader); err != io.EOF { // read expected to terminate with EOF
+				log.Debugw("exit", "object", "RequestStatusSender", "method", "SendStatus", "error", err)
+				return err
+			}
+			if err := resp.Body.Close(); err != nil {
+				log.Debugw("exit", "object", "RequestStatusSender", "method", "SendStatus", "error", err)
+				return err
+			}
+			err := ss.responseHandler.HandleList(responseMessage.State, responseMessage.Car.Blocks)
+			log.Debugw("exit", "object", "RequestStatusSender", "method", "SendStatus", "error", err)
 			return err
+		} else {
+			log.Debugw("Unexpected response", "object", "RequestBatchBlockSender", "status", resp.Status)
+			return ErrInvalidResponse
 		}
-		if err := resp.Body.Close(); err != nil {
-			return err
-		}
-		ss.responseHandler.HandleList(responseMessage.State, responseMessage.Car.Blocks)
-		return nil
 	}
 }
 
@@ -214,8 +234,7 @@ func NewClientReceiverConnection[I core.BlockId, R core.BlockIdRef[I]](
 	}
 }
 
-// OpenBlockSender opens a block sender
-// we are on the server side here, so the message will actually be sent in response to a status message
+// OpenStatusSender opens a client-side status sender
 func (conn *ClientReceiverConnection[I, R]) OpenStatusSender(orchestrator core.Orchestrator[core.BatchState]) core.StatusSender[I] {
 	return &RequestStatusSender[I, R]{
 		orchestrator,
@@ -244,8 +263,8 @@ func (conn *ServerReceiverConnection[I, R]) ResponseChannel() <-chan *messages.S
 	return conn.messages
 }
 
-// OpenBlockSender opens a block sender
-// we are on the server side here, so the message will actually be sent in response to a status message
+// OpenStatuskSender opens a status sender
+// we are on the server side here, so the message will actually be sent in response to a blocks message
 func (conn *ServerReceiverConnection[I, R]) OpenStatusSender(orchestrator core.Orchestrator[core.BatchState]) core.StatusSender[I] {
 	return &ResponseStatusSender[I, R]{
 		orchestrator,

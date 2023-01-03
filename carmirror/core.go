@@ -240,6 +240,10 @@ const (
 	END_RECEIVE
 	BEGIN_CHECK
 	END_CHECK
+	BEGIN_BATCH
+	END_BATCH
+	BEGIN_ENQUEUE
+	END_ENQUEUE
 	CANCEL
 )
 
@@ -270,10 +274,18 @@ func (se SessionEvent) String() string {
 		return "BEGIN_RECEIVE"
 	case END_RECEIVE:
 		return "END_RECEIVE"
+	case BEGIN_BATCH:
+		return "BEGIN_BATCH"
+	case END_BATCH:
+		return "END_BATCH"
 	case BEGIN_CHECK:
 		return "BEGIN_CHECK"
 	case END_CHECK:
 		return "END_CHECK"
+	case BEGIN_ENQUEUE:
+		return "BEGIN_ENQUEUE"
+	case END_ENQUEUE:
+		return "END_ENQUEUE"
 	case CANCEL:
 		return "CANCEL"
 	default:
@@ -357,6 +369,16 @@ func NewReceiverSession[I BlockId, F Flags](
 	}
 }
 
+// Orchestrator provides access to the orchestrator.
+// TODO - refactor to make SenderSession support the Orchestrator interface:
+// HandleState = ReceiveState
+// IsClosed is implemented anyway
+// Implementing State and Notify will not appreciably complicate things
+// We can probably completely get rid of Connection.
+func (rs *ReceiverSession[I, F]) Orchestrator() Orchestrator[F] {
+	return rs.orchestrator
+}
+
 func (rs *ReceiverSession[I, F]) GetInfo() *ReceiverSessionInfo[F] {
 	return &ReceiverSessionInfo[F]{
 		PendingCount:  uint(rs.pending.Len()),
@@ -392,6 +414,15 @@ func (rs *ReceiverSession[I, F]) AccumulateStatus(id I) error {
 	return nil
 }
 
+func (rs *ReceiverSession[I, F]) Enqueue(id I) error {
+	// When is it safe to do this?
+	// if we are currently checking (e.g. the polling loop is running)
+	// if we are not currently checking *and* we are not currently sending?
+	rs.orchestrator.Notify(BEGIN_ENQUEUE)     // This should block if status is RECEIVER_SENDING
+	defer rs.orchestrator.Notify(END_ENQUEUE) // This should set RECEIVER_CHECKING
+	return rs.AccumulateStatus(id)            // This is recursive so it may take some time
+}
+
 // HandleBlock handles a block that is being received.
 func (rs *ReceiverSession[I, F]) HandleBlock(rawBlock RawBlock[I]) {
 	rs.orchestrator.Notify(BEGIN_RECEIVE)
@@ -422,10 +453,8 @@ func (rs *ReceiverSession[I, F]) Run(connection ReceiverConnection[F, I]) error 
 	}()
 
 	for !rs.orchestrator.IsClosed() {
-		// TODO: Look into use of defer for this.
 		rs.orchestrator.Notify(BEGIN_CHECK)
 
-		// TODO: Any concerns with hangs here if nothing in pending?  Need goroutines?
 		if rs.pending.Len() > 0 {
 			block := rs.pending.PollFront()
 
@@ -457,6 +486,16 @@ func (ss *ReceiverSession[I, F]) HandleState(state F) {
 	if err != nil {
 		ss.log.Errorw("receiving state", "object", "ReceiverSession", "method", "HandleState", "error", err)
 	}
+}
+
+// Close closes the sender session.
+func (rs *ReceiverSession[I, F]) Close() error {
+	if err := rs.orchestrator.Notify(BEGIN_CLOSE); err != nil {
+		return err
+	}
+	defer rs.orchestrator.Notify(END_CLOSE)
+
+	return nil
 }
 
 // Cancel cancels the session.
@@ -503,6 +542,16 @@ func NewSenderSession[I BlockId, F Flags](store BlockStore[I], filter filter.Fil
 		util.NewSynchronizedDeque[I](util.NewBlocksDeque[I](1024)),
 		&log.SugaredLogger,
 	}
+}
+
+// Orchestrator provides access to the orchestrator.
+// TODO - refactor to make SenderSession support the Orchestrator interface:
+// HandleState = ReceiveState
+// IsClosed is implemented anyway
+// Implementing State and Notify will not appreciably complicate things
+// We can probably the completely get rid of Connection.
+func (ss *SenderSession[I, F]) Orchestrator() Orchestrator[F] {
+	return ss.orchestrator
 }
 
 func (ss *SenderSession[I, F]) GetInfo() *SenderSessionInfo[F] {
@@ -605,6 +654,8 @@ func (ss *SenderSession[I, F]) Cancel() error {
 
 // Enqueue enqueues a block id to be sent.
 func (ss *SenderSession[I, F]) Enqueue(id I) error {
+	ss.orchestrator.Notify(BEGIN_ENQUEUE)
+	defer ss.orchestrator.Notify(END_ENQUEUE)
 	return ss.pending.PushBack(id)
 }
 

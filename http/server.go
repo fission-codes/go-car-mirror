@@ -23,14 +23,21 @@ type ServerSourceSessionData[I core.BlockId, R core.BlockIdRef[I]] struct {
 	Session    *core.SenderSession[I, core.BatchState]
 }
 
-func NewServerSourceSessionData[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], maxBatchSize uint32, allocator func() filter.Filter[I]) *ServerSourceSessionData[I, R] {
+func NewServerSourceSessionData[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], maxBatchSize uint32, allocator func() filter.Filter[I], instrumented bool) *ServerSourceSessionData[I, R] {
 	connection := NewServerSenderConnection[I, R](maxBatchSize)
+
+	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSendOrchestrator()
+
+	if instrumented {
+		orchestrator = stats.NewInstrumentedOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchSendOrchestrator"))
+	}
+
 	return &ServerSourceSessionData[I, R]{
 		connection,
 		core.NewSenderSession[I, core.BatchState](
 			store,
 			filter.NewSynchronizedFilter[I](filter.NewEmptyFilter(allocator)),
-			core.NewBatchSendOrchestrator(),
+			orchestrator,
 		),
 	}
 }
@@ -51,7 +58,7 @@ func NewServerSinkSessionData[I core.BlockId, R core.BlockIdRef[I]](store core.B
 
 	return &ServerSinkSessionData[I, R]{
 		connection,
-		core.NewReceiverSession[I, core.BatchState](
+		core.NewReceiverSession[I](
 			store,
 			core.NewSimpleStatusAccumulator(allocator()),
 			orchestrator,
@@ -105,13 +112,13 @@ func NewServer[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], c
 
 // Start starts the server
 func (srv *Server[I, R]) Start() error {
-	log.Debugw("Server", "method", "Start")
+	log.Debugw("enter", "object", "Server", "method", "Start")
 	return srv.http.ListenAndServe()
 }
 
 // Stop stops the server
 func (srv *Server[I, R]) Stop() error {
-	log.Debugw("Server", "method", "Stop")
+	log.Debugw("enter", "object", "Server", "method", "Stop")
 	return srv.http.Close()
 }
 
@@ -134,43 +141,47 @@ func (srv *Server[I, R]) HandleStatus(response http.ResponseWriter, request *htt
 	if err != nil {
 		switch {
 		case errors.Is(err, http.ErrNoCookie):
+			log.Debugw("generating cookie", "object", "Server", "method", "HandleStatus")
 			sessionToken = srv.generateToken(request.RemoteAddr)
 			http.SetCookie(response, &http.Cookie{
-				Name:     "sinkSessionToken",
+				Name:     "sourceSessionToken",
 				Value:    (string)(sessionToken),
 				Secure:   false,
 				SameSite: http.SameSiteDefaultMode,
 				MaxAge:   0,
 			})
 		default:
-			log.Errorf("unexpected error: %v", err)
+			log.Errorw("could not retrieve cookie", "object", "Server", "method", "HandleStatus", "error", err)
 			http.Error(response, "server error", http.StatusInternalServerError)
 			return
 		}
 	} else {
 		sessionToken = SessionToken(sourceCookie.Value)
 	}
+	log.Debugw("have session token", "object", "Server", "method", "HandleStatus", "token", sessionToken)
 
 	// Find the session from the session token, or create one
 	sourceSession, ok := srv.sourceSessions.Get(sessionToken)
 	if !ok {
-		sourceSession = NewServerSourceSessionData[I, R](srv.store, srv.maxBatchSize, srv.allocator)
+		log.Debugw("no session found for token", "object", "Server", "method", "HandleStatus", "session", sessionToken)
+		sourceSession = NewServerSourceSessionData[I, R](srv.store, srv.maxBatchSize, srv.allocator, srv.instrumented)
 		srv.sourceSessions.Add(sessionToken, sourceSession)
 		// Start the new session running; when it stops, remove it from the session map
 		go func() {
 			err := sourceSession.Session.Run(sourceSession.Connection)
 			if err != nil {
-				log.Errorf("source session %v returned error %v", sessionToken, err)
+				log.Errorw("session returned error", "object", "Server", "method", "HandleStatus", "session", sessionToken, "error", err)
 			}
 			srv.sourceSessions.Remove(sessionToken)
 		}()
 	}
+	log.Debugw("have session for token", "object", "Server", "method", "HandleStatus", "session", sessionToken)
 
 	// Parse the request to get the status message
 	message := messages.StatusMessage[I, R, core.BatchState]{}
 	messageReader := bufio.NewReader(request.Body)
 	if err := message.Read(messageReader); err != nil {
-		log.Errorf("could not parse state message for: %v", sessionToken)
+		log.Errorw("parsing status message", "object", "Server", "method", "HandleStatus", "session", sessionToken, "error", err)
 		http.Error(response, "bad message format", http.StatusBadRequest)
 		return
 	}
@@ -181,11 +192,18 @@ func (srv *Server[I, R]) HandleStatus(response http.ResponseWriter, request *htt
 	request.Body.Close()
 
 	// Wait for a response from the session
+	log.Debugw("waiting on session", "object", "Server", "method", "HandleStatus", "session", sessionToken)
 	blocks := <-sourceSession.Connection.ResponseChannel()
+	log.Debugw("session returned blocks", "object", "Server", "method", "HandleStatus", "len", len(blocks.Car.Blocks))
 
 	// Write the response
 	response.WriteHeader(http.StatusAccepted)
-	blocks.Write(response)
+	err = blocks.Write(response)
+
+	if err != nil {
+		log.Errorf("unexpected error writing response", "object", "Server", "method", "HandleStatus", "error", err)
+	}
+	log.Debugw("exit", "object", "Server", "method", "HandleStatus")
 }
 
 func (srv *Server[I, R]) HandleBlocks(response http.ResponseWriter, request *http.Request) {
@@ -247,7 +265,7 @@ func (srv *Server[I, R]) HandleBlocks(response http.ResponseWriter, request *htt
 	log.Debugw("processed blocks", "object", "Server", "method", "HandleBlocks", "session", sessionToken, "count", len(message.Car.Blocks))
 
 	// Send the blocks to the sessions
-	receiver := core.NewSimpleBatchBlockReceiver[I](sinkSession.Session)
+	receiver := core.NewSimpleBatchBlockReceiver[I](sinkSession.Session, sinkSession.Session.Orchestrator())
 	err = receiver.HandleList(message.State, message.Car.Blocks)
 	if err != nil {
 		log.Errorw("could not handle block list", "object", "server", "method", "HandleBlocks", "session", sessionToken, "error", err)

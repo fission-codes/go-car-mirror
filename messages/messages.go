@@ -196,6 +196,10 @@ func (car *Archive[T, R]) Read(reader carmirror.ByteAndBlockReader) error {
 		block := BlockWireFormat[T, R]{}
 		if err = block.Read(reader); err == nil {
 			car.Blocks = append(car.Blocks, &block)
+		} else {
+			if err == io.ErrUnexpectedEOF {
+				err = io.EOF
+			}
 		}
 	}
 	return err

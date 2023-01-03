@@ -44,7 +44,7 @@ type Filter[K comparable] interface {
 	// Mutate operations follow the Go convention of normally mutating, but returning a new filter when necessary.
 	Add(item K) Filter[K]
 
-	// Clear removes all items from the filter.
+	// Clear creates a new, empty filter of the same type as this one
 	Clear() Filter[K]
 
 	// TryAddAll attempts to add all items from other filter to this filter.
@@ -306,7 +306,7 @@ func NewBloomFilter[K comparable](capacity uint, function bloom.HashFunction[K])
 	bitCount, hashCount := bloom.EstimateParameters(uint64(capacity), bloom.EstimateFPP(uint64(capacity)))
 	filter, _ := bloom.NewFilter(bitCount, hashCount, function)
 
-	log.Debugw("BloomFilter", "method", "NewBloomFilter", "bitCount", bitCount, "hashCount", hashCount)
+	log.Debugw("calculated parameters", "object", "BloomFilter", "method", "NewBloomFilter", "bitCount", bitCount, "hashCount", hashCount)
 
 	return &BloomFilter[K]{
 		filter:       filter,
@@ -598,8 +598,7 @@ func (rf *SynchronizedFilter[K]) Add(item K) Filter[K] {
 func (rf *SynchronizedFilter[K]) Clear() Filter[K] {
 	rf.lock.Lock()
 	defer rf.lock.Unlock()
-	rf.filter = rf.filter.Clear()
-	return rf
+	return &SynchronizedFilter[K]{filter: rf.filter.Clear()}
 }
 
 // UnsynchronizedCopy returns an unsynchronized copy of the filter.
@@ -745,8 +744,7 @@ func (pf *PerfectFilter[K]) Add(item K) Filter[K] {
 
 // Clear clears the filter.
 func (pf *PerfectFilter[K]) Clear() Filter[K] {
-	pf.filter = make(map[K]bool)
-	return pf
+	return NewPerfectFilter[K]()
 }
 
 // Copy returns a copy of the filter.

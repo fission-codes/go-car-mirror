@@ -17,13 +17,18 @@ const (
 	RECEIVER_READY BatchState = 1 << iota
 	RECEIVER_CLOSING
 	RECEIVER_CLOSED
-	RECEIVER_CHECKING
-	SENDER_READY
+	RECEIVER_CHECKING  // Receiver is processing a batch of blocks
+	RECEIVER_SENDING   // Receiver is in the process of sending a status message
+	RECEIVER_WAITING   // Receiver is waiting for a batch of blocks
+	RECEIVER_ENQUEUING // Receiver is processing a block id that has been explicitly requested
+	SENDER_READY       // Sender is processing a batch of blocks
+	SENDER_FLUSHING    // Sender is flushing blocks
+	SENDER_WAITING     // Sender is waiting for a status message
 	SENDER_CLOSING
 	SENDER_CLOSED
 	CANCELLED
-	RECEIVER = CANCELLED | RECEIVER_READY | RECEIVER_CLOSING | RECEIVER_CHECKING | RECEIVER_CLOSED
-	SENDER   = CANCELLED | SENDER_READY | SENDER_CLOSING | SENDER_CLOSED
+	RECEIVER = CANCELLED | RECEIVER_READY | RECEIVER_CLOSING | RECEIVER_CHECKING | RECEIVER_CLOSED | RECEIVER_SENDING | RECEIVER_ENQUEUING | RECEIVER_WAITING
+	SENDER   = CANCELLED | SENDER_READY | SENDER_FLUSHING | SENDER_WAITING | SENDER_CLOSING | SENDER_CLOSED
 )
 
 // Strings returns a slice of strings describing the given BatchState.
@@ -40,6 +45,15 @@ func (bs BatchState) Strings() []string {
 	}
 	if bs&RECEIVER_CHECKING != 0 {
 		strings = append(strings, "RECEIVER_CHECKING")
+	}
+	if bs&RECEIVER_SENDING != 0 {
+		strings = append(strings, "RECEIVER_SENDING")
+	}
+	if bs&RECEIVER_WAITING != 0 {
+		strings = append(strings, "RECEIVER_WAITING")
+	}
+	if bs&RECEIVER_ENQUEUING != 0 {
+		strings = append(strings, "RECEIVER_ENQUEUING")
 	}
 	if bs&SENDER_READY != 0 {
 		strings = append(strings, "SENDER_READY")
@@ -78,24 +92,26 @@ type BatchBlockSender[I BlockId] interface {
 
 // SimpleBatchBlockReceiver is a simple implementation of BatchBlockReceiver.
 type SimpleBatchBlockReceiver[I BlockId] struct {
-	session BlockReceiver[I, BatchState]
+	session      BlockReceiver[I, BatchState]
+	orchestrator Orchestrator[BatchState]
 }
 
 // NewSimpleBatchBlockReceiver creates a new SimpleBatchBlockReceiver.
-func NewSimpleBatchBlockReceiver[I BlockId](rs BlockReceiver[I, BatchState]) *SimpleBatchBlockReceiver[I] {
+func NewSimpleBatchBlockReceiver[I BlockId](rs BlockReceiver[I, BatchState], orchestrator Orchestrator[BatchState]) *SimpleBatchBlockReceiver[I] {
 	return &SimpleBatchBlockReceiver[I]{
-		session: rs,
+		session:      rs,
+		orchestrator: orchestrator,
 	}
 }
 
 // HandleList handles a list of raw blocks.
 func (sbbr *SimpleBatchBlockReceiver[I]) HandleList(flags BatchState, list []RawBlock[I]) error {
+	sbbr.orchestrator.Notify(BEGIN_BATCH)
+	defer sbbr.orchestrator.Notify(END_BATCH)
 	for _, block := range list {
 		sbbr.session.HandleBlock(block)
 	}
-
-	sbbr.session.HandleState(flags | RECEIVER_CHECKING)
-
+	sbbr.session.HandleState(flags)
 	return nil
 }
 
@@ -168,10 +184,11 @@ func NewBatchSendOrchestrator() *BatchSendOrchestrator {
 
 // Notify notifies the orchestrator of a session event.
 // Events lead to state transitions in the orchestrator.
+//
 func (bso *BatchSendOrchestrator) Notify(event SessionEvent) error {
 	switch event {
 	case BEGIN_SESSION:
-		bso.flags.Set(SENDER_READY)
+		// bso.flags.Set(SENDER_READY) - now set by END_ENQUEUE
 	case BEGIN_SEND:
 		state := bso.flags.WaitAny(SENDER_READY|CANCELLED, 0)
 		if state&CANCELLED != 0 {
@@ -179,14 +196,23 @@ func (bso *BatchSendOrchestrator) Notify(event SessionEvent) error {
 			return errors.ErrStateError
 		}
 	case END_RECEIVE:
-		bso.flags.Set(SENDER_READY)
+		bso.flags.Update(SENDER_WAITING, SENDER_READY)
 	case BEGIN_CLOSE:
 		bso.flags.Set(SENDER_CLOSING)
 	case BEGIN_FLUSH:
-		bso.flags.Unset(SENDER_READY)
+		bso.flags.Update(SENDER_READY, SENDER_FLUSHING)
+	case END_FLUSH:
+		bso.flags.Update(SENDER_FLUSHING, SENDER_WAITING)
 	case BEGIN_DRAINING:
-		if bso.flags.ContainsAny(RECEIVER_CLOSED | SENDER_CLOSING) {
+		if bso.flags.ContainsAny(RECEIVER_CLOSING | SENDER_CLOSING) {
 			bso.flags.Set(SENDER_CLOSED)
+		}
+	case END_ENQUEUE:
+		// This is necessary because if the session is quiescent (e.g. has no in-flight exchange)
+		// the session Run loop will be waiting on SENDER_READY, and we need to set it to wake
+		// up the session.  If the receiver is not flushing, waiting, or ready, it is quiescent.
+		if !bso.flags.ContainsAny(SENDER_FLUSHING | SENDER_WAITING | SENDER_READY) {
+			bso.flags.Set(SENDER_READY)
 		}
 	case END_SESSION:
 		bso.flags.Update(SENDER, SENDER_CLOSED)
@@ -229,25 +255,44 @@ func NewBatchReceiveOrchestrator() *BatchReceiveOrchestrator {
 
 // Notify notifies the orchestrator of a session event, updating the state as appropriate.
 func (bro *BatchReceiveOrchestrator) Notify(event SessionEvent) error {
+	// TODO: at this point we probably need to enclose all this in a mutex.
 	switch event {
 	case BEGIN_SESSION:
 		bro.flags.Set(RECEIVER_READY)
 	case END_SESSION:
 		bro.flags.Update(RECEIVER_READY, RECEIVER_CLOSED)
+	case BEGIN_CLOSE:
+		bro.flags.Set(RECEIVER_CLOSING)
 	case BEGIN_CHECK:
-		state := bro.flags.WaitAny(RECEIVER_CHECKING|CANCELLED, 0)
+		state := bro.flags.WaitAny(RECEIVER_CHECKING|CANCELLED, 0) // waits for either flag to be set
 		if state&CANCELLED != 0 {
 			bro.log.Errorf("Orchestrator waiting for RECEIVER_CHECKING when CANCELLED seen")
 			return errors.ErrStateError
 		}
 	case BEGIN_SEND:
-		if bro.flags.ContainsAny(SENDER_CLOSED | RECEIVER_CLOSING) {
+		bro.flags.WaitExact(RECEIVER_ENQUEUING, 0) // Can't send while enqueuing
+		bro.flags.Update(RECEIVER_CHECKING, RECEIVER_SENDING)
+		if bro.flags.Contains(SENDER_CLOSED) {
 			bro.flags.Set(RECEIVER_CLOSED)
 		}
+	case END_BATCH:
+		bro.flags.Update(RECEIVER_WAITING, RECEIVER_CHECKING)
 	case END_SEND:
-		bro.flags.Unset(RECEIVER_CHECKING)
+		bro.flags.Update(RECEIVER_SENDING, RECEIVER_WAITING)
 	case CANCEL:
 		bro.flags.Update(RECEIVER, CANCELLED)
+	case BEGIN_ENQUEUE:
+		bro.flags.WaitExact(RECEIVER_SENDING, 0) // Can't enqueue while sending
+		bro.flags.Set(RECEIVER_ENQUEUING)
+	case END_ENQUEUE:
+		bro.flags.Unset(RECEIVER_ENQUEUING)
+		// This is necessary because if the session is quiescent (e.g. has no in-flight exchange)
+		// the session Run loop will be waiting on RECEIVER_CHECKING, and we need to set it to send
+		// an initial 'want' message to the block source. If the receiver is not sending, waiting,
+		// or checking, it is quiescent.
+		if !bro.flags.ContainsAny(RECEIVER_SENDING | RECEIVER_WAITING | RECEIVER_CHECKING) {
+			bro.flags.Set(RECEIVER_CHECKING)
+		}
 	}
 
 	return nil
@@ -260,8 +305,7 @@ func (bro *BatchReceiveOrchestrator) State() BatchState {
 
 // ReceiveState unsets any current sender state flags, and sets the specified state flags.
 func (bro *BatchReceiveOrchestrator) ReceiveState(batchState BatchState) error {
-	// Slight hack here to allow ReceiverChecking to be updated by SimpleBatchBlockReceiver
-	bro.flags.Update(SENDER|RECEIVER_CHECKING, batchState)
+	bro.flags.Update(SENDER, batchState)
 	return nil
 }
 
