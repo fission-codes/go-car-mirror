@@ -292,7 +292,7 @@ func (bro *BatchReceiveOrchestrator) Notify(event SessionEvent) error {
 		// This is necessary because if the session is quiescent (e.g. has no in-flight exchange)
 		// the session Run loop will be waiting on RECEIVER_CHECKING, and we need to set it to send
 		// an initial 'want' message to the block source. If the receiver is not sending, waiting,
-		// or checking, it is quiescant.
+		// or checking, it is quiescent.
 		if !bro.flags.ContainsAny(RECEIVER_SENDING | RECEIVER_WAITING | RECEIVER_CHECKING) {
 			bro.flags.Set(RECEIVER_CHECKING)
 		}
