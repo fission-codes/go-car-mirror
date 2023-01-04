@@ -14,37 +14,33 @@ type BatchState uint32
 
 // Named constants for BatchState flags.
 const (
-	SINK_READY BatchState = 1 << iota
-	SINK_CLOSING
+	SINK_CLOSING BatchState = 1 << iota
 	SINK_CLOSED
-	SINK_CHECKING   // Sink is processing a batch of blocks
-	SINK_SENDING    // Sink is in the process of sending a status message
-	SINK_WAITING    // Sink is waiting for a batch of blocks
-	SINK_ENQUEUING  // Sink is processing a block id that has been explicitly requested
-	SOURCE_READY    // Source is processing a batch of blocks
-	SOURCE_FLUSHING // Source is flushing blocks
-	SOURCE_WAITING  // Source is waiting for a status message
+	SINK_PROCESSING   // Sink is processing a batch of blocks
+	SINK_SENDING      // Sink is in the process of sending a status message
+	SINK_WAITING      // Sink is waiting for a batch of blocks
+	SINK_ENQUEUING    // Sink is processing a block id that has been explicitly requested
+	SOURCE_PROCESSING // Source is processing a batch of blocks
+	SOURCE_FLUSHING   // Source is flushing blocks
+	SOURCE_WAITING    // Source is waiting for a status message
 	SOURCE_CLOSING
 	SOURCE_CLOSED
 	CANCELLED
-	SINK   = CANCELLED | SINK_READY | SINK_CLOSING | SINK_CHECKING | SINK_CLOSED | SINK_SENDING | SINK_ENQUEUING | SINK_WAITING
-	SOURCE = CANCELLED | SOURCE_READY | SOURCE_FLUSHING | SOURCE_WAITING | SOURCE_CLOSING | SOURCE_CLOSED
+	SINK   = CANCELLED | SINK_CLOSING | SINK_PROCESSING | SINK_CLOSED | SINK_SENDING | SINK_ENQUEUING | SINK_WAITING
+	SOURCE = CANCELLED | SOURCE_PROCESSING | SOURCE_FLUSHING | SOURCE_WAITING | SOURCE_CLOSING | SOURCE_CLOSED
 )
 
 // Strings returns a slice of strings describing the given BatchState.
 func (bs BatchState) Strings() []string {
 	var strings []string
-	if bs&SINK_READY != 0 {
-		strings = append(strings, "SINK_READY")
-	}
 	if bs&SINK_CLOSING != 0 {
 		strings = append(strings, "SINK_CLOSING")
 	}
 	if bs&SINK_CLOSED != 0 {
 		strings = append(strings, "SINK_CLOSED")
 	}
-	if bs&SINK_CHECKING != 0 {
-		strings = append(strings, "SINK_CHECKING")
+	if bs&SINK_PROCESSING != 0 {
+		strings = append(strings, "SINK_PROCESSING")
 	}
 	if bs&SINK_SENDING != 0 {
 		strings = append(strings, "SINK_SENDING")
@@ -55,8 +51,8 @@ func (bs BatchState) Strings() []string {
 	if bs&SINK_ENQUEUING != 0 {
 		strings = append(strings, "SINK_ENQUEUING")
 	}
-	if bs&SOURCE_READY != 0 {
-		strings = append(strings, "SOURCE_READY")
+	if bs&SOURCE_PROCESSING != 0 {
+		strings = append(strings, "SOURCE_PROCESSING")
 	}
 	if bs&SOURCE_CLOSING != 0 {
 		strings = append(strings, "SOURCE_CLOSING")
@@ -174,7 +170,7 @@ type BatchSourceOrchestrator struct {
 	log   *zap.SugaredLogger
 }
 
-// NewBatchSourceOrchestrator creates a new BatchSendOrchestrator.
+// NewBatchSourceOrchestrator creates a new BatchSourceOrchestrator.
 func NewBatchSourceOrchestrator() *BatchSourceOrchestrator {
 	return &BatchSourceOrchestrator{
 		flags: *util.NewSharedFlagSet(BatchState(0)),
@@ -187,20 +183,18 @@ func NewBatchSourceOrchestrator() *BatchSourceOrchestrator {
 //
 func (bso *BatchSourceOrchestrator) Notify(event SessionEvent) error {
 	switch event {
-	case BEGIN_SESSION:
-		// bso.flags.Set(SOURCE_READY) - now set by END_ENQUEUE
 	case BEGIN_SEND:
-		state := bso.flags.WaitAny(SOURCE_READY|CANCELLED, 0)
+		state := bso.flags.WaitAny(SOURCE_PROCESSING|CANCELLED, 0)
 		if state&CANCELLED != 0 {
-			bso.log.Errorf("Orchestrator waiting for SOURCE_READY when CANCELLED seen")
+			bso.log.Errorf("Orchestrator waiting for SOURCE_PROCESSING when CANCELLED seen")
 			return errors.ErrStateError
 		}
 	case END_RECEIVE:
-		bso.flags.Update(SOURCE_WAITING, SOURCE_READY)
+		bso.flags.Update(SOURCE_WAITING, SOURCE_PROCESSING)
 	case BEGIN_CLOSE:
 		bso.flags.Set(SOURCE_CLOSING)
 	case BEGIN_FLUSH:
-		bso.flags.Update(SOURCE_READY, SOURCE_FLUSHING)
+		bso.flags.Update(SOURCE_PROCESSING, SOURCE_FLUSHING)
 	case END_FLUSH:
 		bso.flags.Update(SOURCE_FLUSHING, SOURCE_WAITING)
 	case BEGIN_DRAINING:
@@ -209,10 +203,10 @@ func (bso *BatchSourceOrchestrator) Notify(event SessionEvent) error {
 		}
 	case END_ENQUEUE:
 		// This is necessary because if the session is quiescent (e.g. has no in-flight exchange)
-		// the session Run loop will be waiting on SOURCE_READY, and we need to set it to wake
+		// the session Run loop will be waiting on SOURCE_PROCESSING, and we need to set it to wake
 		// up the session.  If the receiver is not flushing, waiting, or ready, it is quiescent.
-		if !bso.flags.ContainsAny(SOURCE_FLUSHING | SOURCE_WAITING | SOURCE_READY) {
-			bso.flags.Set(SOURCE_READY)
+		if !bso.flags.ContainsAny(SOURCE_FLUSHING | SOURCE_WAITING | SOURCE_PROCESSING) {
+			bso.flags.Set(SOURCE_PROCESSING)
 		}
 	case END_SESSION:
 		bso.flags.Update(SOURCE, SOURCE_CLOSED)
@@ -257,26 +251,24 @@ func NewBatchSinkOrchestrator() *BatchSinkOrchestrator {
 func (bro *BatchSinkOrchestrator) Notify(event SessionEvent) error {
 	// TODO: at this point we probably need to enclose all this in a mutex.
 	switch event {
-	case BEGIN_SESSION:
-		bro.flags.Set(SINK_READY)
 	case END_SESSION:
-		bro.flags.Update(SINK_READY, SINK_CLOSED)
+		bro.flags.Set(SINK_CLOSED)
 	case BEGIN_CLOSE:
 		bro.flags.Set(SINK_CLOSING)
 	case BEGIN_CHECK:
-		state := bro.flags.WaitAny(SINK_CHECKING|CANCELLED, 0) // waits for either flag to be set
+		state := bro.flags.WaitAny(SINK_PROCESSING|CANCELLED, 0) // waits for either flag to be set
 		if state&CANCELLED != 0 {
-			bro.log.Errorf("Orchestrator waiting for SINK_CHECKING when CANCELLED seen")
+			bro.log.Errorf("Orchestrator waiting for SINK_PROCESSING when CANCELLED seen")
 			return errors.ErrStateError
 		}
 	case BEGIN_SEND:
 		bro.flags.WaitExact(SINK_ENQUEUING, 0) // Can't send while enqueuing
-		bro.flags.Update(SINK_CHECKING, SINK_SENDING)
+		bro.flags.Update(SINK_PROCESSING, SINK_SENDING)
 		if bro.flags.Contains(SOURCE_CLOSED) {
 			bro.flags.Set(SINK_CLOSED)
 		}
 	case END_BATCH:
-		bro.flags.Update(SINK_WAITING, SINK_CHECKING)
+		bro.flags.Update(SINK_WAITING, SINK_PROCESSING)
 	case END_SEND:
 		bro.flags.Update(SINK_SENDING, SINK_WAITING)
 	case CANCEL:
@@ -287,11 +279,11 @@ func (bro *BatchSinkOrchestrator) Notify(event SessionEvent) error {
 	case END_ENQUEUE:
 		bro.flags.Unset(SINK_ENQUEUING)
 		// This is necessary because if the session is quiescent (e.g. has no in-flight exchange)
-		// the session Run loop will be waiting on SINK_CHECKING, and we need to set it to send
+		// the session Run loop will be waiting on SINK_PROCESSING, and we need to set it to send
 		// an initial 'want' message to the block source. If the receiver is not sending, waiting,
 		// or checking, it is quiescent.
-		if !bro.flags.ContainsAny(SINK_SENDING | SINK_WAITING | SINK_CHECKING) {
-			bro.flags.Set(SINK_CHECKING)
+		if !bro.flags.ContainsAny(SINK_SENDING | SINK_WAITING | SINK_PROCESSING) {
+			bro.flags.Set(SINK_PROCESSING)
 		}
 	}
 
