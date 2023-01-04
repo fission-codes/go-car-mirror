@@ -233,7 +233,7 @@ func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, roo
 	snapshotBefore := stats.GLOBAL_REPORTING.Snapshot()
 	connection := NewMockConnection(max_batch_size, bytes_per_ms, latency_ms)
 
-	sender_session := NewSenderSession[mock.BlockId, BatchState](
+	sender_session := NewSourceSession[mock.BlockId, BatchState](
 		stats.NewInstrumentedBlockStore[mock.BlockId](sender_store, stats.GLOBAL_STATS.WithContext("SenderStore")),
 		filter.NewSynchronizedFilter(makeBloom(1024)),
 		stats.NewInstrumentedOrchestrator[BatchState](NewBatchSendOrchestrator(), stats.GLOBAL_STATS.WithContext("BatchSendOrchestrator")),
@@ -243,7 +243,7 @@ func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, roo
 
 	receiver_orchestrator := stats.NewInstrumentedOrchestrator[BatchState](NewBatchReceiveOrchestrator(), stats.GLOBAL_STATS.WithContext("BatchReceiveOrchestrator"))
 
-	receiver_session := NewReceiverSession[mock.BlockId, BatchState](
+	receiver_session := NewSinkSession[mock.BlockId, BatchState](
 		stats.NewInstrumentedBlockStore[mock.BlockId](NewSynchronizedBlockStore[mock.BlockId](receiver_store), stats.GLOBAL_STATS.WithContext("ReceiverStore")),
 		NewSimpleStatusAccumulator[mock.BlockId](filter.NewSynchronizedFilter(makeBloom(1024))),
 		receiver_orchestrator,

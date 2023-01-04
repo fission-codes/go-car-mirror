@@ -20,7 +20,7 @@ type SessionToken string
 
 type ServerSourceSessionData[I core.BlockId, R core.BlockIdRef[I]] struct {
 	Connection *ServerSenderConnection[I, R]
-	Session    *core.SenderSession[I, core.BatchState]
+	Session    *core.SourceSession[I, core.BatchState]
 }
 
 func NewServerSourceSessionData[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], maxBatchSize uint32, allocator func() filter.Filter[I], instrumented bool) *ServerSourceSessionData[I, R] {
@@ -34,7 +34,7 @@ func NewServerSourceSessionData[I core.BlockId, R core.BlockIdRef[I]](store core
 
 	return &ServerSourceSessionData[I, R]{
 		connection,
-		core.NewSenderSession[I, core.BatchState](
+		core.NewSourceSession[I, core.BatchState](
 			store,
 			filter.NewSynchronizedFilter[I](filter.NewEmptyFilter(allocator)),
 			orchestrator,
@@ -44,7 +44,7 @@ func NewServerSourceSessionData[I core.BlockId, R core.BlockIdRef[I]](store core
 
 type ServerSinkSessionData[I core.BlockId, R core.BlockIdRef[I]] struct {
 	Connection *ServerReceiverConnection[I, R]
-	Session    *core.ReceiverSession[I, core.BatchState]
+	Session    *core.SinkSession[I, core.BatchState]
 }
 
 func NewServerSinkSessionData[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], maxBatchSize uint32, allocator func() filter.Filter[I], instrumented bool) *ServerSinkSessionData[I, R] {
@@ -58,7 +58,7 @@ func NewServerSinkSessionData[I core.BlockId, R core.BlockIdRef[I]](store core.B
 
 	return &ServerSinkSessionData[I, R]{
 		connection,
-		core.NewReceiverSession[I](
+		core.NewSinkSession[I](
 			store,
 			core.NewSimpleStatusAccumulator(allocator()),
 			orchestrator,
@@ -289,9 +289,9 @@ func (srv *Server[I, R]) SourceSessions() []SessionToken {
 	return srv.sourceSessions.Keys()
 }
 
-func (srv *Server[I, R]) SourceInfo(token SessionToken) (*core.SenderSessionInfo[core.BatchState], error) {
+func (srv *Server[I, R]) SourceInfo(token SessionToken) (*core.SourceSessionInfo[core.BatchState], error) {
 	if session, ok := srv.sourceSessions.Get(token); ok {
-		return session.Session.GetInfo(), nil
+		return session.Session.Info(), nil
 	} else {
 		return nil, ErrInvalidSession
 	}
@@ -301,9 +301,9 @@ func (srv *Server[I, R]) SinkSessions() []SessionToken {
 	return srv.sinkSessions.Keys()
 }
 
-func (srv *Server[I, R]) SinkInfo(token SessionToken) (*core.ReceiverSessionInfo[core.BatchState], error) {
+func (srv *Server[I, R]) SinkInfo(token SessionToken) (*core.SinkSessionInfo[core.BatchState], error) {
 	if session, ok := srv.sinkSessions.Get(token); ok {
-		return session.Session.GetInfo(), nil
+		return session.Session.Info(), nil
 	} else {
 		return nil, ErrInvalidSession
 	}
