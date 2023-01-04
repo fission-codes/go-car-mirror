@@ -174,7 +174,7 @@ type BatchSourceOrchestrator struct {
 func NewBatchSourceOrchestrator() *BatchSourceOrchestrator {
 	return &BatchSourceOrchestrator{
 		flags: *util.NewSharedFlagSet(BatchState(0)),
-		log:   log.With("component", "BatchSendOrchestrator"),
+		log:   log.With("component", "BatchSourceOrchestrator"),
 	}
 }
 
@@ -239,11 +239,11 @@ type BatchSinkOrchestrator struct {
 	log   *zap.SugaredLogger
 }
 
-// NewBatchSinkOrchestrator creates a new BatchReceiveOrchestrator.
+// NewBatchSinkOrchestrator creates a new BatchSinkOrchestrator.
 func NewBatchSinkOrchestrator() *BatchSinkOrchestrator {
 	return &BatchSinkOrchestrator{
 		flags: *util.NewSharedFlagSet(BatchState(0)),
-		log:   log.With("component", "BatchReceiveOrchestrator"),
+		log:   log.With("component", "BatchSinkOrchestrator"),
 	}
 }
 

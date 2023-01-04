@@ -24,7 +24,7 @@ func NewClientSourceSessionData[I core.BlockId, R core.BlockIdRef[I]](target str
 	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSourceOrchestrator()
 
 	if instrumented {
-		orchestrator = stats.NewInstrumentedOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchSendOrchestrator"))
+		orchestrator = stats.NewInstrumentedOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchSourceOrchestrator"))
 	}
 
 	session := core.NewSourceSession[I](
@@ -61,7 +61,7 @@ func NewClientSinkSessionData[I core.BlockId, R core.BlockIdRef[I]](target strin
 	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSinkOrchestrator()
 
 	if instrumented {
-		orchestrator = stats.NewInstrumentedOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchReceiveOrchestrator"))
+		orchestrator = stats.NewInstrumentedOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchSinkOrchestrator"))
 	}
 
 	session := core.NewSinkSession[I, core.BatchState](

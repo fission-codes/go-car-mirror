@@ -29,7 +29,7 @@ func NewServerSourceSessionData[I core.BlockId, R core.BlockIdRef[I]](store core
 	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSourceOrchestrator()
 
 	if instrumented {
-		orchestrator = stats.NewInstrumentedOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchSendOrchestrator"))
+		orchestrator = stats.NewInstrumentedOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchSourceOrchestrator"))
 	}
 
 	return &ServerSourceSessionData[I, R]{
@@ -53,7 +53,7 @@ func NewServerSinkSessionData[I core.BlockId, R core.BlockIdRef[I]](store core.B
 	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSinkOrchestrator()
 
 	if instrumented {
-		orchestrator = stats.NewInstrumentedOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchReceiveOrchestrator"))
+		orchestrator = stats.NewInstrumentedOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchSinkOrchestrator"))
 	}
 
 	return &ServerSinkSessionData[I, R]{
