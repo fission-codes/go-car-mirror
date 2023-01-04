@@ -168,15 +168,15 @@ func (sbbs *SimpleBatchBlockSender[I]) Flush() error {
 	return nil
 }
 
-// BatchSendOrchestrator is an orchestrator for sending batches of blocks.
-type BatchSendOrchestrator struct {
+// BatchSourceOrchestrator is an orchestrator for sending batches of blocks.
+type BatchSourceOrchestrator struct {
 	flags util.SharedFlagSet[BatchState]
 	log   *zap.SugaredLogger
 }
 
-// NewBatchSendOrchestrator creates a new BatchSendOrchestrator.
-func NewBatchSendOrchestrator() *BatchSendOrchestrator {
-	return &BatchSendOrchestrator{
+// NewBatchSourceOrchestrator creates a new BatchSendOrchestrator.
+func NewBatchSourceOrchestrator() *BatchSourceOrchestrator {
+	return &BatchSourceOrchestrator{
 		flags: *util.NewSharedFlagSet(BatchState(0)),
 		log:   log.With("component", "BatchSendOrchestrator"),
 	}
@@ -185,7 +185,7 @@ func NewBatchSendOrchestrator() *BatchSendOrchestrator {
 // Notify notifies the orchestrator of a session event.
 // Events lead to state transitions in the orchestrator.
 //
-func (bso *BatchSendOrchestrator) Notify(event SessionEvent) error {
+func (bso *BatchSourceOrchestrator) Notify(event SessionEvent) error {
 	switch event {
 	case BEGIN_SESSION:
 		// bso.flags.Set(SENDER_READY) - now set by END_ENQUEUE
@@ -224,37 +224,37 @@ func (bso *BatchSendOrchestrator) Notify(event SessionEvent) error {
 }
 
 // State returns the current state of the orchestrator.
-func (bso *BatchSendOrchestrator) State() BatchState {
+func (bso *BatchSourceOrchestrator) State() BatchState {
 	return bso.flags.All()
 }
 
 // ReceiveState unsets any current receiver state flags, and sets the specified state flags.
-func (bso *BatchSendOrchestrator) ReceiveState(batchState BatchState) error {
+func (bso *BatchSourceOrchestrator) ReceiveState(batchState BatchState) error {
 	bso.flags.Update(RECEIVER, batchState)
 	return nil
 }
 
 // IsClosed returns true if the sender is closed.
-func (bso *BatchSendOrchestrator) IsClosed() bool {
+func (bso *BatchSourceOrchestrator) IsClosed() bool {
 	return bso.flags.Contains(SENDER_CLOSED|RECEIVER_CLOSED) || bso.flags.Contains(CANCELLED)
 }
 
-// BatchReceiveOrchestrator is an orchestrator for receiving batches of blocks.
-type BatchReceiveOrchestrator struct {
+// BatchSinkOrchestrator is an orchestrator for receiving batches of blocks.
+type BatchSinkOrchestrator struct {
 	flags util.SharedFlagSet[BatchState]
 	log   *zap.SugaredLogger
 }
 
-// NewBatchReceiveOrchestrator creates a new BatchReceiveOrchestrator.
-func NewBatchReceiveOrchestrator() *BatchReceiveOrchestrator {
-	return &BatchReceiveOrchestrator{
+// NewBatchSinkOrchestrator creates a new BatchReceiveOrchestrator.
+func NewBatchSinkOrchestrator() *BatchSinkOrchestrator {
+	return &BatchSinkOrchestrator{
 		flags: *util.NewSharedFlagSet(BatchState(0)),
 		log:   log.With("component", "BatchReceiveOrchestrator"),
 	}
 }
 
 // Notify notifies the orchestrator of a session event, updating the state as appropriate.
-func (bro *BatchReceiveOrchestrator) Notify(event SessionEvent) error {
+func (bro *BatchSinkOrchestrator) Notify(event SessionEvent) error {
 	// TODO: at this point we probably need to enclose all this in a mutex.
 	switch event {
 	case BEGIN_SESSION:
@@ -299,17 +299,17 @@ func (bro *BatchReceiveOrchestrator) Notify(event SessionEvent) error {
 }
 
 // State returns the current state of the orchestrator.
-func (bro *BatchReceiveOrchestrator) State() BatchState {
+func (bro *BatchSinkOrchestrator) State() BatchState {
 	return bro.flags.All()
 }
 
 // ReceiveState unsets any current sender state flags, and sets the specified state flags.
-func (bro *BatchReceiveOrchestrator) ReceiveState(batchState BatchState) error {
+func (bro *BatchSinkOrchestrator) ReceiveState(batchState BatchState) error {
 	bro.flags.Update(SENDER, batchState)
 	return nil
 }
 
 // IsClosed returns true if the receiver is closed.
-func (bro *BatchReceiveOrchestrator) IsClosed() bool {
+func (bro *BatchSinkOrchestrator) IsClosed() bool {
 	return bro.flags.Contains(SENDER_CLOSED|RECEIVER_CLOSED) || bro.flags.Contains(CANCELLED)
 }

@@ -21,7 +21,7 @@ type ClientSourceSessionData[I core.BlockId, R core.BlockIdRef[I]] struct {
 
 func NewClientSourceSessionData[I core.BlockId, R core.BlockIdRef[I]](target string, store core.BlockStore[I], maxBatchSize uint32, allocator func() filter.Filter[I], instrumented bool) *ClientSourceSessionData[I, R] {
 
-	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSendOrchestrator()
+	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSourceOrchestrator()
 
 	if instrumented {
 		orchestrator = stats.NewInstrumentedOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchSendOrchestrator"))
@@ -58,7 +58,7 @@ type ClientSinkSessionData[I core.BlockId, R core.BlockIdRef[I]] struct {
 
 func NewClientSinkSessionData[I core.BlockId, R core.BlockIdRef[I]](target string, store core.BlockStore[I], maxBatchSize uint32, allocator func() filter.Filter[I], instrumented bool) *ClientSinkSessionData[I, R] {
 
-	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchReceiveOrchestrator()
+	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSinkOrchestrator()
 
 	if instrumented {
 		orchestrator = stats.NewInstrumentedOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchReceiveOrchestrator"))

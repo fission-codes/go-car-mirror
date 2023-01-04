@@ -236,12 +236,12 @@ func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, roo
 	sender_session := NewSourceSession[mock.BlockId, BatchState](
 		stats.NewInstrumentedBlockStore[mock.BlockId](sender_store, stats.GLOBAL_STATS.WithContext("SenderStore")),
 		filter.NewSynchronizedFilter(makeBloom(1024)),
-		stats.NewInstrumentedOrchestrator[BatchState](NewBatchSendOrchestrator(), stats.GLOBAL_STATS.WithContext("BatchSendOrchestrator")),
+		stats.NewInstrumentedOrchestrator[BatchState](NewBatchSourceOrchestrator(), stats.GLOBAL_STATS.WithContext("BatchSendOrchestrator")),
 	)
 
 	log.Debugf("created sender_session")
 
-	receiver_orchestrator := stats.NewInstrumentedOrchestrator[BatchState](NewBatchReceiveOrchestrator(), stats.GLOBAL_STATS.WithContext("BatchReceiveOrchestrator"))
+	receiver_orchestrator := stats.NewInstrumentedOrchestrator[BatchState](NewBatchSinkOrchestrator(), stats.GLOBAL_STATS.WithContext("BatchReceiveOrchestrator"))
 
 	receiver_session := NewSinkSession[mock.BlockId, BatchState](
 		stats.NewInstrumentedBlockStore[mock.BlockId](NewSynchronizedBlockStore[mock.BlockId](receiver_store), stats.GLOBAL_STATS.WithContext("ReceiverStore")),
