@@ -180,11 +180,11 @@ type BlockReceiver[I BlockId, F Flags] interface {
 // StatusSender is responsible for sending status.
 // The key intuition of CAR Mirror is that status can be sent efficiently using a lossy filter.
 // TODO: this use of status implies it's just filter, not want list.  Be precise in language.
-// The StatusSender will therefore usually batch reported information and send it in bulk to the ReceiverSession.
+// The StatusSender will therefore usually batch reported information and send it in bulk to the SourceSession.
 type StatusSender[I BlockId] interface {
-	// SendStatus sends the status to the ReceiverSession.
-	// The have filter is a lossy filter of the blocks that the SenderSession has.
-	// The want list is a list of blocks that the SenderSession wants.
+	// SendStatus sends the status to the SourceSession.
+	// The have filter is a lossy filter of the blocks that the SinkSession has.
+	// The want list is a list of blocks that the SinkSession wants.
 	SendStatus(have filter.Filter[I], want []I) error
 
 	// TODO: Close closes the ???.
@@ -370,7 +370,7 @@ func NewSinkSession[I BlockId, F Flags](
 }
 
 // Orchestrator provides access to the orchestrator.
-// TODO - refactor to make SenderSession support the Orchestrator interface:
+// TODO - refactor to make SinkSession support the Orchestrator interface:
 // HandleState = ReceiveState
 // IsClosed is implemented anyway
 // Implementing State and Notify will not appreciably complicate things
@@ -484,7 +484,7 @@ func (ss *SinkSession[I, F]) Run(connection ReceiverConnection[F, I]) error {
 func (ss *SinkSession[I, F]) HandleState(state F) {
 	err := ss.orchestrator.ReceiveState(state)
 	if err != nil {
-		ss.log.Errorw("receiving state", "object", "ReceiverSession", "method", "HandleState", "error", err)
+		ss.log.Errorw("receiving state", "object", "SinkSession", "method", "HandleState", "error", err)
 	}
 }
 
@@ -532,7 +532,7 @@ type SourceSession[
 	log          *zap.SugaredLogger
 }
 
-// NewSourceSession creates a new SenderSession.
+// NewSourceSession creates a new SourceSession.
 func NewSourceSession[I BlockId, F Flags](store BlockStore[I], filter filter.Filter[I], orchestrator Orchestrator[F]) *SourceSession[I, F] {
 	return &SourceSession[I, F]{
 		store,
@@ -545,7 +545,7 @@ func NewSourceSession[I BlockId, F Flags](store BlockStore[I], filter filter.Fil
 }
 
 // Orchestrator provides access to the orchestrator.
-// TODO - refactor to make SenderSession support the Orchestrator interface:
+// TODO - refactor to make SourceSession support the Orchestrator interface:
 // HandleState = ReceiveState
 // IsClosed is implemented anyway
 // Implementing State and Notify will not appreciably complicate things
@@ -622,17 +622,17 @@ func (ss *SourceSession[I, F]) Run(connection SenderConnection[F, I]) error {
 // receiverHave, receiverWant?
 func (ss *SourceSession[I, F]) HandleStatus(have filter.Filter[I], want []I) {
 	if err := ss.orchestrator.Notify(BEGIN_RECEIVE); err != nil {
-		ss.log.Errorw("error notifying BEGIN_RECEIVE", "object", "SenderSession", "method", "HandleStatus", "error", err)
+		ss.log.Errorw("error notifying BEGIN_RECEIVE", "object", "SourceSession", "method", "HandleStatus", "error", err)
 	}
 	defer ss.orchestrator.Notify(END_RECEIVE)
-	ss.log.Debugw("begin processing", "object", "SenderSession", "method", "HandleStatus", "pending", ss.pending.Len(), "filter", ss.filter.Count())
+	ss.log.Debugw("begin processing", "object", "SourceSession", "method", "HandleStatus", "pending", ss.pending.Len(), "filter", ss.filter.Count())
 	ss.filter = ss.filter.AddAll(have)
-	ss.log.Debugw("incoming have filter merged", "object", "SenderSession", "method", "HandleStatus", "filter", ss.filter.Count())
-	//ss.filter.Dump(ss.log, "SenderSession filter - ")
+	ss.log.Debugw("incoming have filter merged", "object", "SourceSession", "method", "HandleStatus", "filter", ss.filter.Count())
+	//ss.filter.Dump(ss.log, "SourceSession filter - ")
 	for _, id := range want {
 		ss.pending.PushFront(id) // send wants to the front of the queue
 	}
-	ss.log.Debugw("incoming want list merged", "obect", "SenderSession", "method", "HandleStatus", "pending", ss.pending.Len())
+	ss.log.Debugw("incoming want list merged", "obect", "SourceSession", "method", "HandleStatus", "pending", ss.pending.Len())
 }
 
 // Close closes the sender session.
@@ -663,7 +663,7 @@ func (ss *SourceSession[I, F]) Enqueue(id I) error {
 func (ss *SourceSession[I, F]) HandleState(state F) {
 	err := ss.orchestrator.ReceiveState(state)
 	if err != nil {
-		ss.log.Errorw("SenderSession", "method", "HandleState", "error", err)
+		ss.log.Errorw("SourceSession", "method", "HandleState", "error", err)
 	}
 }
 
