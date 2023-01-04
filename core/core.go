@@ -311,9 +311,9 @@ type Orchestrator[F Flags] interface {
 	IsClosed() bool
 }
 
-// SenderConnection provides a way to get a block sender after you create the session.
+// SourceConnection provides a way to get a block sender after you create the session.
 // The sender wants to know about the orchestrator, to notify it of certain events, like flush.
-type SenderConnection[
+type SourceConnection[
 	F Flags,
 	I BlockId,
 ] interface {
@@ -321,8 +321,8 @@ type SenderConnection[
 	OpenBlockSender(Orchestrator[F]) BlockSender[I]
 }
 
-// ReceiverConnection provides a way to get a status sender after you create the session.
-type ReceiverConnection[
+// SinkConnection provides a way to get a status sender after you create the session.
+type SinkConnection[
 	F Flags,
 	I BlockId,
 ] interface {
@@ -443,7 +443,7 @@ func (ss *SinkSession[I, F]) HandleBlock(rawBlock RawBlock[I]) {
 // Run runs the receiver session.
 // TODO: Is start a better name?  Starting a session?
 // Or begin, to match the event names?
-func (ss *SinkSession[I, F]) Run(connection ReceiverConnection[F, I]) error {
+func (ss *SinkSession[I, F]) Run(connection SinkConnection[F, I]) error {
 	sender := connection.OpenStatusSender(ss.orchestrator)
 
 	ss.orchestrator.Notify(BEGIN_SESSION)
@@ -564,7 +564,7 @@ func (ss *SourceSession[I, F]) Info() *SourceSessionInfo[F] {
 
 // Run runs the sender session.
 // TODO: Consider renaming to Start or Begin or Open to match Close/IsClosed?
-func (ss *SourceSession[I, F]) Run(connection SenderConnection[F, I]) error {
+func (ss *SourceSession[I, F]) Run(connection SourceConnection[F, I]) error {
 	sender := connection.OpenBlockSender(ss.orchestrator)
 	if err := ss.orchestrator.Notify(BEGIN_SESSION); err != nil {
 		return err

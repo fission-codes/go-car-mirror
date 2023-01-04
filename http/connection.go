@@ -150,7 +150,7 @@ func (ss *ResponseStatusSender[I, R]) Close() error {
 	return nil
 }
 
-type ClientSenderConnection[
+type ClientSourceConnection[
 	I core.BlockId,
 	R core.BlockIdRef[I],
 ] struct {
@@ -160,13 +160,13 @@ type ClientSenderConnection[
 	url             string
 }
 
-func NewClientSenderConnection[I core.BlockId, R core.BlockIdRef[I]](
+func NewClientSourceConnection[I core.BlockId, R core.BlockIdRef[I]](
 	maxBatchSize uint32,
 	client *http.Client,
 	url string,
 	responseHandler core.StatusReceiver[I, core.BatchState],
-) *ClientSenderConnection[I, R] {
-	return &ClientSenderConnection[I, R]{
+) *ClientSourceConnection[I, R] {
+	return &ClientSourceConnection[I, R]{
 		responseHandler,
 		maxBatchSize,
 		client,
@@ -176,7 +176,7 @@ func NewClientSenderConnection[I core.BlockId, R core.BlockIdRef[I]](
 
 // OpenBlockSender opens a block sender
 // we are on the server side here, so the message will actually be sent in response to a status message
-func (conn *ClientSenderConnection[I, R]) OpenBlockSender(orchestrator core.Orchestrator[core.BatchState]) core.BlockSender[I] {
+func (conn *ClientSourceConnection[I, R]) OpenBlockSender(orchestrator core.Orchestrator[core.BatchState]) core.BlockSender[I] {
 	return core.NewSimpleBatchBlockSender[I](
 		&RequestBatchBlockSender[I, R]{conn.client, conn.url, conn.responseHandler},
 		orchestrator,
@@ -184,7 +184,7 @@ func (conn *ClientSenderConnection[I, R]) OpenBlockSender(orchestrator core.Orch
 	)
 }
 
-type ServerSenderConnection[
+type ServerSourceConnection[
 	I core.BlockId,
 	R core.BlockIdRef[I],
 ] struct {
@@ -192,20 +192,20 @@ type ServerSenderConnection[
 	maxBatchSize uint32
 }
 
-func NewServerSenderConnection[I core.BlockId, R core.BlockIdRef[I]](maxBatchSize uint32) *ServerSenderConnection[I, R] {
-	return &ServerSenderConnection[I, R]{
+func NewServerSourceConnection[I core.BlockId, R core.BlockIdRef[I]](maxBatchSize uint32) *ServerSourceConnection[I, R] {
+	return &ServerSourceConnection[I, R]{
 		make(chan *messages.BlocksMessage[I, R, core.BatchState]),
 		maxBatchSize,
 	}
 }
 
-func (conn *ServerSenderConnection[I, R]) ResponseChannel() <-chan *messages.BlocksMessage[I, R, core.BatchState] {
+func (conn *ServerSourceConnection[I, R]) ResponseChannel() <-chan *messages.BlocksMessage[I, R, core.BatchState] {
 	return conn.messages
 }
 
 // OpenBlockSender opens a block sender
 // we are on the server side here, so the message will actually be sent in response to a status message
-func (conn *ServerSenderConnection[I, R]) OpenBlockSender(orchestrator core.Orchestrator[core.BatchState]) core.BlockSender[I] {
+func (conn *ServerSourceConnection[I, R]) OpenBlockSender(orchestrator core.Orchestrator[core.BatchState]) core.BlockSender[I] {
 	return core.NewSimpleBatchBlockSender[I](
 		&ResponseBatchBlockSender[I, R]{conn.messages},
 		orchestrator,
@@ -213,7 +213,7 @@ func (conn *ServerSenderConnection[I, R]) OpenBlockSender(orchestrator core.Orch
 	)
 }
 
-type ClientReceiverConnection[
+type ClientSinkConnection[
 	I core.BlockId,
 	R core.BlockIdRef[I],
 ] struct {
@@ -222,12 +222,12 @@ type ClientReceiverConnection[
 	url             string
 }
 
-func NewClientReceiverConnection[I core.BlockId, R core.BlockIdRef[I]](
+func NewClientSinkConnection[I core.BlockId, R core.BlockIdRef[I]](
 	client *http.Client,
 	url string,
 	responseHandler core.BatchBlockReceiver[I],
-) *ClientReceiverConnection[I, R] {
-	return &ClientReceiverConnection[I, R]{
+) *ClientSinkConnection[I, R] {
+	return &ClientSinkConnection[I, R]{
 		responseHandler,
 		client,
 		url,
@@ -235,7 +235,7 @@ func NewClientReceiverConnection[I core.BlockId, R core.BlockIdRef[I]](
 }
 
 // OpenStatusSender opens a client-side status sender
-func (conn *ClientReceiverConnection[I, R]) OpenStatusSender(orchestrator core.Orchestrator[core.BatchState]) core.StatusSender[I] {
+func (conn *ClientSinkConnection[I, R]) OpenStatusSender(orchestrator core.Orchestrator[core.BatchState]) core.StatusSender[I] {
 	return &RequestStatusSender[I, R]{
 		orchestrator,
 		conn.client,
@@ -244,7 +244,7 @@ func (conn *ClientReceiverConnection[I, R]) OpenStatusSender(orchestrator core.O
 	}
 }
 
-type ServerReceiverConnection[
+type ServerSinkConnection[
 	I core.BlockId,
 	R core.BlockIdRef[I],
 ] struct {
@@ -252,20 +252,20 @@ type ServerReceiverConnection[
 	maxBatchSize uint32
 }
 
-func NewServerReceiverConnection[I core.BlockId, R core.BlockIdRef[I]](maxBatchSize uint32) *ServerReceiverConnection[I, R] {
-	return &ServerReceiverConnection[I, R]{
+func NewServerSinkConnection[I core.BlockId, R core.BlockIdRef[I]](maxBatchSize uint32) *ServerSinkConnection[I, R] {
+	return &ServerSinkConnection[I, R]{
 		make(chan *messages.StatusMessage[I, R, core.BatchState]),
 		maxBatchSize,
 	}
 }
 
-func (conn *ServerReceiverConnection[I, R]) ResponseChannel() <-chan *messages.StatusMessage[I, R, core.BatchState] {
+func (conn *ServerSinkConnection[I, R]) ResponseChannel() <-chan *messages.StatusMessage[I, R, core.BatchState] {
 	return conn.messages
 }
 
-// OpenStatuskSender opens a status sender
+// OpenStatusSender opens a status sender
 // we are on the server side here, so the message will actually be sent in response to a blocks message
-func (conn *ServerReceiverConnection[I, R]) OpenStatusSender(orchestrator core.Orchestrator[core.BatchState]) core.StatusSender[I] {
+func (conn *ServerSinkConnection[I, R]) OpenStatusSender(orchestrator core.Orchestrator[core.BatchState]) core.StatusSender[I] {
 	return &ResponseStatusSender[I, R]{
 		orchestrator,
 		conn.messages,

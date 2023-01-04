@@ -15,7 +15,7 @@ func init() {
 }
 
 type ClientSourceSessionData[I core.BlockId, R core.BlockIdRef[I]] struct {
-	Connection *ClientSenderConnection[I, R]
+	Connection *ClientSourceConnection[I, R]
 	Session    *core.SourceSession[I, core.BatchState]
 }
 
@@ -38,7 +38,7 @@ func NewClientSourceSessionData[I core.BlockId, R core.BlockIdRef[I]](target str
 		panic(err)
 	}
 
-	connection := NewClientSenderConnection[I, R](
+	connection := NewClientSourceConnection[I, R](
 		maxBatchSize,
 		&http.Client{Jar: jar},
 		target,
@@ -52,7 +52,7 @@ func NewClientSourceSessionData[I core.BlockId, R core.BlockIdRef[I]](target str
 }
 
 type ClientSinkSessionData[I core.BlockId, R core.BlockIdRef[I]] struct {
-	Connection *ClientReceiverConnection[I, R]
+	Connection *ClientSinkConnection[I, R]
 	Session    *core.SinkSession[I, core.BatchState]
 }
 
@@ -77,7 +77,7 @@ func NewClientSinkSessionData[I core.BlockId, R core.BlockIdRef[I]](target strin
 		panic(err)
 	}
 
-	connection := NewClientReceiverConnection[I, R](&http.Client{Jar: jar}, target, receiver)
+	connection := NewClientSinkConnection[I, R](&http.Client{Jar: jar}, target, receiver)
 
 	return &ClientSinkSessionData[I, R]{
 		connection,

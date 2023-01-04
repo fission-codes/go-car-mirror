@@ -19,12 +19,12 @@ import (
 type SessionToken string
 
 type ServerSourceSessionData[I core.BlockId, R core.BlockIdRef[I]] struct {
-	Connection *ServerSenderConnection[I, R]
+	Connection *ServerSourceConnection[I, R]
 	Session    *core.SourceSession[I, core.BatchState]
 }
 
 func NewServerSourceSessionData[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], maxBatchSize uint32, allocator func() filter.Filter[I], instrumented bool) *ServerSourceSessionData[I, R] {
-	connection := NewServerSenderConnection[I, R](maxBatchSize)
+	connection := NewServerSourceConnection[I, R](maxBatchSize)
 
 	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSourceOrchestrator()
 
@@ -43,12 +43,12 @@ func NewServerSourceSessionData[I core.BlockId, R core.BlockIdRef[I]](store core
 }
 
 type ServerSinkSessionData[I core.BlockId, R core.BlockIdRef[I]] struct {
-	Connection *ServerReceiverConnection[I, R]
+	Connection *ServerSinkConnection[I, R]
 	Session    *core.SinkSession[I, core.BatchState]
 }
 
 func NewServerSinkSessionData[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], maxBatchSize uint32, allocator func() filter.Filter[I], instrumented bool) *ServerSinkSessionData[I, R] {
-	connection := NewServerReceiverConnection[I, R](maxBatchSize)
+	connection := NewServerSinkConnection[I, R](maxBatchSize)
 
 	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSinkOrchestrator()
 
