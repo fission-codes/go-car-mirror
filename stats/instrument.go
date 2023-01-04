@@ -254,9 +254,3 @@ func (ir *InstrumentedStatusReceiver[I, F]) HandleStatus(have filter.Filter[I], 
 	ir.stats.Logger().Debugw("InstrumentedStatusReceiver", "method", "HandleStatus", "haves", have.Count(), "wants", len(want))
 	ir.receiver.HandleStatus(have, want)
 }
-
-// HandleState calls the underlying status receiver's HandleState method and records stats.
-func (ir *InstrumentedStatusReceiver[I, F]) HandleState(state F) {
-	ir.stats.Logger().Debugw("InstrumentedStatusReceiver", "method", "HandleStatus", "state", state)
-	ir.receiver.HandleState(state)
-}

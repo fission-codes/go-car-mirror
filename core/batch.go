@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/fission-codes/go-car-mirror/errors"
+	"github.com/fission-codes/go-car-mirror/filter"
 	"github.com/fission-codes/go-car-mirror/util"
 	"go.uber.org/zap"
 )
@@ -107,7 +108,7 @@ func (sbbr *SimpleBatchBlockReceiver[I]) HandleList(flags BatchState, list []Raw
 	for _, block := range list {
 		sbbr.session.HandleBlock(block)
 	}
-	sbbr.session.HandleState(flags)
+	sbbr.orchestrator.ReceiveState(flags)
 	return nil
 }
 
@@ -304,4 +305,23 @@ func (bro *BatchSinkOrchestrator) ReceiveState(batchState BatchState) error {
 // IsClosed returns true if the receiver is closed.
 func (bro *BatchSinkOrchestrator) IsClosed() bool {
 	return bro.flags.Contains(SOURCE_CLOSED|SINK_CLOSED) || bro.flags.Contains(CANCELLED)
+}
+
+type SimpleBatchStatusReceiver[I BlockId] struct {
+	session      StatusReceiver[I, BatchState]
+	orchestrator Orchestrator[BatchState]
+}
+
+// NewSimpleBatchStatusReceiver creates a new SimpleBatchStatusReceiver.
+func NewSimpleBatchStatusReceiver[I BlockId](rs StatusReceiver[I, BatchState], orchestrator Orchestrator[BatchState]) *SimpleBatchStatusReceiver[I] {
+	return &SimpleBatchStatusReceiver[I]{
+		session:      rs,
+		orchestrator: orchestrator,
+	}
+}
+
+// HandleList handles a list of raw blocks.
+func (sbbr *SimpleBatchStatusReceiver[I]) HandleStatus(flags BatchState, have filter.Filter[I], want []I) error {
+	sbbr.session.HandleStatus(have, want)
+	return sbbr.orchestrator.ReceiveState(flags)
 }
