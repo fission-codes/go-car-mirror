@@ -4,7 +4,7 @@ package ipld
 import (
 	"errors"
 
-	"github.com/fission-codes/go-car-mirror/carmirror"
+	"github.com/fission-codes/go-car-mirror/core"
 	cbor "github.com/fxamacker/cbor/v2"
 	cid "github.com/ipfs/go-cid"
 	golog "github.com/ipfs/go-log/v2"
@@ -58,7 +58,7 @@ func (ipfsCid *Cid) UnmarshalCBOR(bytes []byte) error {
 }
 
 // Read reads the CID from the reader into the Cid.
-func (ipfsCid *Cid) Read(reader carmirror.ByteAndBlockReader) (int, error) {
+func (ipfsCid *Cid) Read(reader core.ByteAndBlockReader) (int, error) {
 	i, c, err := cid.CidFromReader(reader)
 	if err != nil {
 		log.Debugw("Read CID error", "err", err)

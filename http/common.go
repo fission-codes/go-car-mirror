@@ -3,7 +3,7 @@ package http
 import (
 	"errors"
 
-	core "github.com/fission-codes/go-car-mirror/carmirror"
+	"github.com/fission-codes/go-car-mirror/core"
 	"github.com/fission-codes/go-car-mirror/filter"
 	golog "github.com/ipfs/go-log/v2"
 )

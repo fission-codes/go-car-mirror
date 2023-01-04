@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 
-	core "github.com/fission-codes/go-car-mirror/carmirror"
+	"github.com/fission-codes/go-car-mirror/core"
 	"github.com/fission-codes/go-car-mirror/filter"
 	"github.com/fission-codes/go-car-mirror/stats"
 	"github.com/fission-codes/go-car-mirror/util"
@@ -15,19 +15,19 @@ func init() {
 }
 
 type ClientSourceSessionData[I core.BlockId, R core.BlockIdRef[I]] struct {
-	Connection *ClientSenderConnection[I, R]
-	Session    *core.SenderSession[I, core.BatchState]
+	Connection *ClientSourceConnection[I, R]
+	Session    *core.SourceSession[I, core.BatchState]
 }
 
 func NewClientSourceSessionData[I core.BlockId, R core.BlockIdRef[I]](target string, store core.BlockStore[I], maxBatchSize uint32, allocator func() filter.Filter[I], instrumented bool) *ClientSourceSessionData[I, R] {
 
-	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSendOrchestrator()
+	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSourceOrchestrator()
 
 	if instrumented {
-		orchestrator = stats.NewInstrumentedOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchSendOrchestrator"))
+		orchestrator = stats.NewInstrumentedOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchSourceOrchestrator"))
 	}
 
-	session := core.NewSenderSession[I](
+	session := core.NewSourceSession[I](
 		store,
 		filter.NewSynchronizedFilter[I](filter.NewEmptyFilter(allocator)),
 		orchestrator,
@@ -38,7 +38,7 @@ func NewClientSourceSessionData[I core.BlockId, R core.BlockIdRef[I]](target str
 		panic(err)
 	}
 
-	connection := NewClientSenderConnection[I, R](
+	connection := NewClientSourceConnection[I, R](
 		maxBatchSize,
 		&http.Client{Jar: jar},
 		target,
@@ -52,19 +52,19 @@ func NewClientSourceSessionData[I core.BlockId, R core.BlockIdRef[I]](target str
 }
 
 type ClientSinkSessionData[I core.BlockId, R core.BlockIdRef[I]] struct {
-	Connection *ClientReceiverConnection[I, R]
-	Session    *core.ReceiverSession[I, core.BatchState]
+	Connection *ClientSinkConnection[I, R]
+	Session    *core.SinkSession[I, core.BatchState]
 }
 
 func NewClientSinkSessionData[I core.BlockId, R core.BlockIdRef[I]](target string, store core.BlockStore[I], maxBatchSize uint32, allocator func() filter.Filter[I], instrumented bool) *ClientSinkSessionData[I, R] {
 
-	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchReceiveOrchestrator()
+	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSinkOrchestrator()
 
 	if instrumented {
-		orchestrator = stats.NewInstrumentedOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchReceiveOrchestrator"))
+		orchestrator = stats.NewInstrumentedOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchSinkOrchestrator"))
 	}
 
-	session := core.NewReceiverSession[I, core.BatchState](
+	session := core.NewSinkSession[I, core.BatchState](
 		store,
 		core.NewSimpleStatusAccumulator(allocator()),
 		orchestrator,
@@ -77,7 +77,7 @@ func NewClientSinkSessionData[I core.BlockId, R core.BlockIdRef[I]](target strin
 		panic(err)
 	}
 
-	connection := NewClientReceiverConnection[I, R](&http.Client{Jar: jar}, target, receiver)
+	connection := NewClientSinkConnection[I, R](&http.Client{Jar: jar}, target, receiver)
 
 	return &ClientSinkSessionData[I, R]{
 		connection,
@@ -183,9 +183,9 @@ func (c *Client[I, R]) SourceSessions() []string {
 	return c.sourceSessions.Keys()
 }
 
-func (c *Client[I, R]) SourceInfo(url string) (*core.SenderSessionInfo[core.BatchState], error) {
+func (c *Client[I, R]) SourceInfo(url string) (*core.SourceSessionInfo[core.BatchState], error) {
 	if session, ok := c.sourceSessions.Get(url); ok {
-		return session.Session.GetInfo(), nil
+		return session.Session.Info(), nil
 	} else {
 		return nil, ErrInvalidSession
 	}
@@ -195,9 +195,9 @@ func (c *Client[I, R]) SinkSessions() []string {
 	return c.sinkSessions.Keys()
 }
 
-func (c *Client[I, R]) SinkInfo(url string) (*core.ReceiverSessionInfo[core.BatchState], error) {
+func (c *Client[I, R]) SinkInfo(url string) (*core.SinkSessionInfo[core.BatchState], error) {
 	if session, ok := c.sinkSessions.Get(url); ok {
-		return session.Session.GetInfo(), nil
+		return session.Session.Info(), nil
 	} else {
 		return nil, ErrInvalidSession
 	}

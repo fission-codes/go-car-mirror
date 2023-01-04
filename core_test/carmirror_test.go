@@ -9,7 +9,7 @@ import (
 
 	"math/rand"
 
-	. "github.com/fission-codes/go-car-mirror/carmirror"
+	. "github.com/fission-codes/go-car-mirror/core"
 	"github.com/fission-codes/go-car-mirror/filter"
 	mock "github.com/fission-codes/go-car-mirror/fixtures"
 	"github.com/fission-codes/go-car-mirror/messages"
@@ -233,17 +233,17 @@ func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, roo
 	snapshotBefore := stats.GLOBAL_REPORTING.Snapshot()
 	connection := NewMockConnection(max_batch_size, bytes_per_ms, latency_ms)
 
-	sender_session := NewSenderSession[mock.BlockId, BatchState](
+	sender_session := NewSourceSession[mock.BlockId, BatchState](
 		stats.NewInstrumentedBlockStore[mock.BlockId](sender_store, stats.GLOBAL_STATS.WithContext("SenderStore")),
 		filter.NewSynchronizedFilter(makeBloom(1024)),
-		stats.NewInstrumentedOrchestrator[BatchState](NewBatchSendOrchestrator(), stats.GLOBAL_STATS.WithContext("BatchSendOrchestrator")),
+		stats.NewInstrumentedOrchestrator[BatchState](NewBatchSourceOrchestrator(), stats.GLOBAL_STATS.WithContext("BatchSourceOrchestrator")),
 	)
 
 	log.Debugf("created sender_session")
 
-	receiver_orchestrator := stats.NewInstrumentedOrchestrator[BatchState](NewBatchReceiveOrchestrator(), stats.GLOBAL_STATS.WithContext("BatchReceiveOrchestrator"))
+	receiver_orchestrator := stats.NewInstrumentedOrchestrator[BatchState](NewBatchSinkOrchestrator(), stats.GLOBAL_STATS.WithContext("BatchSinkOrchestrator"))
 
-	receiver_session := NewReceiverSession[mock.BlockId, BatchState](
+	receiver_session := NewSinkSession[mock.BlockId, BatchState](
 		stats.NewInstrumentedBlockStore[mock.BlockId](NewSynchronizedBlockStore[mock.BlockId](receiver_store), stats.GLOBAL_STATS.WithContext("ReceiverStore")),
 		NewSimpleStatusAccumulator[mock.BlockId](filter.NewSynchronizedFilter(makeBloom(1024))),
 		receiver_orchestrator,

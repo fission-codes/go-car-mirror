@@ -6,7 +6,7 @@ import (
 	"encoding/binary"
 	"io"
 
-	"github.com/fission-codes/go-car-mirror/carmirror"
+	"github.com/fission-codes/go-car-mirror/core"
 	"github.com/fission-codes/go-car-mirror/filter"
 	"github.com/fission-codes/go-car-mirror/util"
 	"github.com/fxamacker/cbor/v2"
@@ -30,7 +30,7 @@ func writeBufferWithPrefix(writer io.Writer, buf []byte) error {
 	return err
 }
 
-func readBufferWithPrefix(reader carmirror.ByteAndBlockReader) ([]byte, error) {
+func readBufferWithPrefix(reader core.ByteAndBlockReader) ([]byte, error) {
 	if size, err := binary.ReadUvarint(reader); err != nil {
 		return nil, err
 	} else {
@@ -41,13 +41,13 @@ func readBufferWithPrefix(reader carmirror.ByteAndBlockReader) ([]byte, error) {
 }
 
 // ArchiveHeaderWireFormat is the wire format for the archive header.
-type ArchiveHeaderWireFormat[T carmirror.BlockId] struct {
+type ArchiveHeaderWireFormat[T core.BlockId] struct {
 	Version int `json:"version"`
 	Roots   []T `json:"roots"`
 }
 
 // ArchiveHeader is the header of content-addressable archive (CAR).
-type ArchiveHeader[T carmirror.BlockId] ArchiveHeaderWireFormat[T] // Avoid recursion due to cbor marshalling falling back to using MarshalBinary
+type ArchiveHeader[T core.BlockId] ArchiveHeaderWireFormat[T] // Avoid recursion due to cbor marshalling falling back to using MarshalBinary
 
 // Write writes the archive header to the writer.
 func (ah *ArchiveHeader[T]) Write(writer io.Writer) error {
@@ -59,7 +59,7 @@ func (ah *ArchiveHeader[T]) Write(writer io.Writer) error {
 }
 
 // Read reads the archive header from the reader.
-func (ah *ArchiveHeader[T]) Read(reader carmirror.ByteAndBlockReader) error {
+func (ah *ArchiveHeader[T]) Read(reader core.ByteAndBlockReader) error {
 	if buf, err := readBufferWithPrefix(reader); err == nil {
 		return cbor.Unmarshal(buf, (*ArchiveHeaderWireFormat[T])(ah))
 	} else {
@@ -80,7 +80,7 @@ func (ah *ArchiveHeader[T]) UnmarshalBinary(data []byte) error {
 }
 
 // BlockWireFormat is the wire format for a block id or block id reference.
-type BlockWireFormat[T carmirror.BlockId, R carmirror.BlockIdRef[T]] struct {
+type BlockWireFormat[T core.BlockId, R core.BlockIdRef[T]] struct {
 	IdRef R      `json:"id"`
 	Data  []byte `json:"data"`
 }
@@ -106,7 +106,7 @@ func (b *BlockWireFormat[T, R]) Write(writer io.Writer) error {
 }
 
 // Read reads from the reader into the block wire format.
-func (b *BlockWireFormat[T, R]) Read(reader carmirror.ByteAndBlockReader) error {
+func (b *BlockWireFormat[T, R]) Read(reader core.ByteAndBlockReader) error {
 	var (
 		err   error
 		size  uint64
@@ -156,7 +156,7 @@ func (b *BlockWireFormat[T, R]) Size() int64 {
 }
 
 // CastBlockWireFormat casts a raw block to a block wire format.
-func CastBlockWireFormat[T carmirror.BlockId, R carmirror.BlockIdRef[T]](rawBlock carmirror.RawBlock[T]) *BlockWireFormat[T, R] {
+func CastBlockWireFormat[T core.BlockId, R core.BlockIdRef[T]](rawBlock core.RawBlock[T]) *BlockWireFormat[T, R] {
 	block, ok := rawBlock.(*BlockWireFormat[T, R])
 	if ok {
 		return block
@@ -167,9 +167,9 @@ func CastBlockWireFormat[T carmirror.BlockId, R carmirror.BlockIdRef[T]](rawBloc
 }
 
 // Archive represents a content-addressable archive (CAR).
-type Archive[T carmirror.BlockId, R carmirror.BlockIdRef[T]] struct {
-	Header ArchiveHeader[T]        `json:"hdr"`
-	Blocks []carmirror.RawBlock[T] `json:"blocks"`
+type Archive[T core.BlockId, R core.BlockIdRef[T]] struct {
+	Header ArchiveHeader[T]   `json:"hdr"`
+	Blocks []core.RawBlock[T] `json:"blocks"`
 }
 
 // Write writes the archive to the writer.
@@ -188,10 +188,10 @@ func (car *Archive[T, R]) Write(writer io.Writer) error {
 }
 
 // Read reads the archive from the reader.
-func (car *Archive[T, R]) Read(reader carmirror.ByteAndBlockReader) error {
+func (car *Archive[T, R]) Read(reader core.ByteAndBlockReader) error {
 	var err error
 	err = car.Header.Read(reader)
-	car.Blocks = make([]carmirror.RawBlock[T], 0)
+	car.Blocks = make([]core.RawBlock[T], 0)
 	for err == nil {
 		block := BlockWireFormat[T, R]{}
 		if err = block.Read(reader); err == nil {
@@ -218,23 +218,23 @@ func (ah *Archive[T, R]) MarshalBinary() ([]byte, error) {
 }
 
 // BlocksMessage state and the archive.
-type BlocksMessage[T carmirror.BlockId, R carmirror.BlockIdRef[T], F carmirror.Flags] struct {
+type BlocksMessage[T core.BlockId, R core.BlockIdRef[T], F core.Flags] struct {
 	State F
 	Car   Archive[T, R]
 }
 
 // NewBlocksMessage creates a new blocks message.
 func NewBlocksMessage[
-	T carmirror.BlockId,
-	R carmirror.BlockIdRef[T],
-	F carmirror.Flags,
-](state F, blocks []carmirror.RawBlock[T]) *BlocksMessage[T, R, F] {
+	T core.BlockId,
+	R core.BlockIdRef[T],
+	F core.Flags,
+](state F, blocks []core.RawBlock[T]) *BlocksMessage[T, R, F] {
 	return &BlocksMessage[T, R, F]{
 		state,
 		Archive[T, R]{
 			ArchiveHeader[T]{
 				1,
-				util.Map(blocks, func(blk carmirror.RawBlock[T]) T { return blk.Id() }),
+				util.Map(blocks, func(blk core.RawBlock[T]) T { return blk.Id() }),
 			},
 			blocks,
 		},
@@ -255,7 +255,7 @@ func (msg *BlocksMessage[T, B, F]) Write(writer io.Writer) error {
 }
 
 // Read reads the blocks message from the reader.
-func (msg *BlocksMessage[T, B, F]) Read(reader carmirror.ByteAndBlockReader) error {
+func (msg *BlocksMessage[T, B, F]) Read(reader core.ByteAndBlockReader) error {
 	if data, err := readBufferWithPrefix(reader); err != nil {
 		return err
 	} else {
@@ -279,17 +279,17 @@ func (msg *BlocksMessage[T, B, F]) UnmarshalBinary(data []byte) error {
 }
 
 // StatusMessageWireFormat is the wire format of a status message.
-type StatusMessageWireFormat[I carmirror.BlockId, R carmirror.BlockIdRef[I], S carmirror.Flags] struct {
+type StatusMessageWireFormat[I core.BlockId, R core.BlockIdRef[I], S core.Flags] struct {
 	State S                           `json:"state"`
 	Have  *filter.FilterWireFormat[I] `json:"have"`
 	Want  []I                         `json:"want"`
 }
 
 // StatusMessage represents a status message.
-type StatusMessage[I carmirror.BlockId, R carmirror.BlockIdRef[I], S carmirror.Flags] StatusMessageWireFormat[I, R, S]
+type StatusMessage[I core.BlockId, R core.BlockIdRef[I], S core.Flags] StatusMessageWireFormat[I, R, S]
 
 // NewStatusMessage creates a new status message.
-func NewStatusMessage[I carmirror.BlockId, R carmirror.BlockIdRef[I], S carmirror.Flags](state S, have filter.Filter[I], want []I) *StatusMessage[I, R, S] {
+func NewStatusMessage[I core.BlockId, R core.BlockIdRef[I], S core.Flags](state S, have filter.Filter[I], want []I) *StatusMessage[I, R, S] {
 	return &StatusMessage[I, R, S]{
 		state,
 		filter.NewFilterWireFormat(have),
@@ -307,7 +307,7 @@ func (msg *StatusMessage[I, R, S]) Write(writer io.Writer) error {
 }
 
 // Read reads the status message from the reader.
-func (msg *StatusMessage[I, R, S]) Read(reader carmirror.ByteAndBlockReader) error {
+func (msg *StatusMessage[I, R, S]) Read(reader core.ByteAndBlockReader) error {
 	if data, err := readBufferWithPrefix(reader); err != nil {
 		return err
 	} else {

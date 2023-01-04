@@ -1,7 +1,7 @@
 // Package carmirror provides a generic Go implementation of the [CAR Mirror] protocol.
 //
 // [CAR Mirror]: https://github.com/fission-codes/spec/blob/main/car-pool/car-mirror/SPEC.md
-package carmirror
+package core
 
 import (
 	"context"
@@ -180,11 +180,11 @@ type BlockReceiver[I BlockId, F Flags] interface {
 // StatusSender is responsible for sending status.
 // The key intuition of CAR Mirror is that status can be sent efficiently using a lossy filter.
 // TODO: this use of status implies it's just filter, not want list.  Be precise in language.
-// The StatusSender will therefore usually batch reported information and send it in bulk to the ReceiverSession.
+// The StatusSender will therefore usually batch reported information and send it in bulk to the SourceSession.
 type StatusSender[I BlockId] interface {
-	// SendStatus sends the status to the ReceiverSession.
-	// The have filter is a lossy filter of the blocks that the SenderSession has.
-	// The want list is a list of blocks that the SenderSession wants.
+	// SendStatus sends the status to the SourceSession.
+	// The have filter is a lossy filter of the blocks that the SinkSession has.
+	// The want list is a list of blocks that the SinkSession wants.
 	SendStatus(have filter.Filter[I], want []I) error
 
 	// TODO: Close closes the ???.
@@ -311,9 +311,9 @@ type Orchestrator[F Flags] interface {
 	IsClosed() bool
 }
 
-// SenderConnection provides a way to get a block sender after you create the session.
+// SourceConnection provides a way to get a block sender after you create the session.
 // The sender wants to know about the orchestrator, to notify it of certain events, like flush.
-type SenderConnection[
+type SourceConnection[
 	F Flags,
 	I BlockId,
 ] interface {
@@ -321,8 +321,8 @@ type SenderConnection[
 	OpenBlockSender(Orchestrator[F]) BlockSender[I]
 }
 
-// ReceiverConnection provides a way to get a status sender after you create the session.
-type ReceiverConnection[
+// SinkConnection provides a way to get a status sender after you create the session.
+type SinkConnection[
 	F Flags,
 	I BlockId,
 ] interface {
@@ -330,8 +330,8 @@ type ReceiverConnection[
 	OpenStatusSender(Orchestrator[F]) StatusSender[I]
 }
 
-// ReceiverSession is a session that receives blocks.
-type ReceiverSession[
+// SinkSession is a session that receives blocks.
+type SinkSession[
 	I BlockId,
 	F Flags,
 ] struct {
@@ -343,24 +343,24 @@ type ReceiverSession[
 }
 
 // Struct for returning summary information about the session
-type ReceiverSessionInfo[F Flags] struct {
+type SinkSessionInfo[F Flags] struct {
 	PendingCount  uint
 	Status        F
 	HavesEstimate uint
 	Wants         uint
 }
 
-func (inf *ReceiverSessionInfo[F]) String() string {
+func (inf *SinkSessionInfo[F]) String() string {
 	return fmt.Sprintf("pnd:%6v have:%6v want:%6v %v", inf.PendingCount, inf.HavesEstimate, inf.Wants, inf.Status)
 }
 
-// NewReceiverSession creates a new ReceiverSession.
-func NewReceiverSession[I BlockId, F Flags](
+// NewSinkSession creates a new SinkSession.
+func NewSinkSession[I BlockId, F Flags](
 	store BlockStore[I],
 	accumulator StatusAccumulator[I],
 	orchestrator Orchestrator[F],
-) *ReceiverSession[I, F] {
-	return &ReceiverSession[I, F]{
+) *SinkSession[I, F] {
+	return &SinkSession[I, F]{
 		accumulator,
 		orchestrator,
 		store,
@@ -370,43 +370,43 @@ func NewReceiverSession[I BlockId, F Flags](
 }
 
 // Orchestrator provides access to the orchestrator.
-// TODO - refactor to make SenderSession support the Orchestrator interface:
+// TODO - refactor to make SinkSession support the Orchestrator interface:
 // HandleState = ReceiveState
 // IsClosed is implemented anyway
 // Implementing State and Notify will not appreciably complicate things
 // We can probably completely get rid of Connection.
-func (rs *ReceiverSession[I, F]) Orchestrator() Orchestrator[F] {
-	return rs.orchestrator
+func (ss *SinkSession[I, F]) Orchestrator() Orchestrator[F] {
+	return ss.orchestrator
 }
 
-func (rs *ReceiverSession[I, F]) GetInfo() *ReceiverSessionInfo[F] {
-	return &ReceiverSessionInfo[F]{
-		PendingCount:  uint(rs.pending.Len()),
-		Status:        rs.orchestrator.State(),
-		HavesEstimate: rs.accumulator.HaveCount(),
-		Wants:         rs.accumulator.WantCount(),
+func (ss *SinkSession[I, F]) Info() *SinkSessionInfo[F] {
+	return &SinkSessionInfo[F]{
+		PendingCount:  uint(ss.pending.Len()),
+		Status:        ss.orchestrator.State(),
+		HavesEstimate: ss.accumulator.HaveCount(),
+		Wants:         ss.accumulator.WantCount(),
 	}
 }
 
 // AccumulateStatus accumulates the status of the block with the given id and all of its children.
-func (rs *ReceiverSession[I, F]) AccumulateStatus(id I) error {
+func (ss *SinkSession[I, F]) AccumulateStatus(id I) error {
 	// Get block and handle errors
-	block, err := rs.store.Get(context.Background(), id)
+	block, err := ss.store.Get(context.Background(), id)
 
 	if err == errors.ErrBlockNotFound {
-		return rs.accumulator.Want(id)
+		return ss.accumulator.Want(id)
 	}
 
 	if err != nil {
 		return err
 	}
 
-	if err := rs.accumulator.Have(id); err != nil {
+	if err := ss.accumulator.Have(id); err != nil {
 		return err
 	}
 
 	for _, child := range block.Children() {
-		if err := rs.AccumulateStatus(child); err != nil {
+		if err := ss.AccumulateStatus(child); err != nil {
 			return err
 		}
 	}
@@ -414,52 +414,52 @@ func (rs *ReceiverSession[I, F]) AccumulateStatus(id I) error {
 	return nil
 }
 
-func (rs *ReceiverSession[I, F]) Enqueue(id I) error {
+func (ss *SinkSession[I, F]) Enqueue(id I) error {
 	// When is it safe to do this?
 	// if we are currently checking (e.g. the polling loop is running)
 	// if we are not currently checking *and* we are not currently sending?
-	rs.orchestrator.Notify(BEGIN_ENQUEUE)     // This should block if status is RECEIVER_SENDING
-	defer rs.orchestrator.Notify(END_ENQUEUE) // This should set RECEIVER_CHECKING
-	return rs.AccumulateStatus(id)            // This is recursive so it may take some time
+	ss.orchestrator.Notify(BEGIN_ENQUEUE)     // This should block if status is RECEIVER_SENDING
+	defer ss.orchestrator.Notify(END_ENQUEUE) // This should set RECEIVER_CHECKING
+	return ss.AccumulateStatus(id)            // This is recursive so it may take some time
 }
 
 // HandleBlock handles a block that is being received.
-func (rs *ReceiverSession[I, F]) HandleBlock(rawBlock RawBlock[I]) {
-	rs.orchestrator.Notify(BEGIN_RECEIVE)
-	defer rs.orchestrator.Notify(END_RECEIVE)
+func (ss *SinkSession[I, F]) HandleBlock(rawBlock RawBlock[I]) {
+	ss.orchestrator.Notify(BEGIN_RECEIVE)
+	defer ss.orchestrator.Notify(END_RECEIVE)
 
-	block, err := rs.store.Add(context.TODO(), rawBlock)
+	block, err := ss.store.Add(context.TODO(), rawBlock)
 	if err != nil {
-		rs.log.Debugf("Failed to add block to store. err = %v", err)
+		ss.log.Debugf("Failed to add block to store. err = %v", err)
 	}
 
-	if err := rs.accumulator.Receive(block.Id()); err != nil {
-		rs.log.Debugf("Failed to receive block. err = %v", err)
+	if err := ss.accumulator.Receive(block.Id()); err != nil {
+		ss.log.Debugf("Failed to receive block. err = %v", err)
 	}
 
-	rs.pending.PushBack(block)
+	ss.pending.PushBack(block)
 }
 
 // Run runs the receiver session.
 // TODO: Is start a better name?  Starting a session?
 // Or begin, to match the event names?
-func (rs *ReceiverSession[I, F]) Run(connection ReceiverConnection[F, I]) error {
-	sender := connection.OpenStatusSender(rs.orchestrator)
+func (ss *SinkSession[I, F]) Run(connection SinkConnection[F, I]) error {
+	sender := connection.OpenStatusSender(ss.orchestrator)
 
-	rs.orchestrator.Notify(BEGIN_SESSION)
+	ss.orchestrator.Notify(BEGIN_SESSION)
 	defer func() {
-		rs.orchestrator.Notify(END_SESSION)
+		ss.orchestrator.Notify(END_SESSION)
 		sender.Close()
 	}()
 
-	for !rs.orchestrator.IsClosed() {
-		rs.orchestrator.Notify(BEGIN_CHECK)
+	for !ss.orchestrator.IsClosed() {
+		ss.orchestrator.Notify(BEGIN_CHECK)
 
-		if rs.pending.Len() > 0 {
-			block := rs.pending.PollFront()
+		if ss.pending.Len() > 0 {
+			block := ss.pending.PollFront()
 
 			for _, child := range block.Children() {
-				if err := rs.AccumulateStatus(child); err != nil {
+				if err := ss.AccumulateStatus(child); err != nil {
 					return err
 				}
 			}
@@ -469,58 +469,58 @@ func (rs *ReceiverSession[I, F]) Run(connection ReceiverConnection[F, I]) error 
 			// so it can be triggered by the orchestrator - otherwise we wind up sending a status update every
 			// time the pending list becomes empty.
 
-			rs.orchestrator.Notify(BEGIN_SEND)
-			rs.accumulator.Send(sender)
-			rs.orchestrator.Notify(END_SEND)
+			ss.orchestrator.Notify(BEGIN_SEND)
+			ss.accumulator.Send(sender)
+			ss.orchestrator.Notify(END_SEND)
 
 		}
-		rs.orchestrator.Notify(END_CHECK)
+		ss.orchestrator.Notify(END_CHECK)
 	}
 
 	return nil
 }
 
 // HandleState makes sure the state is handled by the orchestrator.
-func (ss *ReceiverSession[I, F]) HandleState(state F) {
+func (ss *SinkSession[I, F]) HandleState(state F) {
 	err := ss.orchestrator.ReceiveState(state)
 	if err != nil {
-		ss.log.Errorw("receiving state", "object", "ReceiverSession", "method", "HandleState", "error", err)
+		ss.log.Errorw("receiving state", "object", "SinkSession", "method", "HandleState", "error", err)
 	}
 }
 
 // Close closes the sender session.
-func (rs *ReceiverSession[I, F]) Close() error {
-	if err := rs.orchestrator.Notify(BEGIN_CLOSE); err != nil {
+func (ss *SinkSession[I, F]) Close() error {
+	if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
 		return err
 	}
-	defer rs.orchestrator.Notify(END_CLOSE)
+	defer ss.orchestrator.Notify(END_CLOSE)
 
 	return nil
 }
 
 // Cancel cancels the session.
-func (ss *ReceiverSession[I, F]) Cancel() error {
+func (ss *SinkSession[I, F]) Cancel() error {
 	return ss.orchestrator.Notify(CANCEL)
 }
 
 // IsClosed returns true if the session is closed.
-func (rs *ReceiverSession[I, F]) IsClosed() bool {
-	return rs.orchestrator.IsClosed()
+func (ss *SinkSession[I, F]) IsClosed() bool {
+	return ss.orchestrator.IsClosed()
 }
 
 // Struct for returting summary information about the session
-type SenderSessionInfo[F Flags] struct {
+type SourceSessionInfo[F Flags] struct {
 	PendingCount  uint
 	Status        F
 	HavesEstimate uint
 }
 
-func (inf *SenderSessionInfo[F]) String() string {
+func (inf *SourceSessionInfo[F]) String() string {
 	return fmt.Sprintf("pnd:%6v have:%6v %v", inf.PendingCount, inf.HavesEstimate, inf.Status)
 }
 
-// SenderSession is a session for sending blocks.
-type SenderSession[
+// SourceSession is a session for sending blocks.
+type SourceSession[
 	I BlockId,
 	F Flags,
 ] struct {
@@ -532,9 +532,9 @@ type SenderSession[
 	log          *zap.SugaredLogger
 }
 
-// NewSenderSession creates a new SenderSession.
-func NewSenderSession[I BlockId, F Flags](store BlockStore[I], filter filter.Filter[I], orchestrator Orchestrator[F]) *SenderSession[I, F] {
-	return &SenderSession[I, F]{
+// NewSourceSession creates a new SourceSession.
+func NewSourceSession[I BlockId, F Flags](store BlockStore[I], filter filter.Filter[I], orchestrator Orchestrator[F]) *SourceSession[I, F] {
+	return &SourceSession[I, F]{
 		store,
 		orchestrator,
 		filter,
@@ -545,17 +545,17 @@ func NewSenderSession[I BlockId, F Flags](store BlockStore[I], filter filter.Fil
 }
 
 // Orchestrator provides access to the orchestrator.
-// TODO - refactor to make SenderSession support the Orchestrator interface:
+// TODO - refactor to make SourceSession support the Orchestrator interface:
 // HandleState = ReceiveState
 // IsClosed is implemented anyway
 // Implementing State and Notify will not appreciably complicate things
 // We can probably the completely get rid of Connection.
-func (ss *SenderSession[I, F]) Orchestrator() Orchestrator[F] {
+func (ss *SourceSession[I, F]) Orchestrator() Orchestrator[F] {
 	return ss.orchestrator
 }
 
-func (ss *SenderSession[I, F]) GetInfo() *SenderSessionInfo[F] {
-	return &SenderSessionInfo[F]{
+func (ss *SourceSession[I, F]) Info() *SourceSessionInfo[F] {
+	return &SourceSessionInfo[F]{
 		PendingCount:  uint(ss.pending.Len()),
 		Status:        ss.orchestrator.State(),
 		HavesEstimate: uint(ss.filter.Count()),
@@ -564,7 +564,7 @@ func (ss *SenderSession[I, F]) GetInfo() *SenderSessionInfo[F] {
 
 // Run runs the sender session.
 // TODO: Consider renaming to Start or Begin or Open to match Close/IsClosed?
-func (ss *SenderSession[I, F]) Run(connection SenderConnection[F, I]) error {
+func (ss *SourceSession[I, F]) Run(connection SourceConnection[F, I]) error {
 	sender := connection.OpenBlockSender(ss.orchestrator)
 	if err := ss.orchestrator.Notify(BEGIN_SESSION); err != nil {
 		return err
@@ -620,23 +620,23 @@ func (ss *SenderSession[I, F]) Run(connection SenderConnection[F, I]) error {
 // HandleStatus handles incoming status, updating the filter and pending list.
 // TODO: Is pending just want but from the sender side?  and filter is have from the sender side?  Could we name these similarly?
 // receiverHave, receiverWant?
-func (ss *SenderSession[I, F]) HandleStatus(have filter.Filter[I], want []I) {
+func (ss *SourceSession[I, F]) HandleStatus(have filter.Filter[I], want []I) {
 	if err := ss.orchestrator.Notify(BEGIN_RECEIVE); err != nil {
-		ss.log.Errorw("error notifying BEGIN_RECEIVE", "object", "SenderSession", "method", "HandleStatus", "error", err)
+		ss.log.Errorw("error notifying BEGIN_RECEIVE", "object", "SourceSession", "method", "HandleStatus", "error", err)
 	}
 	defer ss.orchestrator.Notify(END_RECEIVE)
-	ss.log.Debugw("begin processing", "object", "SenderSession", "method", "HandleStatus", "pending", ss.pending.Len(), "filter", ss.filter.Count())
+	ss.log.Debugw("begin processing", "object", "SourceSession", "method", "HandleStatus", "pending", ss.pending.Len(), "filter", ss.filter.Count())
 	ss.filter = ss.filter.AddAll(have)
-	ss.log.Debugw("incoming have filter merged", "object", "SenderSession", "method", "HandleStatus", "filter", ss.filter.Count())
-	//ss.filter.Dump(ss.log, "SenderSession filter - ")
+	ss.log.Debugw("incoming have filter merged", "object", "SourceSession", "method", "HandleStatus", "filter", ss.filter.Count())
+	//ss.filter.Dump(ss.log, "SourceSession filter - ")
 	for _, id := range want {
 		ss.pending.PushFront(id) // send wants to the front of the queue
 	}
-	ss.log.Debugw("incoming want list merged", "obect", "SenderSession", "method", "HandleStatus", "pending", ss.pending.Len())
+	ss.log.Debugw("incoming want list merged", "obect", "SourceSession", "method", "HandleStatus", "pending", ss.pending.Len())
 }
 
 // Close closes the sender session.
-func (ss *SenderSession[I, F]) Close() error {
+func (ss *SourceSession[I, F]) Close() error {
 	if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
 		return err
 	}
@@ -648,27 +648,27 @@ func (ss *SenderSession[I, F]) Close() error {
 }
 
 // Cancel cancels the sender session.
-func (ss *SenderSession[I, F]) Cancel() error {
+func (ss *SourceSession[I, F]) Cancel() error {
 	return ss.orchestrator.Notify(CANCEL)
 }
 
 // Enqueue enqueues a block id to be sent.
-func (ss *SenderSession[I, F]) Enqueue(id I) error {
+func (ss *SourceSession[I, F]) Enqueue(id I) error {
 	ss.orchestrator.Notify(BEGIN_ENQUEUE)
 	defer ss.orchestrator.Notify(END_ENQUEUE)
 	return ss.pending.PushBack(id)
 }
 
 // HandleState handles incoming session state.
-func (ss *SenderSession[I, F]) HandleState(state F) {
+func (ss *SourceSession[I, F]) HandleState(state F) {
 	err := ss.orchestrator.ReceiveState(state)
 	if err != nil {
-		ss.log.Errorw("SenderSession", "method", "HandleState", "error", err)
+		ss.log.Errorw("SourceSession", "method", "HandleState", "error", err)
 	}
 }
 
 // IsClosed returns true if the session is closed.
-func (ss *SenderSession[I, F]) IsClosed() bool {
+func (ss *SourceSession[I, F]) IsClosed() bool {
 	return ss.orchestrator.IsClosed()
 }
 

@@ -1,4 +1,4 @@
-package carmirror
+package core
 
 import (
 	"strings"
@@ -14,55 +14,51 @@ type BatchState uint32
 
 // Named constants for BatchState flags.
 const (
-	RECEIVER_READY BatchState = 1 << iota
-	RECEIVER_CLOSING
-	RECEIVER_CLOSED
-	RECEIVER_CHECKING  // Receiver is processing a batch of blocks
-	RECEIVER_SENDING   // Receiver is in the process of sending a status message
-	RECEIVER_WAITING   // Receiver is waiting for a batch of blocks
-	RECEIVER_ENQUEUING // Receiver is processing a block id that has been explicitly requested
-	SENDER_READY       // Sender is processing a batch of blocks
-	SENDER_FLUSHING    // Sender is flushing blocks
-	SENDER_WAITING     // Sender is waiting for a status message
-	SENDER_CLOSING
-	SENDER_CLOSED
+	SINK_CLOSING BatchState = 1 << iota
+	SINK_CLOSED
+	SINK_PROCESSING   // Sink is processing a batch of blocks
+	SINK_SENDING      // Sink is in the process of sending a status message
+	SINK_WAITING      // Sink is waiting for a batch of blocks
+	SINK_ENQUEUING    // Sink is processing a block id that has been explicitly requested
+	SOURCE_PROCESSING // Source is processing a batch of blocks
+	SOURCE_FLUSHING   // Source is flushing blocks
+	SOURCE_WAITING    // Source is waiting for a status message
+	SOURCE_CLOSING
+	SOURCE_CLOSED
 	CANCELLED
-	RECEIVER = CANCELLED | RECEIVER_READY | RECEIVER_CLOSING | RECEIVER_CHECKING | RECEIVER_CLOSED | RECEIVER_SENDING | RECEIVER_ENQUEUING | RECEIVER_WAITING
-	SENDER   = CANCELLED | SENDER_READY | SENDER_FLUSHING | SENDER_WAITING | SENDER_CLOSING | SENDER_CLOSED
+	SINK   = CANCELLED | SINK_CLOSING | SINK_PROCESSING | SINK_CLOSED | SINK_SENDING | SINK_ENQUEUING | SINK_WAITING
+	SOURCE = CANCELLED | SOURCE_PROCESSING | SOURCE_FLUSHING | SOURCE_WAITING | SOURCE_CLOSING | SOURCE_CLOSED
 )
 
 // Strings returns a slice of strings describing the given BatchState.
 func (bs BatchState) Strings() []string {
 	var strings []string
-	if bs&RECEIVER_READY != 0 {
-		strings = append(strings, "RECEIVER_READY")
+	if bs&SINK_CLOSING != 0 {
+		strings = append(strings, "SINK_CLOSING")
 	}
-	if bs&RECEIVER_CLOSING != 0 {
-		strings = append(strings, "RECEIVER_CLOSING")
+	if bs&SINK_CLOSED != 0 {
+		strings = append(strings, "SINK_CLOSED")
 	}
-	if bs&RECEIVER_CLOSED != 0 {
-		strings = append(strings, "RECEIVER_CLOSED")
+	if bs&SINK_PROCESSING != 0 {
+		strings = append(strings, "SINK_PROCESSING")
 	}
-	if bs&RECEIVER_CHECKING != 0 {
-		strings = append(strings, "RECEIVER_CHECKING")
+	if bs&SINK_SENDING != 0 {
+		strings = append(strings, "SINK_SENDING")
 	}
-	if bs&RECEIVER_SENDING != 0 {
-		strings = append(strings, "RECEIVER_SENDING")
+	if bs&SINK_WAITING != 0 {
+		strings = append(strings, "SINK_WAITING")
 	}
-	if bs&RECEIVER_WAITING != 0 {
-		strings = append(strings, "RECEIVER_WAITING")
+	if bs&SINK_ENQUEUING != 0 {
+		strings = append(strings, "SINK_ENQUEUING")
 	}
-	if bs&RECEIVER_ENQUEUING != 0 {
-		strings = append(strings, "RECEIVER_ENQUEUING")
+	if bs&SOURCE_PROCESSING != 0 {
+		strings = append(strings, "SOURCE_PROCESSING")
 	}
-	if bs&SENDER_READY != 0 {
-		strings = append(strings, "SENDER_READY")
+	if bs&SOURCE_CLOSING != 0 {
+		strings = append(strings, "SOURCE_CLOSING")
 	}
-	if bs&SENDER_CLOSING != 0 {
-		strings = append(strings, "SENDER_CLOSING")
-	}
-	if bs&SENDER_CLOSED != 0 {
-		strings = append(strings, "SENDER_CLOSED")
+	if bs&SOURCE_CLOSED != 0 {
+		strings = append(strings, "SOURCE_CLOSED")
 	}
 	if bs&CANCELLED != 0 {
 		strings = append(strings, "CANCELLED")
@@ -160,7 +156,7 @@ func (sbbs *SimpleBatchBlockSender[I]) Flush() error {
 	batchState := sbbs.orchestrator.State()
 	sbbs.listMutex.Lock()
 	defer sbbs.listMutex.Unlock()
-	if err := sbbs.sender.SendList(batchState&SENDER, sbbs.list); err != nil {
+	if err := sbbs.sender.SendList(batchState&SOURCE, sbbs.list); err != nil {
 		return err
 	}
 	sbbs.list = sbbs.list[:0]
@@ -168,130 +164,126 @@ func (sbbs *SimpleBatchBlockSender[I]) Flush() error {
 	return nil
 }
 
-// BatchSendOrchestrator is an orchestrator for sending batches of blocks.
-type BatchSendOrchestrator struct {
+// BatchSourceOrchestrator is an orchestrator for sending batches of blocks.
+type BatchSourceOrchestrator struct {
 	flags util.SharedFlagSet[BatchState]
 	log   *zap.SugaredLogger
 }
 
-// NewBatchSendOrchestrator creates a new BatchSendOrchestrator.
-func NewBatchSendOrchestrator() *BatchSendOrchestrator {
-	return &BatchSendOrchestrator{
+// NewBatchSourceOrchestrator creates a new BatchSourceOrchestrator.
+func NewBatchSourceOrchestrator() *BatchSourceOrchestrator {
+	return &BatchSourceOrchestrator{
 		flags: *util.NewSharedFlagSet(BatchState(0)),
-		log:   log.With("component", "BatchSendOrchestrator"),
+		log:   log.With("component", "BatchSourceOrchestrator"),
 	}
 }
 
 // Notify notifies the orchestrator of a session event.
 // Events lead to state transitions in the orchestrator.
 //
-func (bso *BatchSendOrchestrator) Notify(event SessionEvent) error {
+func (bso *BatchSourceOrchestrator) Notify(event SessionEvent) error {
 	switch event {
-	case BEGIN_SESSION:
-		// bso.flags.Set(SENDER_READY) - now set by END_ENQUEUE
 	case BEGIN_SEND:
-		state := bso.flags.WaitAny(SENDER_READY|CANCELLED, 0)
+		state := bso.flags.WaitAny(SOURCE_PROCESSING|CANCELLED, 0)
 		if state&CANCELLED != 0 {
-			bso.log.Errorf("Orchestrator waiting for SENDER_READY when CANCELLED seen")
+			bso.log.Errorf("Orchestrator waiting for SOURCE_PROCESSING when CANCELLED seen")
 			return errors.ErrStateError
 		}
 	case END_RECEIVE:
-		bso.flags.Update(SENDER_WAITING, SENDER_READY)
+		bso.flags.Update(SOURCE_WAITING, SOURCE_PROCESSING)
 	case BEGIN_CLOSE:
-		bso.flags.Set(SENDER_CLOSING)
+		bso.flags.Set(SOURCE_CLOSING)
 	case BEGIN_FLUSH:
-		bso.flags.Update(SENDER_READY, SENDER_FLUSHING)
+		bso.flags.Update(SOURCE_PROCESSING, SOURCE_FLUSHING)
 	case END_FLUSH:
-		bso.flags.Update(SENDER_FLUSHING, SENDER_WAITING)
+		bso.flags.Update(SOURCE_FLUSHING, SOURCE_WAITING)
 	case BEGIN_DRAINING:
-		if bso.flags.ContainsAny(RECEIVER_CLOSING | SENDER_CLOSING) {
-			bso.flags.Set(SENDER_CLOSED)
+		if bso.flags.ContainsAny(SINK_CLOSING | SOURCE_CLOSING) {
+			bso.flags.Set(SOURCE_CLOSED)
 		}
 	case END_ENQUEUE:
 		// This is necessary because if the session is quiescent (e.g. has no in-flight exchange)
-		// the session Run loop will be waiting on SENDER_READY, and we need to set it to wake
+		// the session Run loop will be waiting on SOURCE_PROCESSING, and we need to set it to wake
 		// up the session.  If the receiver is not flushing, waiting, or ready, it is quiescent.
-		if !bso.flags.ContainsAny(SENDER_FLUSHING | SENDER_WAITING | SENDER_READY) {
-			bso.flags.Set(SENDER_READY)
+		if !bso.flags.ContainsAny(SOURCE_FLUSHING | SOURCE_WAITING | SOURCE_PROCESSING) {
+			bso.flags.Set(SOURCE_PROCESSING)
 		}
 	case END_SESSION:
-		bso.flags.Update(SENDER, SENDER_CLOSED)
+		bso.flags.Update(SOURCE, SOURCE_CLOSED)
 	case CANCEL:
-		bso.flags.Update(SENDER, CANCELLED)
+		bso.flags.Update(SOURCE, CANCELLED)
 	}
 
 	return nil
 }
 
 // State returns the current state of the orchestrator.
-func (bso *BatchSendOrchestrator) State() BatchState {
+func (bso *BatchSourceOrchestrator) State() BatchState {
 	return bso.flags.All()
 }
 
 // ReceiveState unsets any current receiver state flags, and sets the specified state flags.
-func (bso *BatchSendOrchestrator) ReceiveState(batchState BatchState) error {
-	bso.flags.Update(RECEIVER, batchState)
+func (bso *BatchSourceOrchestrator) ReceiveState(batchState BatchState) error {
+	bso.flags.Update(SINK, batchState)
 	return nil
 }
 
 // IsClosed returns true if the sender is closed.
-func (bso *BatchSendOrchestrator) IsClosed() bool {
-	return bso.flags.Contains(SENDER_CLOSED|RECEIVER_CLOSED) || bso.flags.Contains(CANCELLED)
+func (bso *BatchSourceOrchestrator) IsClosed() bool {
+	return bso.flags.Contains(SOURCE_CLOSED|SINK_CLOSED) || bso.flags.Contains(CANCELLED)
 }
 
-// BatchReceiveOrchestrator is an orchestrator for receiving batches of blocks.
-type BatchReceiveOrchestrator struct {
+// BatchSinkOrchestrator is an orchestrator for receiving batches of blocks.
+type BatchSinkOrchestrator struct {
 	flags util.SharedFlagSet[BatchState]
 	log   *zap.SugaredLogger
 }
 
-// NewBatchReceiveOrchestrator creates a new BatchReceiveOrchestrator.
-func NewBatchReceiveOrchestrator() *BatchReceiveOrchestrator {
-	return &BatchReceiveOrchestrator{
+// NewBatchSinkOrchestrator creates a new BatchSinkOrchestrator.
+func NewBatchSinkOrchestrator() *BatchSinkOrchestrator {
+	return &BatchSinkOrchestrator{
 		flags: *util.NewSharedFlagSet(BatchState(0)),
-		log:   log.With("component", "BatchReceiveOrchestrator"),
+		log:   log.With("component", "BatchSinkOrchestrator"),
 	}
 }
 
 // Notify notifies the orchestrator of a session event, updating the state as appropriate.
-func (bro *BatchReceiveOrchestrator) Notify(event SessionEvent) error {
+func (bro *BatchSinkOrchestrator) Notify(event SessionEvent) error {
 	// TODO: at this point we probably need to enclose all this in a mutex.
 	switch event {
-	case BEGIN_SESSION:
-		bro.flags.Set(RECEIVER_READY)
 	case END_SESSION:
-		bro.flags.Update(RECEIVER_READY, RECEIVER_CLOSED)
+		bro.flags.Set(SINK_CLOSED)
 	case BEGIN_CLOSE:
-		bro.flags.Set(RECEIVER_CLOSING)
+		bro.flags.Set(SINK_CLOSING)
 	case BEGIN_CHECK:
-		state := bro.flags.WaitAny(RECEIVER_CHECKING|CANCELLED, 0) // waits for either flag to be set
+		state := bro.flags.WaitAny(SINK_PROCESSING|CANCELLED, 0) // waits for either flag to be set
 		if state&CANCELLED != 0 {
-			bro.log.Errorf("Orchestrator waiting for RECEIVER_CHECKING when CANCELLED seen")
+			bro.log.Errorf("Orchestrator waiting for SINK_PROCESSING when CANCELLED seen")
 			return errors.ErrStateError
 		}
 	case BEGIN_SEND:
-		bro.flags.WaitExact(RECEIVER_ENQUEUING, 0) // Can't send while enqueuing
-		bro.flags.Update(RECEIVER_CHECKING, RECEIVER_SENDING)
-		if bro.flags.Contains(SENDER_CLOSED) {
-			bro.flags.Set(RECEIVER_CLOSED)
+		bro.flags.WaitExact(SINK_ENQUEUING, 0) // Can't send while enqueuing
+		bro.flags.Update(SINK_PROCESSING, SINK_SENDING)
+		if bro.flags.Contains(SOURCE_CLOSED) {
+			bro.flags.Set(SINK_CLOSED)
 		}
 	case END_BATCH:
-		bro.flags.Update(RECEIVER_WAITING, RECEIVER_CHECKING)
+		bro.flags.Update(SINK_WAITING, SINK_PROCESSING)
 	case END_SEND:
-		bro.flags.Update(RECEIVER_SENDING, RECEIVER_WAITING)
+		bro.flags.Update(SINK_SENDING, SINK_WAITING)
 	case CANCEL:
-		bro.flags.Update(RECEIVER, CANCELLED)
+		bro.flags.Update(SINK, CANCELLED)
 	case BEGIN_ENQUEUE:
-		bro.flags.WaitExact(RECEIVER_SENDING, 0) // Can't enqueue while sending
-		bro.flags.Set(RECEIVER_ENQUEUING)
+		bro.flags.WaitExact(SINK_SENDING, 0) // Can't enqueue while sending
+		bro.flags.Set(SINK_ENQUEUING)
 	case END_ENQUEUE:
-		bro.flags.Unset(RECEIVER_ENQUEUING)
+		bro.flags.Unset(SINK_ENQUEUING)
 		// This is necessary because if the session is quiescent (e.g. has no in-flight exchange)
-		// the session Run loop will be waiting on RECEIVER_CHECKING, and we need to set it to send
+		// the session Run loop will be waiting on SINK_PROCESSING, and we need to set it to send
 		// an initial 'want' message to the block source. If the receiver is not sending, waiting,
 		// or checking, it is quiescent.
-		if !bro.flags.ContainsAny(RECEIVER_SENDING | RECEIVER_WAITING | RECEIVER_CHECKING) {
-			bro.flags.Set(RECEIVER_CHECKING)
+		if !bro.flags.ContainsAny(SINK_SENDING | SINK_WAITING | SINK_PROCESSING) {
+			bro.flags.Set(SINK_PROCESSING)
 		}
 	}
 
@@ -299,17 +291,17 @@ func (bro *BatchReceiveOrchestrator) Notify(event SessionEvent) error {
 }
 
 // State returns the current state of the orchestrator.
-func (bro *BatchReceiveOrchestrator) State() BatchState {
+func (bro *BatchSinkOrchestrator) State() BatchState {
 	return bro.flags.All()
 }
 
 // ReceiveState unsets any current sender state flags, and sets the specified state flags.
-func (bro *BatchReceiveOrchestrator) ReceiveState(batchState BatchState) error {
-	bro.flags.Update(SENDER, batchState)
+func (bro *BatchSinkOrchestrator) ReceiveState(batchState BatchState) error {
+	bro.flags.Update(SOURCE, batchState)
 	return nil
 }
 
 // IsClosed returns true if the receiver is closed.
-func (bro *BatchReceiveOrchestrator) IsClosed() bool {
-	return bro.flags.Contains(SENDER_CLOSED|RECEIVER_CLOSED) || bro.flags.Contains(CANCELLED)
+func (bro *BatchSinkOrchestrator) IsClosed() bool {
+	return bro.flags.Contains(SOURCE_CLOSED|SINK_CLOSED) || bro.flags.Contains(CANCELLED)
 }
