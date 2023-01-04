@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/fission-codes/go-car-mirror/carmirror"
+	"github.com/fission-codes/go-car-mirror/core"
 	"github.com/fission-codes/go-car-mirror/filter"
 	mock "github.com/fission-codes/go-car-mirror/fixtures"
 	"github.com/fission-codes/go-car-mirror/util"
@@ -61,13 +61,13 @@ func TestBlockWireFormatWriteRead(t *testing.T) {
 	if err := copy.Read(&buf); err != nil {
 		t.Errorf("error reading block %v", err)
 	}
-	if !carmirror.BlockEqual[mock.BlockId](rawBlock, &copy) {
+	if !core.BlockEqual[mock.BlockId](rawBlock, &copy) {
 		t.Errorf("Blocks (%v, %v) not equal", rawBlock.Id(), copy.Id())
 		assertBytesEqual(rawBlock.RawData(), copy.RawData(), t)
 	}
 }
 
-func compareBlocks(a []carmirror.RawBlock[mock.BlockId], b []carmirror.RawBlock[mock.BlockId], t *testing.T) {
+func compareBlocks(a []core.RawBlock[mock.BlockId], b []core.RawBlock[mock.BlockId], t *testing.T) {
 	if len(a) != len(b) {
 		t.Errorf("Lists of blocks are not same length")
 	}
@@ -88,7 +88,7 @@ func compareBlocks(a []carmirror.RawBlock[mock.BlockId], b []carmirror.RawBlock[
 
 func TestArchiveWriteRead(t *testing.T) {
 	buf := bytes.Buffer{}
-	blocks := make([]carmirror.RawBlock[mock.BlockId], 2)
+	blocks := make([]core.RawBlock[mock.BlockId], 2)
 	blocks[0] = mock.RandMockBlock()
 	blocks[1] = mock.RandMockBlock()
 	roots := make([]mock.BlockId, 2)
@@ -114,7 +114,7 @@ func TestArchiveWriteRead(t *testing.T) {
 
 func TestBlocksMessageReadWrite(t *testing.T) {
 	buf := bytes.Buffer{}
-	blocks := make([]carmirror.RawBlock[mock.BlockId], 1)
+	blocks := make([]core.RawBlock[mock.BlockId], 1)
 	blocks[0] = mock.RandMockBlock()
 	message := NewBlocksMessage(uint(23), blocks)
 

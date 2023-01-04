@@ -9,7 +9,7 @@ import (
 
 	"math/rand"
 
-	. "github.com/fission-codes/go-car-mirror/carmirror"
+	. "github.com/fission-codes/go-car-mirror/core"
 	"github.com/fission-codes/go-car-mirror/filter"
 	mock "github.com/fission-codes/go-car-mirror/fixtures"
 	"github.com/fission-codes/go-car-mirror/messages"

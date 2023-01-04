@@ -3,7 +3,7 @@ package ipld
 import (
 	"testing"
 
-	core "github.com/fission-codes/go-car-mirror/carmirror"
+	"github.com/fission-codes/go-car-mirror/core"
 	"golang.org/x/exp/slices"
 )
 

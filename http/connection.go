@@ -5,7 +5,7 @@ import (
 	"io"
 	"net/http"
 
-	core "github.com/fission-codes/go-car-mirror/carmirror"
+	"github.com/fission-codes/go-car-mirror/core"
 	"github.com/fission-codes/go-car-mirror/filter"
 	messages "github.com/fission-codes/go-car-mirror/messages"
 )

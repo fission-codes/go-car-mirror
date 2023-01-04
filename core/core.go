@@ -1,7 +1,7 @@
 // Package carmirror provides a generic Go implementation of the [CAR Mirror] protocol.
 //
 // [CAR Mirror]: https://github.com/fission-codes/spec/blob/main/car-pool/car-mirror/SPEC.md
-package carmirror
+package core
 
 import (
 	"context"

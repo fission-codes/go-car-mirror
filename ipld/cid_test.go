@@ -8,7 +8,7 @@ import (
 
 	mc "github.com/multiformats/go-multicodec"
 
-	core "github.com/fission-codes/go-car-mirror/carmirror"
+	"github.com/fission-codes/go-car-mirror/core"
 	mh "github.com/multiformats/go-multihash"
 )
 

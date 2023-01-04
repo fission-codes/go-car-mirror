@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	core "github.com/fission-codes/go-car-mirror/carmirror"
+	"github.com/fission-codes/go-car-mirror/core"
 	"github.com/fission-codes/go-car-mirror/filter"
 	"github.com/fission-codes/go-car-mirror/messages"
 	"github.com/fission-codes/go-car-mirror/stats"

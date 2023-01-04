@@ -1,4 +1,4 @@
-package carmirror
+package core
 
 import (
 	"strings"
