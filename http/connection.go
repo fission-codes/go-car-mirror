@@ -15,7 +15,7 @@ const CONTENT_TYPE_CBOR = "application/cbor"
 type RequestBatchBlockSender[I core.BlockId, R core.BlockIdRef[I]] struct {
 	client          *http.Client
 	url             string
-	responseHandler core.StatusReceiver[I, core.BatchState]
+	responseHandler *core.SimpleBatchStatusReceiver[I]
 }
 
 func (bbs *RequestBatchBlockSender[I, R]) SendList(state core.BatchState, blocks []core.RawBlock[I]) error {
@@ -48,8 +48,7 @@ func (bbs *RequestBatchBlockSender[I, R]) SendList(state core.BatchState, blocks
 				log.Debugw("exit", "object", "RequestBatchBlockSender", "method", "SendList", "error", err)
 				return err
 			}
-			bbs.responseHandler.HandleStatus(responseMessage.Have.Any(), responseMessage.Want)
-			bbs.responseHandler.HandleState(responseMessage.State)
+			bbs.responseHandler.HandleStatus(responseMessage.State, responseMessage.Have.Any(), responseMessage.Want)
 			log.Debugw("exit", "object", "RequestBatchBlockSender", "method", "SendList")
 			return nil
 		} else {
@@ -148,126 +147,4 @@ func (ss *ResponseStatusSender[I, R]) SendStatus(have filter.Filter[I], want []I
 func (ss *ResponseStatusSender[I, R]) Close() error {
 	//close(ss.messages)
 	return nil
-}
-
-type ClientSourceConnection[
-	I core.BlockId,
-	R core.BlockIdRef[I],
-] struct {
-	responseHandler core.StatusReceiver[I, core.BatchState]
-	maxBatchSize    uint32
-	client          *http.Client
-	url             string
-}
-
-func NewClientSourceConnection[I core.BlockId, R core.BlockIdRef[I]](
-	maxBatchSize uint32,
-	client *http.Client,
-	url string,
-	responseHandler core.StatusReceiver[I, core.BatchState],
-) *ClientSourceConnection[I, R] {
-	return &ClientSourceConnection[I, R]{
-		responseHandler,
-		maxBatchSize,
-		client,
-		url,
-	}
-}
-
-// OpenBlockSender opens a block sender
-// we are on the server side here, so the message will actually be sent in response to a status message
-func (conn *ClientSourceConnection[I, R]) OpenBlockSender(orchestrator core.Orchestrator[core.BatchState]) core.BlockSender[I] {
-	return core.NewSimpleBatchBlockSender[I](
-		&RequestBatchBlockSender[I, R]{conn.client, conn.url, conn.responseHandler},
-		orchestrator,
-		conn.maxBatchSize,
-	)
-}
-
-type ServerSourceConnection[
-	I core.BlockId,
-	R core.BlockIdRef[I],
-] struct {
-	messages     chan *messages.BlocksMessage[I, R, core.BatchState]
-	maxBatchSize uint32
-}
-
-func NewServerSourceConnection[I core.BlockId, R core.BlockIdRef[I]](maxBatchSize uint32) *ServerSourceConnection[I, R] {
-	return &ServerSourceConnection[I, R]{
-		make(chan *messages.BlocksMessage[I, R, core.BatchState]),
-		maxBatchSize,
-	}
-}
-
-func (conn *ServerSourceConnection[I, R]) ResponseChannel() <-chan *messages.BlocksMessage[I, R, core.BatchState] {
-	return conn.messages
-}
-
-// OpenBlockSender opens a block sender
-// we are on the server side here, so the message will actually be sent in response to a status message
-func (conn *ServerSourceConnection[I, R]) OpenBlockSender(orchestrator core.Orchestrator[core.BatchState]) core.BlockSender[I] {
-	return core.NewSimpleBatchBlockSender[I](
-		&ResponseBatchBlockSender[I, R]{conn.messages},
-		orchestrator,
-		conn.maxBatchSize,
-	)
-}
-
-type ClientSinkConnection[
-	I core.BlockId,
-	R core.BlockIdRef[I],
-] struct {
-	responseHandler core.BatchBlockReceiver[I]
-	client          *http.Client
-	url             string
-}
-
-func NewClientSinkConnection[I core.BlockId, R core.BlockIdRef[I]](
-	client *http.Client,
-	url string,
-	responseHandler core.BatchBlockReceiver[I],
-) *ClientSinkConnection[I, R] {
-	return &ClientSinkConnection[I, R]{
-		responseHandler,
-		client,
-		url,
-	}
-}
-
-// OpenStatusSender opens a client-side status sender
-func (conn *ClientSinkConnection[I, R]) OpenStatusSender(orchestrator core.Orchestrator[core.BatchState]) core.StatusSender[I] {
-	return &RequestStatusSender[I, R]{
-		orchestrator,
-		conn.client,
-		conn.url,
-		conn.responseHandler,
-	}
-}
-
-type ServerSinkConnection[
-	I core.BlockId,
-	R core.BlockIdRef[I],
-] struct {
-	messages     chan *messages.StatusMessage[I, R, core.BatchState]
-	maxBatchSize uint32
-}
-
-func NewServerSinkConnection[I core.BlockId, R core.BlockIdRef[I]](maxBatchSize uint32) *ServerSinkConnection[I, R] {
-	return &ServerSinkConnection[I, R]{
-		make(chan *messages.StatusMessage[I, R, core.BatchState]),
-		maxBatchSize,
-	}
-}
-
-func (conn *ServerSinkConnection[I, R]) ResponseChannel() <-chan *messages.StatusMessage[I, R, core.BatchState] {
-	return conn.messages
-}
-
-// OpenStatusSender opens a status sender
-// we are on the server side here, so the message will actually be sent in response to a blocks message
-func (conn *ServerSinkConnection[I, R]) OpenStatusSender(orchestrator core.Orchestrator[core.BatchState]) core.StatusSender[I] {
-	return &ResponseStatusSender[I, R]{
-		orchestrator,
-		conn.messages,
-	}
 }

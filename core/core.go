@@ -165,14 +165,7 @@ type BlockSender[I BlockId] interface {
 }
 
 // BlockReceiver is responsible for receiving blocks.
-type StateReceiver[F Flags] interface {
-	// HandleState is called on receipt of a new state.
-	HandleState(state F)
-}
-
-// BlockReceiver is responsible for receiving blocks.
 type BlockReceiver[I BlockId, F Flags] interface {
-	StateReceiver[F]
 	// HandleBlock is called on receipt of a new block.
 	HandleBlock(block RawBlock[I])
 }
@@ -192,10 +185,7 @@ type StatusSender[I BlockId] interface {
 }
 
 // StatusReceiver is responsible for receiving a status.
-// It also receives the state of the session.
 type StatusReceiver[I BlockId, F Flags] interface {
-	StateReceiver[F]
-
 	// HandleStatus is called on receipt of a new status.
 	// The have filter is a lossy filter of the blocks that the ??? has.
 	// The want list is a list of blocks that the ??? wants.
@@ -311,25 +301,6 @@ type Orchestrator[F Flags] interface {
 	IsClosed() bool
 }
 
-// SourceConnection provides a way to get a block sender after you create the session.
-// The sender wants to know about the orchestrator, to notify it of certain events, like flush.
-type SourceConnection[
-	F Flags,
-	I BlockId,
-] interface {
-	// OpenBlockSender opens a block sender.
-	OpenBlockSender(Orchestrator[F]) BlockSender[I]
-}
-
-// SinkConnection provides a way to get a status sender after you create the session.
-type SinkConnection[
-	F Flags,
-	I BlockId,
-] interface {
-	// OpenStatusSender opens a status sender.
-	OpenStatusSender(Orchestrator[F]) StatusSender[I]
-}
-
 // SinkSession is a session that receives blocks.
 type SinkSession[
 	I BlockId,
@@ -369,16 +340,17 @@ func NewSinkSession[I BlockId, F Flags](
 	}
 }
 
-// Orchestrator provides access to the orchestrator.
-// TODO - refactor to make SinkSession support the Orchestrator interface:
-// HandleState = ReceiveState
-// IsClosed is implemented anyway
-// Implementing State and Notify will not appreciably complicate things
-// We can probably completely get rid of Connection.
-func (ss *SinkSession[I, F]) Orchestrator() Orchestrator[F] {
-	return ss.orchestrator
+// Get the current state from this session
+func (ss *SinkSession[I, F]) State() F {
+	return ss.orchestrator.State()
 }
 
+// Notify the session of some event which may change state
+func (ss *SinkSession[I, F]) Notify(event SessionEvent) error {
+	return ss.orchestrator.Notify(event)
+}
+
+// Get information about this session
 func (ss *SinkSession[I, F]) Info() *SinkSessionInfo[F] {
 	return &SinkSessionInfo[F]{
 		PendingCount:  uint(ss.pending.Len()),
@@ -414,6 +386,7 @@ func (ss *SinkSession[I, F]) AccumulateStatus(id I) error {
 	return nil
 }
 
+// Enqueue a block for transfer (will retrieve block and children from the related source session)
 func (ss *SinkSession[I, F]) Enqueue(id I) error {
 	// When is it safe to do this?
 	// if we are currently checking (e.g. the polling loop is running)
@@ -443,14 +416,10 @@ func (ss *SinkSession[I, F]) HandleBlock(rawBlock RawBlock[I]) {
 // Run runs the receiver session.
 // TODO: Is start a better name?  Starting a session?
 // Or begin, to match the event names?
-func (ss *SinkSession[I, F]) Run(connection SinkConnection[F, I]) error {
-	sender := connection.OpenStatusSender(ss.orchestrator)
+func (ss *SinkSession[I, F]) Run(sender StatusSender[I]) error {
 
 	ss.orchestrator.Notify(BEGIN_SESSION)
-	defer func() {
-		ss.orchestrator.Notify(END_SESSION)
-		sender.Close()
-	}()
+	defer ss.orchestrator.Notify(END_SESSION)
 
 	for !ss.orchestrator.IsClosed() {
 		ss.orchestrator.Notify(BEGIN_CHECK)
@@ -480,12 +449,9 @@ func (ss *SinkSession[I, F]) Run(connection SinkConnection[F, I]) error {
 	return nil
 }
 
-// HandleState makes sure the state is handled by the orchestrator.
-func (ss *SinkSession[I, F]) HandleState(state F) {
-	err := ss.orchestrator.ReceiveState(state)
-	if err != nil {
-		ss.log.Errorw("receiving state", "object", "SinkSession", "method", "HandleState", "error", err)
-	}
+// Receive state from the remote session.
+func (ss *SinkSession[I, F]) ReceiveState(state F) error {
+	return ss.orchestrator.ReceiveState(state)
 }
 
 // Close closes the sender session.
@@ -544,16 +510,17 @@ func NewSourceSession[I BlockId, F Flags](store BlockStore[I], filter filter.Fil
 	}
 }
 
-// Orchestrator provides access to the orchestrator.
-// TODO - refactor to make SourceSession support the Orchestrator interface:
-// HandleState = ReceiveState
-// IsClosed is implemented anyway
-// Implementing State and Notify will not appreciably complicate things
-// We can probably the completely get rid of Connection.
-func (ss *SourceSession[I, F]) Orchestrator() Orchestrator[F] {
-	return ss.orchestrator
+// Retrieve the current session state
+func (ss *SourceSession[I, F]) State() F {
+	return ss.orchestrator.State()
 }
 
+// Notify the session of some event which may change state
+func (ss *SourceSession[I, F]) Notify(event SessionEvent) error {
+	return ss.orchestrator.Notify(event)
+}
+
+// Retrieve information about this session
 func (ss *SourceSession[I, F]) Info() *SourceSessionInfo[F] {
 	return &SourceSessionInfo[F]{
 		PendingCount:  uint(ss.pending.Len()),
@@ -564,8 +531,7 @@ func (ss *SourceSession[I, F]) Info() *SourceSessionInfo[F] {
 
 // Run runs the sender session.
 // TODO: Consider renaming to Start or Begin or Open to match Close/IsClosed?
-func (ss *SourceSession[I, F]) Run(connection SourceConnection[F, I]) error {
-	sender := connection.OpenBlockSender(ss.orchestrator)
+func (ss *SourceSession[I, F]) Run(sender BlockSender[I]) error {
 	if err := ss.orchestrator.Notify(BEGIN_SESSION); err != nil {
 		return err
 	}
@@ -610,11 +576,7 @@ func (ss *SourceSession[I, F]) Run(connection SourceConnection[F, I]) error {
 		}
 		ss.orchestrator.Notify(END_SEND)
 	}
-	ss.orchestrator.Notify(END_SESSION)
-	if err := sender.Close(); err != nil {
-		return err
-	}
-	return nil
+	return ss.orchestrator.Notify(END_SESSION)
 }
 
 // HandleStatus handles incoming status, updating the filter and pending list.
@@ -660,11 +622,8 @@ func (ss *SourceSession[I, F]) Enqueue(id I) error {
 }
 
 // HandleState handles incoming session state.
-func (ss *SourceSession[I, F]) HandleState(state F) {
-	err := ss.orchestrator.ReceiveState(state)
-	if err != nil {
-		ss.log.Errorw("SourceSession", "method", "HandleState", "error", err)
-	}
+func (ss *SourceSession[I, F]) ReceiveState(state F) error {
+	return ss.orchestrator.ReceiveState(state)
 }
 
 // IsClosed returns true if the session is closed.
