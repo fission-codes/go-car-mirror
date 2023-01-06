@@ -221,6 +221,12 @@ type Config struct {
 	ReadStorageBandwith  time.Duration // time to write one byte
 }
 
+func DefaultConfig() Config {
+	return Config{
+		0, 0, 0, 0,
+	}
+}
+
 // BlockStore
 type Store struct {
 	blocks map[BlockId]core.Block[BlockId]
@@ -232,6 +238,10 @@ func NewStore(config Config) *Store {
 		blocks: make(map[BlockId]core.Block[BlockId]),
 		config: &config,
 	}
+}
+
+func (bs *Store) Reconfigure(config Config) {
+	bs.config = &config
 }
 
 func (bs *Store) Get(_ context.Context, id BlockId) (core.Block[BlockId], error) {
