@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"time"
 
 	"github.com/fission-codes/go-car-mirror/core"
 	cmerrors "github.com/fission-codes/go-car-mirror/errors"
@@ -213,23 +214,33 @@ func AddRandomForest(ctx context.Context, store *Store, rootCount int) []BlockId
 	return roots
 }
 
+type Config struct {
+	WriteStorageLatency  time.Duration
+	WriteStorageBandwith time.Duration // time to write one byte
+	ReadStorageLatency   time.Duration
+	ReadStorageBandwith  time.Duration // time to write one byte
+}
+
 // BlockStore
 type Store struct {
 	blocks map[BlockId]core.Block[BlockId]
+	config *Config
 }
 
-func NewStore() *Store {
+func NewStore(config Config) *Store {
 	return &Store{
 		blocks: make(map[BlockId]core.Block[BlockId]),
+		config: &config,
 	}
 }
 
 func (bs *Store) Get(_ context.Context, id BlockId) (core.Block[BlockId], error) {
+	time.Sleep(bs.config.ReadStorageLatency)
 	block, ok := bs.blocks[id]
 	if !ok || block == nil {
 		return nil, cmerrors.ErrBlockNotFound
 	}
-
+	time.Sleep(bs.config.ReadStorageBandwith * time.Duration(block.Size()))
 	return block, nil
 }
 
@@ -249,11 +260,13 @@ func (bs *Store) Dump(id BlockId, log *zap.SugaredLogger, spacer string) (core.B
 }
 
 func (bs *Store) Has(_ context.Context, id BlockId) (bool, error) {
+	time.Sleep(bs.config.ReadStorageLatency)
 	_, ok := bs.blocks[id]
 	return ok, nil
 }
 
 func (bs *Store) Remove(id BlockId) {
+	time.Sleep(bs.config.WriteStorageLatency)
 	delete(bs.blocks, id)
 }
 
@@ -289,6 +302,7 @@ func (bs *Store) doHasAll(root BlockId) error {
 func (bs *Store) All(_ context.Context) (<-chan BlockId, error) {
 	values := make(chan BlockId, len(bs.blocks))
 	for _, v := range bs.blocks {
+		time.Sleep(bs.config.ReadStorageLatency)
 		values <- v.Id()
 	}
 	close(values)
@@ -296,6 +310,7 @@ func (bs *Store) All(_ context.Context) (<-chan BlockId, error) {
 }
 
 func (bs *Store) Add(_ context.Context, rawBlock core.RawBlock[BlockId]) (core.Block[BlockId], error) {
+	time.Sleep(bs.config.WriteStorageLatency + time.Duration(rawBlock.Size())*bs.config.WriteStorageBandwith)
 	block, ok := rawBlock.(*Block)
 	if !ok {
 		block = NewBlock(rawBlock.Id(), rawBlock.Size())
