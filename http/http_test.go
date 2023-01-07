@@ -41,8 +41,8 @@ func TestClientSend(t *testing.T) {
 		Instrument:    false,
 	}
 
-	serverStore := mock.NewStore()
-	clientStore := mock.NewStore()
+	serverStore := mock.NewStore(mock.Config{})
+	clientStore := mock.NewStore(mock.Config{})
 
 	rootId := mock.AddRandomTree(context.Background(), clientStore, 12, 5, 0.0)
 
@@ -92,8 +92,8 @@ func TestClientReceive(t *testing.T) {
 		Instrument:    true,
 	}
 
-	serverStore := mock.NewStore()
-	clientStore := mock.NewStore()
+	serverStore := mock.NewStore(mock.Config{})
+	clientStore := mock.NewStore(mock.Config{})
 
 	rootId := mock.AddRandomTree(context.Background(), serverStore, 12, 5, 0.0)
 
