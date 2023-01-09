@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/fission-codes/go-car-mirror/core"
+	"github.com/fission-codes/go-car-mirror/core/instrumented"
 	"github.com/fission-codes/go-car-mirror/filter"
 	"github.com/fission-codes/go-car-mirror/messages"
 	"github.com/fission-codes/go-car-mirror/stats"
@@ -100,7 +101,7 @@ func (srv *Server[I, R]) startSourceSession(token SessionToken) *ServerSourceSes
 	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSourceOrchestrator()
 
 	if srv.instrumented {
-		orchestrator = stats.NewInstrumentedOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchSourceOrchestrator"))
+		orchestrator = instrumented.NewOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchSourceOrchestrator"))
 	}
 
 	newSession := core.NewSourceSession[I](
@@ -217,7 +218,7 @@ func (srv *Server[I, R]) startSinkSession(token SessionToken) *ServerSinkSession
 	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSinkOrchestrator()
 
 	if srv.instrumented {
-		orchestrator = stats.NewInstrumentedOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchSinkOrchestrator"))
+		orchestrator = instrumented.NewOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchSinkOrchestrator"))
 	}
 
 	newSession := core.NewSinkSession[I](

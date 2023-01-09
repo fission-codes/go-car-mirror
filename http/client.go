@@ -5,6 +5,7 @@ import (
 	"net/http/cookiejar"
 
 	"github.com/fission-codes/go-car-mirror/core"
+	"github.com/fission-codes/go-car-mirror/core/instrumented"
 	"github.com/fission-codes/go-car-mirror/filter"
 	"github.com/fission-codes/go-car-mirror/stats"
 	"github.com/fission-codes/go-car-mirror/util"
@@ -39,7 +40,7 @@ func (c *Client[I, R]) startSourceSession(url string) *core.SourceSession[I, cor
 	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSourceOrchestrator()
 
 	if c.instrumented {
-		orchestrator = stats.NewInstrumentedOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchSourceOrchestrator"))
+		orchestrator = instrumented.NewOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchSourceOrchestrator"))
 	}
 
 	newSession := core.NewSourceSession[I](
@@ -95,7 +96,7 @@ func (c *Client[I, R]) startSinkSession(url string) *core.SinkSession[I, core.Ba
 	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSinkOrchestrator()
 
 	if c.instrumented {
-		orchestrator = stats.NewInstrumentedOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchSinkOrchestrator"))
+		orchestrator = instrumented.NewOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchSinkOrchestrator"))
 	}
 
 	newSession := core.NewSinkSession[I, core.BatchState](
