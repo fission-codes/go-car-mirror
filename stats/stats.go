@@ -60,12 +60,11 @@ func (ctx *Context) Logger() *zap.SugaredLogger {
 
 // Name returns the name of this Stats instance.
 func (ctx *Context) Name() string {
-	return ctx.name
+	return ctx.parent.Name() + ctx.name
 }
 
 // WithContext returns a new Stats instance that adds a prefix to all events.
 func (ctx *Context) WithContext(name string) Stats {
-	name = ctx.name + "." + name
 	return &Context{
 		parent: ctx,
 		name:   name,
@@ -217,13 +216,13 @@ func (ds *DefaultStatsAndReporting) WithContext(name string) Stats {
 	return &Context{
 		parent: ds,
 		name:   name,
-		logger: ds.logger.With("for", name),
+		logger: ds.logger,
 	}
 }
 
 // Logger returns a logger that adds a prefix to all events.
 func (ds *DefaultStatsAndReporting) Logger() *zap.SugaredLogger {
-	return ds.logger
+	return ds.logger.With("for", ds.Name())
 }
 
 // Name returns the name of this DefaultStatsAndReporting instance.

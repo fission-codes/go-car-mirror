@@ -39,7 +39,7 @@ func TestClientSend(t *testing.T) {
 		Address:       ":8021",
 		BloomCapacity: 256,
 		BloomFunction: MOCK_ID_HASH,
-		Instrument:    false,
+		Instrument:    instrumented.INSTRUMENT_STORE | instrumented.INSTRUMENT_ORCHESTRATOR,
 	}
 
 	serverStore := mock.NewStore(mock.Config{})
@@ -90,7 +90,7 @@ func TestClientReceive(t *testing.T) {
 		Address:       ":8021",
 		BloomCapacity: 256,
 		BloomFunction: MOCK_ID_HASH,
-		Instrument:    true,
+		Instrument:    instrumented.INSTRUMENT_STORE | instrumented.INSTRUMENT_ORCHESTRATOR,
 	}
 
 	serverStore := mock.NewStore(mock.Config{})
@@ -99,7 +99,7 @@ func TestClientReceive(t *testing.T) {
 	rootId := mock.AddRandomTree(context.Background(), serverStore, 12, 5, 0.0)
 
 	server := NewServer[mock.BlockId](serverStore, config)
-	client := NewClient[mock.BlockId](instrumented.NewBlockStore[mock.BlockId](clientStore, stats.GLOBAL_STATS.WithContext("clientStore")), config)
+	client := NewClient[mock.BlockId](clientStore, config)
 
 	errChan := make(chan error)
 

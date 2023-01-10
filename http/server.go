@@ -36,7 +36,7 @@ type Server[I core.BlockId, R core.BlockIdRef[I]] struct {
 	maxBatchSize   uint32
 	allocator      func() filter.Filter[I]
 	http           *http.Server
-	instrumented   bool
+	instrumented   instrumented.InstrumentationOptions
 }
 
 func NewServer[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], config Config) *Server[I, R] {
@@ -100,14 +100,12 @@ func (srv *Server[I, R]) startSourceSession(token SessionToken) *ServerSourceSes
 
 	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSourceOrchestrator()
 
-	if srv.instrumented {
-		orchestrator = instrumented.NewOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchSourceOrchestrator"))
-	}
-
-	newSession := core.NewSourceSession[I](
+	newSession := instrumented.NewSourceSession[I](
 		srv.store,
 		filter.NewSynchronizedFilter[I](filter.NewEmptyFilter(srv.allocator)),
 		orchestrator,
+		stats.GLOBAL_STATS.WithContext(string(token)),
+		srv.instrumented,
 	)
 
 	responseChannel := make(chan *messages.BlocksMessage[I, R, core.BatchState])
@@ -217,14 +215,12 @@ func (srv *Server[I, R]) startSinkSession(token SessionToken) *ServerSinkSession
 
 	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSinkOrchestrator()
 
-	if srv.instrumented {
-		orchestrator = instrumented.NewOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchSinkOrchestrator"))
-	}
-
-	newSession := core.NewSinkSession[I](
+	newSession := instrumented.NewSinkSession[I](
 		srv.store,
 		core.NewSimpleStatusAccumulator(srv.allocator()),
 		orchestrator,
+		stats.GLOBAL_STATS.WithContext(string(token)),
+		srv.instrumented,
 	)
 
 	responseChannel := make(chan *messages.StatusMessage[I, R, core.BatchState])

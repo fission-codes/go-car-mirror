@@ -207,18 +207,22 @@ func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, roo
 		latency_ms,
 	}
 
-	sender_session := NewSourceSession[mock.BlockId, BatchState](
-		instrumented.NewBlockStore[mock.BlockId](sender_store, stats.GLOBAL_STATS.WithContext("SenderStore")),
+	sender_session := instrumented.NewSourceSession[mock.BlockId, BatchState](
+		sender_store,
 		filter.NewSynchronizedFilter(makeBloom(1024)),
-		instrumented.NewOrchestrator[BatchState](NewBatchSourceOrchestrator(), stats.GLOBAL_STATS.WithContext("BatchSourceOrchestrator")),
+		NewBatchSourceOrchestrator(),
+		stats.GLOBAL_STATS.WithContext("SourceSession"),
+		instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE,
 	)
 
 	log.Debugf("created sender_session")
 
-	receiver_session := NewSinkSession[mock.BlockId, BatchState](
-		instrumented.NewBlockStore[mock.BlockId](NewSynchronizedBlockStore[mock.BlockId](receiver_store), stats.GLOBAL_STATS.WithContext("ReceiverStore")),
+	receiver_session := instrumented.NewSinkSession[mock.BlockId, BatchState](
+		NewSynchronizedBlockStore[mock.BlockId](receiver_store),
 		NewSimpleStatusAccumulator[mock.BlockId](filter.NewSynchronizedFilter(makeBloom(1024))),
-		instrumented.NewOrchestrator[BatchState](NewBatchSinkOrchestrator(), stats.GLOBAL_STATS.WithContext("BatchSinkOrchestrator")),
+		NewBatchSinkOrchestrator(),
+		stats.GLOBAL_STATS.WithContext("SourceSession"),
+		instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE,
 	)
 
 	log.Debugf("created receiver_session")

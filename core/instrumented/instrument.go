@@ -7,6 +7,7 @@ import (
 
 	"github.com/fission-codes/go-car-mirror/core"
 	"github.com/fission-codes/go-car-mirror/filter"
+	inf "github.com/fission-codes/go-car-mirror/filter/instrumented"
 	"github.com/fission-codes/go-car-mirror/stats"
 )
 
@@ -253,4 +254,47 @@ func NewStatusReceiver[I core.BlockId, F core.Flags](receiver core.StatusReceive
 func (ir *StatusReceiver[I, F]) HandleStatus(have filter.Filter[I], want []I) {
 	ir.stats.Logger().Debugw("StatusReceiver", "method", "HandleStatus", "haves", have.Count(), "wants", len(want))
 	ir.receiver.HandleStatus(have, want)
+}
+
+type InstrumentationOptions uint8
+
+const (
+	INSTRUMENT_STORE InstrumentationOptions = 1 << iota
+	INSTRUMENT_ORCHESTRATOR
+	INSTRUMENT_FILTER
+)
+
+func NewSourceSession[I core.BlockId, F core.Flags](store core.BlockStore[I], filter filter.Filter[I], orchestrator core.Orchestrator[F], stats stats.Stats, options InstrumentationOptions) *core.SourceSession[I, F] {
+
+	if options&INSTRUMENT_STORE > 0 {
+		store = NewBlockStore(store, stats.WithContext("SourceStore"))
+	}
+
+	if options&INSTRUMENT_ORCHESTRATOR > 0 {
+		orchestrator = NewOrchestrator(orchestrator, stats.WithContext("SourceOrchestrator"))
+	}
+
+	if options&INSTRUMENT_FILTER > 0 {
+		filter = inf.New(filter, stats.WithContext("SourceFilter"))
+	}
+
+	return core.NewSourceSession(store, filter, orchestrator, stats)
+}
+
+func NewSinkSession[I core.BlockId, F core.Flags](
+	store core.BlockStore[I],
+	accumulator core.StatusAccumulator[I],
+	orchestrator core.Orchestrator[F],
+	stats stats.Stats,
+	options InstrumentationOptions,
+) *core.SinkSession[I, F] {
+
+	if options&INSTRUMENT_STORE > 0 {
+		store = NewBlockStore(store, stats.WithContext("SinkStore"))
+	}
+
+	if options&INSTRUMENT_ORCHESTRATOR > 0 {
+		orchestrator = NewOrchestrator(orchestrator, stats.WithContext("SinkOrchestrator"))
+	}
+	return core.NewSinkSession(store, accumulator, orchestrator, stats)
 }

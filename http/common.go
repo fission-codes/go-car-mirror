@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/fission-codes/go-car-mirror/core"
+	"github.com/fission-codes/go-car-mirror/core/instrumented"
 	"github.com/fission-codes/go-car-mirror/filter"
 	golog "github.com/ipfs/go-log/v2"
 )
@@ -20,7 +21,7 @@ type Config struct {
 	Address       string
 	BloomCapacity uint
 	BloomFunction uint64
-	Instrument    bool
+	Instrument    instrumented.InstrumentationOptions
 }
 
 func DefaultConfig() Config {
@@ -29,7 +30,7 @@ func DefaultConfig() Config {
 		Address:       ":8080",
 		BloomCapacity: 1024,
 		BloomFunction: 2,
-		Instrument:    false,
+		Instrument:    0,
 	}
 }
 
