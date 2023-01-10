@@ -12,8 +12,8 @@ import (
 	"sync"
 
 	"github.com/fission-codes/go-car-mirror/errors"
+	"github.com/fission-codes/go-car-mirror/stats"
 	"github.com/fxamacker/cbor/v2"
-	"go.uber.org/zap"
 
 	"golang.org/x/exp/constraints"
 	"golang.org/x/exp/slices"
@@ -310,7 +310,7 @@ type SinkSession[
 	orchestrator Orchestrator[F]
 	store        BlockStore[I]
 	pending      *util.SynchronizedDeque[Block[I]]
-	log          *zap.SugaredLogger
+	stats        stats.Stats
 }
 
 // Struct for returning summary information about the session
@@ -330,13 +330,14 @@ func NewSinkSession[I BlockId, F Flags](
 	store BlockStore[I],
 	accumulator StatusAccumulator[I],
 	orchestrator Orchestrator[F],
+	stats stats.Stats,
 ) *SinkSession[I, F] {
 	return &SinkSession[I, F]{
 		accumulator,
 		orchestrator,
 		store,
 		util.NewSynchronizedDeque[Block[I]](util.NewBlocksDeque[Block[I]](2048)),
-		&log.SugaredLogger,
+		stats,
 	}
 }
 
@@ -403,11 +404,11 @@ func (ss *SinkSession[I, F]) HandleBlock(rawBlock RawBlock[I]) {
 
 	block, err := ss.store.Add(context.TODO(), rawBlock)
 	if err != nil {
-		ss.log.Debugf("Failed to add block to store. err = %v", err)
+		ss.stats.Logger().Errorf("Failed to add block to store. err = %v", err)
 	}
 
 	if err := ss.accumulator.Receive(block.Id()); err != nil {
-		ss.log.Debugf("Failed to receive block. err = %v", err)
+		ss.stats.Logger().Errorf("Failed to receive block. err = %v", err)
 	}
 
 	ss.pending.PushBack(block)
@@ -495,18 +496,18 @@ type SourceSession[
 	filter       filter.Filter[I]
 	sent         sync.Map
 	pending      *util.SynchronizedDeque[I]
-	log          *zap.SugaredLogger
+	stats        stats.Stats
 }
 
 // NewSourceSession creates a new SourceSession.
-func NewSourceSession[I BlockId, F Flags](store BlockStore[I], filter filter.Filter[I], orchestrator Orchestrator[F]) *SourceSession[I, F] {
+func NewSourceSession[I BlockId, F Flags](store BlockStore[I], filter filter.Filter[I], orchestrator Orchestrator[F], stats stats.Stats) *SourceSession[I, F] {
 	return &SourceSession[I, F]{
 		store,
 		orchestrator,
 		filter,
 		sync.Map{},
 		util.NewSynchronizedDeque[I](util.NewBlocksDeque[I](1024)),
-		&log.SugaredLogger,
+		stats,
 	}
 }
 
@@ -584,17 +585,17 @@ func (ss *SourceSession[I, F]) Run(sender BlockSender[I]) error {
 // receiverHave, receiverWant?
 func (ss *SourceSession[I, F]) HandleStatus(have filter.Filter[I], want []I) {
 	if err := ss.orchestrator.Notify(BEGIN_RECEIVE); err != nil {
-		ss.log.Errorw("error notifying BEGIN_RECEIVE", "object", "SourceSession", "method", "HandleStatus", "error", err)
+		ss.stats.Logger().Errorw("error notifying BEGIN_RECEIVE", "object", "SourceSession", "method", "HandleStatus", "error", err)
 	}
 	defer ss.orchestrator.Notify(END_RECEIVE)
-	ss.log.Debugw("begin processing", "object", "SourceSession", "method", "HandleStatus", "pending", ss.pending.Len(), "filter", ss.filter.Count())
+	ss.stats.Logger().Debugw("begin processing", "object", "SourceSession", "method", "HandleStatus", "pending", ss.pending.Len(), "filter", ss.filter.Count())
 	ss.filter = ss.filter.AddAll(have)
-	ss.log.Debugw("incoming have filter merged", "object", "SourceSession", "method", "HandleStatus", "filter", ss.filter.Count())
+	ss.stats.Logger().Debugw("incoming have filter merged", "object", "SourceSession", "method", "HandleStatus", "filter", ss.filter.Count())
 	//ss.filter.Dump(ss.log, "SourceSession filter - ")
 	for _, id := range want {
 		ss.pending.PushFront(id) // send wants to the front of the queue
 	}
-	ss.log.Debugw("incoming want list merged", "obect", "SourceSession", "method", "HandleStatus", "pending", ss.pending.Len())
+	ss.stats.Logger().Debugw("incoming want list merged", "obect", "SourceSession", "method", "HandleStatus", "pending", ss.pending.Len())
 }
 
 // Close closes the sender session.

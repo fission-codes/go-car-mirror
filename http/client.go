@@ -5,6 +5,7 @@ import (
 	"net/http/cookiejar"
 
 	"github.com/fission-codes/go-car-mirror/core"
+	"github.com/fission-codes/go-car-mirror/core/instrumented"
 	"github.com/fission-codes/go-car-mirror/filter"
 	"github.com/fission-codes/go-car-mirror/stats"
 	"github.com/fission-codes/go-car-mirror/util"
@@ -20,7 +21,7 @@ type Client[I core.BlockId, R core.BlockIdRef[I]] struct {
 	sinkSessions   *util.SynchronizedMap[string, *core.SinkSession[I, core.BatchState]]
 	maxBatchSize   uint32
 	allocator      func() filter.Filter[I]
-	instrumented   bool
+	instrumented   instrumented.InstrumentationOptions
 }
 
 func NewClient[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], config Config) *Client[I, R] {
@@ -38,14 +39,12 @@ func (c *Client[I, R]) startSourceSession(url string) *core.SourceSession[I, cor
 
 	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSourceOrchestrator()
 
-	if c.instrumented {
-		orchestrator = stats.NewInstrumentedOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchSourceOrchestrator"))
-	}
-
-	newSession := core.NewSourceSession[I](
+	newSession := instrumented.NewSourceSession[I](
 		c.store,
 		filter.NewSynchronizedFilter[I](filter.NewEmptyFilter(c.allocator)),
 		orchestrator,
+		stats.GLOBAL_STATS.WithContext(url),
+		c.instrumented,
 	)
 
 	jar, err := cookiejar.New(&cookiejar.Options{}) // TODO: set public suffix list
@@ -57,7 +56,7 @@ func (c *Client[I, R]) startSourceSession(url string) *core.SourceSession[I, cor
 
 	newSender := core.NewSimpleBatchBlockSender[I](
 		&RequestBatchBlockSender[I, R]{&http.Client{Jar: jar}, url + "/dag/cm/blocks", newReceiver},
-		orchestrator,
+		newSession,
 		c.maxBatchSize,
 	)
 
@@ -92,16 +91,12 @@ func (c *Client[I, R]) GetSourceSession(url string) (*core.SourceSession[I, core
 
 func (c *Client[I, R]) startSinkSession(url string) *core.SinkSession[I, core.BatchState] {
 
-	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSinkOrchestrator()
-
-	if c.instrumented {
-		orchestrator = stats.NewInstrumentedOrchestrator[core.BatchState](orchestrator, stats.GLOBAL_STATS.WithContext("BatchSinkOrchestrator"))
-	}
-
-	newSession := core.NewSinkSession[I, core.BatchState](
+	newSession := instrumented.NewSinkSession[I, core.BatchState](
 		c.store,
 		core.NewSimpleStatusAccumulator(c.allocator()),
-		orchestrator,
+		core.NewBatchSinkOrchestrator(),
+		stats.GLOBAL_STATS.WithContext(url),
+		c.instrumented,
 	)
 
 	jar, err := cookiejar.New(&cookiejar.Options{}) // TODO: set public suffix list
