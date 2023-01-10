@@ -236,7 +236,7 @@ func (srv *Server[I, R]) startSinkSession(token SessionToken) *ServerSinkSession
 			log.Errorw("session returned error", "object", "Server", "method", "HandleBlocks", "session", token, "error", err)
 		}
 		sender.Close()
-		srv.sourceSessions.Remove(token)
+		srv.sinkSessions.Remove(token)
 	}()
 
 	return &ServerSinkSessionData[I, R]{
