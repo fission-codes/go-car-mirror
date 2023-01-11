@@ -204,3 +204,29 @@ func (c *Client[I, R]) CloseSink(url string) error {
 	log.Debugw("exit", "object", "Client", "method", "CloseSink", "err", err)
 	return err
 }
+
+// CancelSource cancels the source session with the given URL.
+func (c *Client[I, R]) CancelSource(url string) error {
+	log.Debugw("enter", "object", "Client", "method", "CancelSource", "url", url)
+	session, err := c.GetSourceSession(url)
+	if err != nil {
+		log.Debugw("exit", "object", "Client", "method", "CancelSource", "err", err)
+		return err
+	}
+	err = session.Cancel()
+	log.Debugw("exit", "object", "Client", "method", "CancelSource", "err", err)
+	return err
+}
+
+// CancelSink cancels the sink session with the given URL.
+func (c *Client[I, R]) CancelSink(url string) error {
+	log.Debugw("enter", "object", "Client", "method", "CancelSink", "url", url)
+	session, err := c.GetSinkSession(url)
+	if err != nil {
+		log.Debugw("exit", "object", "Client", "method", "CancelSink", "err", err)
+		return err
+	}
+	err = session.Cancel()
+	log.Debugw("exit", "object", "Client", "method", "CancelSink", "err", err)
+	return err
+}
