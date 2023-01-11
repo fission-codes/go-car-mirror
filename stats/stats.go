@@ -1,6 +1,7 @@
 package stats
 
 import (
+	"encoding/json"
 	"sort"
 	"strings"
 	"sync"
@@ -157,6 +158,11 @@ func (snap *Snapshot) Write(log *zap.SugaredLogger) {
 			log.Infow("snapshot", "event", key, "interval", bucket.Interval)
 		}
 	}
+}
+
+// MarshalJSON implements the json.Marshaler interface.
+func (snap *Snapshot) MarshalJSON() ([]byte, error) {
+	return json.Marshal(snap.values)
 }
 
 // Reporting is an interface for reporting stats.
