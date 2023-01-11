@@ -404,3 +404,120 @@ func TestMockTransferSingleMissingTreeBlockBatch(t *testing.T) {
 		receiverStore.Dump(root, &log.SugaredLogger, "")
 	}
 }
+
+func TestSessionQuiescence(t *testing.T) {
+
+	snapshotBefore := stats.GLOBAL_REPORTING.Snapshot()
+
+	blockChannel := BlockChannel{
+		make(chan *messages.BlocksMessage[mock.BlockId, *mock.BlockId, BatchState]),
+		nil,
+		0,
+		0,
+	}
+
+	statusChannel := StatusChannel{
+		make(chan *messages.StatusMessage[mock.BlockId, *mock.BlockId, BatchState]),
+		nil,
+		0,
+		0,
+	}
+
+	senderStore := mock.NewStore(mock.DefaultConfig())
+	receiverStore := mock.NewStore(mock.DefaultConfig())
+	root := mock.RandId()
+	mock.NewBlock(root, 100)
+
+	sender_session := instrumented.NewSourceSession[mock.BlockId, BatchState](
+		senderStore,
+		filter.NewSynchronizedFilter(makeBloom(1024)),
+		NewBatchSourceOrchestrator(),
+		stats.GLOBAL_STATS.WithContext("SourceSession"),
+		instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE,
+	)
+
+	log.Debugf("created sender_session")
+
+	receiver_session := instrumented.NewSinkSession[mock.BlockId, BatchState](
+		NewSynchronizedBlockStore[mock.BlockId](receiverStore),
+		NewSimpleStatusAccumulator[mock.BlockId](filter.NewSynchronizedFilter(makeBloom(1024))),
+		NewBatchSinkOrchestrator(),
+		stats.GLOBAL_STATS.WithContext("SourceSession"),
+		instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE,
+	)
+
+	log.Debugf("created receiver_session")
+
+	blockSender := instrumented.NewBlockSender[mock.BlockId](
+		NewSimpleBatchBlockSender[mock.BlockId](&blockChannel, sender_session, 100),
+		stats.GLOBAL_STATS.WithContext("MockBlockSender"),
+	)
+
+	statusSender := instrumented.NewStatusSender[mock.BlockId](
+		NewMockStatusSender(&statusChannel, receiver_session),
+		stats.GLOBAL_STATS.WithContext("MockStatusSender"),
+	)
+
+	statusChannel.SetStatusListener(NewSimpleBatchStatusReceiver[mock.BlockId](sender_session, sender_session))
+	blockChannel.SetBlockListener(NewSimpleBatchBlockReceiver[mock.BlockId](receiver_session, receiver_session))
+
+	log.Debugf("created receiver_session")
+
+	sender_session.Enqueue(root)
+
+	log.Debugf("starting goroutines")
+
+	err_chan := make(chan error)
+	go func() {
+		log.Debugf("sender session started")
+		err_chan <- sender_session.Run(blockSender)
+		blockSender.Close()
+		log.Debugf("sender session terminated")
+	}()
+
+	go func() {
+		log.Debugf("receiver session started")
+		err_chan <- receiver_session.Run(statusSender)
+		statusSender.Close()
+		log.Debugf("receiver session terminated")
+	}()
+
+	go func() {
+		log.Debugf("block listener started")
+		err_chan <- blockChannel.listen()
+		log.Debugf("block listener terminated")
+	}()
+
+	go func() {
+		log.Debugf("status listener started")
+		err_chan <- statusChannel.listen()
+		log.Debugf("status listener terminated")
+	}()
+
+	go func() {
+		log.Debugf("close timeout started")
+		time.Sleep(10 * time.Second)
+		log.Debugf("close timeout elapsed")
+		err_chan <- sender_session.Close()
+	}()
+
+	var err error
+
+	for i := 0; i < 5 && err == nil; i++ {
+		err = <-err_chan
+		if err != nil {
+			t.Errorf("goroutine terminated with %v", err)
+		} else {
+			log.Debugf("goroutine terminated OK")
+		}
+	}
+
+	snapshotAfter := stats.GLOBAL_REPORTING.Snapshot()
+	diff := snapshotBefore.Diff(snapshotAfter)
+	diff.Write(&log.SugaredLogger)
+
+	numberOfRounds := diff.Count("MockBlockSender.Flush.Ok")
+	if numberOfRounds > 2 { // One round to exchange data, one round to close session
+		t.Errorf("Expected 2 rounds, actual count %v", numberOfRounds)
+	}
+}
