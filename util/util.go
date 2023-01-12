@@ -58,10 +58,10 @@ func (fs *SharedFlagSet[F]) Unset(flags F) {
 	fs.Update(flags, 0)
 }
 
-// Wait for all the flags in 'status' to be set
-func (fs *SharedFlagSet[F]) Wait(status F) {
+// Wait for all the flags in 'state' to be set
+func (fs *SharedFlagSet[F]) Wait(state F) {
 	fs.condvar.L.Lock()
-	for fs.flags.Load().(F)&status != status {
+	for fs.flags.Load().(F)&state != state {
 		fs.condvar.Wait()
 	}
 	fs.condvar.L.Unlock()

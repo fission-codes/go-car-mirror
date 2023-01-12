@@ -306,34 +306,34 @@ type SinkSession[
 	I BlockId,
 	F Flags,
 ] struct {
-	accumulator  StatusAccumulator[I]
-	orchestrator Orchestrator[F]
-	store        BlockStore[I]
-	pending      *util.SynchronizedDeque[Block[I]]
-	stats        stats.Stats
+	statusAccumulator StatusAccumulator[I]
+	orchestrator      Orchestrator[F]
+	store             BlockStore[I]
+	pendingBlocks     *util.SynchronizedDeque[Block[I]]
+	stats             stats.Stats
 }
 
 // Struct for returning summary information about the session
 type SinkSessionInfo[F Flags] struct {
-	PendingCount  uint
-	Status        F
-	HavesEstimate uint
-	Wants         uint
+	PendingBlocksCount uint
+	State              F
+	HavesEstimate      uint
+	Wants              uint
 }
 
 func (inf *SinkSessionInfo[F]) String() string {
-	return fmt.Sprintf("pnd:%6v have:%6v want:%6v %v", inf.PendingCount, inf.HavesEstimate, inf.Wants, inf.Status)
+	return fmt.Sprintf("pnd:%6v have:%6v want:%6v %v", inf.PendingBlocksCount, inf.HavesEstimate, inf.Wants, inf.State)
 }
 
 // NewSinkSession creates a new SinkSession.
 func NewSinkSession[I BlockId, F Flags](
 	store BlockStore[I],
-	accumulator StatusAccumulator[I],
+	statusAccumulator StatusAccumulator[I],
 	orchestrator Orchestrator[F],
 	stats stats.Stats,
 ) *SinkSession[I, F] {
 	return &SinkSession[I, F]{
-		accumulator,
+		statusAccumulator,
 		orchestrator,
 		store,
 		util.NewSynchronizedDeque[Block[I]](util.NewBlocksDeque[Block[I]](2048)),
@@ -354,10 +354,10 @@ func (ss *SinkSession[I, F]) Notify(event SessionEvent) error {
 // Get information about this session
 func (ss *SinkSession[I, F]) Info() *SinkSessionInfo[F] {
 	return &SinkSessionInfo[F]{
-		PendingCount:  uint(ss.pending.Len()),
-		Status:        ss.orchestrator.State(),
-		HavesEstimate: ss.accumulator.HaveCount(),
-		Wants:         ss.accumulator.WantCount(),
+		PendingBlocksCount: uint(ss.pendingBlocks.Len()),
+		State:              ss.orchestrator.State(),
+		HavesEstimate:      ss.statusAccumulator.HaveCount(),
+		Wants:              ss.statusAccumulator.WantCount(),
 	}
 }
 
@@ -367,14 +367,14 @@ func (ss *SinkSession[I, F]) AccumulateStatus(id I) error {
 	block, err := ss.store.Get(context.Background(), id)
 
 	if err == errors.ErrBlockNotFound {
-		return ss.accumulator.Want(id)
+		return ss.statusAccumulator.Want(id)
 	}
 
 	if err != nil {
 		return err
 	}
 
-	if err := ss.accumulator.Have(id); err != nil {
+	if err := ss.statusAccumulator.Have(id); err != nil {
 		return err
 	}
 
@@ -392,7 +392,7 @@ func (ss *SinkSession[I, F]) Enqueue(id I) error {
 	// When is it safe to do this?
 	// if we are currently checking (e.g. the polling loop is running)
 	// if we are not currently checking *and* we are not currently sending?
-	ss.orchestrator.Notify(BEGIN_ENQUEUE)     // This should block if status is RECEIVER_SENDING
+	ss.orchestrator.Notify(BEGIN_ENQUEUE)     // This should block if state is RECEIVER_SENDING
 	defer ss.orchestrator.Notify(END_ENQUEUE) // This should set RECEIVER_CHECKING
 	return ss.AccumulateStatus(id)            // This is recursive so it may take some time
 }
@@ -407,17 +407,17 @@ func (ss *SinkSession[I, F]) HandleBlock(rawBlock RawBlock[I]) {
 		ss.stats.Logger().Errorf("Failed to add block to store. err = %v", err)
 	}
 
-	if err := ss.accumulator.Receive(block.Id()); err != nil {
+	if err := ss.statusAccumulator.Receive(block.Id()); err != nil {
 		ss.stats.Logger().Errorf("Failed to receive block. err = %v", err)
 	}
 
-	ss.pending.PushBack(block)
+	ss.pendingBlocks.PushBack(block)
 }
 
 // Run runs the receiver session.
 // TODO: Is start a better name?  Starting a session?
 // Or begin, to match the event names?
-func (ss *SinkSession[I, F]) Run(sender StatusSender[I]) error {
+func (ss *SinkSession[I, F]) Run(statusSender StatusSender[I]) error {
 
 	ss.orchestrator.Notify(BEGIN_SESSION)
 	defer ss.orchestrator.Notify(END_SESSION)
@@ -425,8 +425,10 @@ func (ss *SinkSession[I, F]) Run(sender StatusSender[I]) error {
 	for !ss.orchestrator.IsClosed() {
 		ss.orchestrator.Notify(BEGIN_CHECK)
 
-		if ss.pending.Len() > 0 {
-			block := ss.pending.PollFront()
+		// Pending blocks are blocks that have been recieved and added to our block store,
+		// but have not had status accumulated on their children yet.
+		if ss.pendingBlocks.Len() > 0 {
+			block := ss.pendingBlocks.PollFront()
 
 			for _, child := range block.Children() {
 				if err := ss.AccumulateStatus(child); err != nil {
@@ -437,10 +439,10 @@ func (ss *SinkSession[I, F]) Run(sender StatusSender[I]) error {
 			// If we get here it means we have no more blocks to process. In a batch based process that's
 			// the only time we'd want to send. But for streaming maybe this should be in a separate loop
 			// so it can be triggered by the orchestrator - otherwise we wind up sending a status update every
-			// time the pending list becomes empty.
+			// time the pending blocks list becomes empty.
 
 			ss.orchestrator.Notify(BEGIN_SEND)
-			ss.accumulator.Send(sender)
+			ss.statusAccumulator.Send(statusSender)
 			ss.orchestrator.Notify(END_SEND)
 
 		}
@@ -477,13 +479,13 @@ func (ss *SinkSession[I, F]) IsClosed() bool {
 
 // Struct for returting summary information about the session
 type SourceSessionInfo[F Flags] struct {
-	PendingCount  uint
-	Status        F
-	HavesEstimate uint
+	PendingBlocksCount uint
+	State              F
+	HavesEstimate      uint
 }
 
 func (inf *SourceSessionInfo[F]) String() string {
-	return fmt.Sprintf("pnd:%6v have:%6v %v", inf.PendingCount, inf.HavesEstimate, inf.Status)
+	return fmt.Sprintf("pnd:%6v have:%6v %v", inf.PendingBlocksCount, inf.HavesEstimate, inf.State)
 }
 
 // SourceSession is a session for sending blocks.
@@ -491,12 +493,12 @@ type SourceSession[
 	I BlockId,
 	F Flags,
 ] struct {
-	store        BlockStore[I]
-	orchestrator Orchestrator[F]
-	filter       filter.Filter[I]
-	sent         sync.Map
-	pending      *util.SynchronizedDeque[I]
-	stats        stats.Stats
+	store         BlockStore[I]
+	orchestrator  Orchestrator[F]
+	filter        filter.Filter[I]
+	sent          sync.Map
+	pendingBlocks *util.SynchronizedDeque[I]
+	stats         stats.Stats
 }
 
 // NewSourceSession creates a new SourceSession.
@@ -524,15 +526,15 @@ func (ss *SourceSession[I, F]) Notify(event SessionEvent) error {
 // Retrieve information about this session
 func (ss *SourceSession[I, F]) Info() *SourceSessionInfo[F] {
 	return &SourceSessionInfo[F]{
-		PendingCount:  uint(ss.pending.Len()),
-		Status:        ss.orchestrator.State(),
-		HavesEstimate: uint(ss.filter.Count()),
+		PendingBlocksCount: uint(ss.pendingBlocks.Len()),
+		State:              ss.orchestrator.State(),
+		HavesEstimate:      uint(ss.filter.Count()),
 	}
 }
 
 // Run runs the sender session.
 // TODO: Consider renaming to Start or Begin or Open to match Close/IsClosed?
-func (ss *SourceSession[I, F]) Run(sender BlockSender[I]) error {
+func (ss *SourceSession[I, F]) Run(blockSender BlockSender[I]) error {
 	if err := ss.orchestrator.Notify(BEGIN_SESSION); err != nil {
 		return err
 	}
@@ -543,8 +545,8 @@ func (ss *SourceSession[I, F]) Run(sender BlockSender[I]) error {
 			return err
 		}
 
-		if ss.pending.Len() > 0 {
-			id := ss.pending.PollFront()
+		if ss.pendingBlocks.Len() > 0 {
+			id := ss.pendingBlocks.PollFront()
 			if _, ok := ss.sent.Load(id); !ok {
 				ss.sent.Store(id, true)
 
@@ -554,12 +556,12 @@ func (ss *SourceSession[I, F]) Run(sender BlockSender[I]) error {
 						return err
 					}
 				} else {
-					if err := sender.SendBlock(block); err != nil {
+					if err := blockSender.SendBlock(block); err != nil {
 						return err
 					}
 					for _, child := range block.Children() {
 						if ss.filter.DoesNotContain(child) {
-							if err := ss.pending.PushBack(child); err != nil {
+							if err := ss.pendingBlocks.PushBack(child); err != nil {
 								return err
 							}
 						}
@@ -570,7 +572,7 @@ func (ss *SourceSession[I, F]) Run(sender BlockSender[I]) error {
 			if err := ss.orchestrator.Notify(BEGIN_DRAINING); err != nil {
 				return err
 			}
-			if err := sender.Flush(); err != nil {
+			if err := blockSender.Flush(); err != nil {
 				return err
 			}
 			ss.orchestrator.Notify(END_DRAINING)
@@ -580,22 +582,22 @@ func (ss *SourceSession[I, F]) Run(sender BlockSender[I]) error {
 	return ss.orchestrator.Notify(END_SESSION)
 }
 
-// HandleStatus handles incoming status, updating the filter and pending list.
-// TODO: Is pending just want but from the sender side?  and filter is have from the sender side?  Could we name these similarly?
+// HandleStatus handles incoming status, updating the filter and pending blocks list.
+// TODO: Is pending blocks just want but from the sender side?  and filter is have from the sender side?  Could we name these similarly?
 // receiverHave, receiverWant?
 func (ss *SourceSession[I, F]) HandleStatus(have filter.Filter[I], want []I) {
 	if err := ss.orchestrator.Notify(BEGIN_RECEIVE); err != nil {
 		ss.stats.Logger().Errorw("error notifying BEGIN_RECEIVE", "object", "SourceSession", "method", "HandleStatus", "error", err)
 	}
 	defer ss.orchestrator.Notify(END_RECEIVE)
-	ss.stats.Logger().Debugw("begin processing", "object", "SourceSession", "method", "HandleStatus", "pending", ss.pending.Len(), "filter", ss.filter.Count())
+	ss.stats.Logger().Debugw("begin processing", "object", "SourceSession", "method", "HandleStatus", "pendingBlocks", ss.pendingBlocks.Len(), "filter", ss.filter.Count())
 	ss.filter = ss.filter.AddAll(have)
 	ss.stats.Logger().Debugw("incoming have filter merged", "object", "SourceSession", "method", "HandleStatus", "filter", ss.filter.Count())
 	//ss.filter.Dump(ss.log, "SourceSession filter - ")
 	for _, id := range want {
-		ss.pending.PushFront(id) // send wants to the front of the queue
+		ss.pendingBlocks.PushFront(id) // send wants to the front of the queue
 	}
-	ss.stats.Logger().Debugw("incoming want list merged", "obect", "SourceSession", "method", "HandleStatus", "pending", ss.pending.Len())
+	ss.stats.Logger().Debugw("incoming want list merged", "obect", "SourceSession", "method", "HandleStatus", "pendingBlocks", ss.pendingBlocks.Len())
 }
 
 // Close closes the sender session.
@@ -619,7 +621,7 @@ func (ss *SourceSession[I, F]) Cancel() error {
 func (ss *SourceSession[I, F]) Enqueue(id I) error {
 	ss.orchestrator.Notify(BEGIN_ENQUEUE)
 	defer ss.orchestrator.Notify(END_ENQUEUE)
-	return ss.pending.PushBack(id)
+	return ss.pendingBlocks.PushBack(id)
 }
 
 // HandleState handles incoming session state.

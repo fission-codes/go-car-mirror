@@ -138,14 +138,14 @@ func (ibs *BlockStore[I]) Add(ctx context.Context, rawBlock core.RawBlock[I]) (c
 
 // BlockSender is a BlockSender that records stats for events.
 type BlockSender[I core.BlockId] struct {
-	sender core.BlockSender[I]
-	stats  stats.Stats
+	blockSender core.BlockSender[I]
+	stats       stats.Stats
 }
 
 // NewBlockSender returns a new BlockSender instance.
-func NewBlockSender[I core.BlockId](sender core.BlockSender[I], stats stats.Stats) *BlockSender[I] {
+func NewBlockSender[I core.BlockId](blockSender core.BlockSender[I], stats stats.Stats) *BlockSender[I] {
 	return &BlockSender[I]{
-		sender,
+		blockSender,
 		stats,
 	}
 }
@@ -154,7 +154,7 @@ func NewBlockSender[I core.BlockId](sender core.BlockSender[I], stats stats.Stat
 func (ibs *BlockSender[I]) SendBlock(block core.RawBlock[I]) error {
 	ibs.stats.Logger().Debugw("BlockSender", "method", "SendBlock", "id", block.Id())
 	begin := time.Now()
-	err := ibs.sender.SendBlock(block)
+	err := ibs.blockSender.SendBlock(block)
 	if err == nil {
 		ibs.stats.Log("SendBlock.Ok")
 		ibs.stats.LogBytes("SendBlock", uint64(block.Size()))
@@ -170,7 +170,7 @@ func (ibs *BlockSender[I]) SendBlock(block core.RawBlock[I]) error {
 func (ibs *BlockSender[I]) Flush() error {
 	ibs.stats.Logger().Debugw("BlockSender", "method", "Flush")
 	begin := time.Now()
-	err := ibs.sender.Flush()
+	err := ibs.blockSender.Flush()
 	if err == nil {
 		ibs.stats.Log("Flush.Ok")
 	} else {
@@ -184,7 +184,7 @@ func (ibs *BlockSender[I]) Flush() error {
 // Close calls the underlying block sender's Close method and records stats.
 func (ibs *BlockSender[I]) Close() error {
 	ibs.stats.Logger().Debugw("BlockSender", "method", "Close")
-	err := ibs.sender.Close()
+	err := ibs.blockSender.Close()
 	if err == nil {
 		ibs.stats.Log("Close.Ok")
 	} else {
@@ -196,14 +196,14 @@ func (ibs *BlockSender[I]) Close() error {
 
 // StatusSender is a StatusSender that records stats for events.
 type StatusSender[I core.BlockId] struct {
-	sender core.StatusSender[I]
-	stats  stats.Stats
+	statusSender core.StatusSender[I]
+	stats        stats.Stats
 }
 
 // NewStatusSender returns a new StatusSender instance.
-func NewStatusSender[I core.BlockId](sender core.StatusSender[I], stats stats.Stats) *StatusSender[I] {
+func NewStatusSender[I core.BlockId](statusSender core.StatusSender[I], stats stats.Stats) *StatusSender[I] {
 	return &StatusSender[I]{
-		sender,
+		statusSender,
 		stats,
 	}
 }
@@ -212,7 +212,7 @@ func NewStatusSender[I core.BlockId](sender core.StatusSender[I], stats stats.St
 func (ibs *StatusSender[I]) SendStatus(have filter.Filter[I], want []I) error {
 	ibs.stats.Logger().Debugw("StatusSender", "method", "SendStatus", "haves", have.Count(), "wants", len(want))
 	begin := time.Now()
-	err := ibs.sender.SendStatus(have, want)
+	err := ibs.statusSender.SendStatus(have, want)
 	if err == nil {
 		ibs.stats.Log("SendStatus.Ok")
 	} else {
@@ -226,7 +226,7 @@ func (ibs *StatusSender[I]) SendStatus(have filter.Filter[I], want []I) error {
 // Close calls the underlying status sender's Close method and records stats.
 func (ibs *StatusSender[I]) Close() error {
 	ibs.stats.Logger().Debugw("StatusSender", "method", "Close")
-	err := ibs.sender.Close()
+	err := ibs.statusSender.Close()
 	if err == nil {
 		ibs.stats.Log("Close.Ok")
 	} else {
@@ -238,14 +238,14 @@ func (ibs *StatusSender[I]) Close() error {
 
 // StatusReceiver is a StatusReceiver that records stats for events.
 type StatusReceiver[I core.BlockId] struct {
-	receiver core.StatusReceiver[I]
-	stats    stats.Stats
+	statusReceiver core.StatusReceiver[I]
+	stats          stats.Stats
 }
 
 // NewStatusReceiver returns a new StatusReceiver instance.
-func NewStatusReceiver[I core.BlockId, F core.Flags](receiver core.StatusReceiver[I], stats stats.Stats) core.StatusReceiver[I] {
+func NewStatusReceiver[I core.BlockId, F core.Flags](statusReceiver core.StatusReceiver[I], stats stats.Stats) core.StatusReceiver[I] {
 	return &StatusReceiver[I]{
-		receiver,
+		statusReceiver,
 		stats,
 	}
 }
@@ -253,7 +253,7 @@ func NewStatusReceiver[I core.BlockId, F core.Flags](receiver core.StatusReceive
 // HandleStatus calls the underlying status receiver's HandleStatus method and records stats.
 func (ir *StatusReceiver[I]) HandleStatus(have filter.Filter[I], want []I) {
 	ir.stats.Logger().Debugw("StatusReceiver", "method", "HandleStatus", "haves", have.Count(), "wants", len(want))
-	ir.receiver.HandleStatus(have, want)
+	ir.statusReceiver.HandleStatus(have, want)
 }
 
 type InstrumentationOptions uint8
@@ -283,7 +283,7 @@ func NewSourceSession[I core.BlockId, F core.Flags](store core.BlockStore[I], fi
 
 func NewSinkSession[I core.BlockId, F core.Flags](
 	store core.BlockStore[I],
-	accumulator core.StatusAccumulator[I],
+	statusAccumulator core.StatusAccumulator[I],
 	orchestrator core.Orchestrator[F],
 	stats stats.Stats,
 	options InstrumentationOptions,
@@ -296,5 +296,5 @@ func NewSinkSession[I core.BlockId, F core.Flags](
 	if options&INSTRUMENT_ORCHESTRATOR > 0 {
 		orchestrator = NewOrchestrator(orchestrator, stats.WithContext("SinkOrchestrator"))
 	}
-	return core.NewSinkSession(store, accumulator, orchestrator, stats)
+	return core.NewSinkSession(store, statusAccumulator, orchestrator, stats)
 }
