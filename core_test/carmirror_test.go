@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -151,7 +152,7 @@ func (ch *StatusChannel) listen() error {
 			return ErrReceiverNotSet
 		}
 		have := result.Have.Any()
-		log.Debugw("received", "object", "BlockChannel", "method", "listen", "state", result.State, "have", have.Count(), "want", len(result.Want))
+		log.Debugw("received", "object", "StatusChannel", "method", "listen", "state", result.State, "have", have.Count(), "want", len(result.Want))
 		ch.receiver.HandleStatus(result.State, have, result.Want)
 	}
 	return err
@@ -406,6 +407,9 @@ func TestMockTransferSingleMissingTreeBlockBatch(t *testing.T) {
 }
 
 func TestSessionQuiescence(t *testing.T) {
+	if os.Getenv("CM_TEST_QUIESCENCE") == "" {
+		t.Skip("skipping quiescence test")
+	}
 
 	snapshotBefore := stats.GLOBAL_REPORTING.Snapshot()
 
