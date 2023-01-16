@@ -185,10 +185,10 @@ type StatusSender[I BlockId] interface {
 }
 
 // StatusReceiver is responsible for receiving a status.
-type StatusReceiver[I BlockId, F Flags] interface {
+type StatusReceiver[I BlockId] interface {
 	// HandleStatus is called on receipt of a new status.
-	// The have filter is a lossy filter of the blocks that the ??? has.
-	// The want list is a list of blocks that the ??? wants.
+	// The have filter is a lossy filter of the blocks that the Sink has.
+	// The want list is a list of blocks that the Sink wants.
 	HandleStatus(have filter.Filter[I], want []I)
 }
 
