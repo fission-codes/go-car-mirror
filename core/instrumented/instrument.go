@@ -237,21 +237,21 @@ func (ibs *StatusSender[I]) Close() error {
 }
 
 // StatusReceiver is a StatusReceiver that records stats for events.
-type StatusReceiver[I core.BlockId, F core.Flags] struct {
-	receiver core.StatusReceiver[I, F]
+type StatusReceiver[I core.BlockId] struct {
+	receiver core.StatusReceiver[I]
 	stats    stats.Stats
 }
 
 // NewStatusReceiver returns a new StatusReceiver instance.
-func NewStatusReceiver[I core.BlockId, F core.Flags](receiver core.StatusReceiver[I, F], stats stats.Stats) core.StatusReceiver[I, F] {
-	return &StatusReceiver[I, F]{
+func NewStatusReceiver[I core.BlockId, F core.Flags](receiver core.StatusReceiver[I], stats stats.Stats) core.StatusReceiver[I] {
+	return &StatusReceiver[I]{
 		receiver,
 		stats,
 	}
 }
 
 // HandleStatus calls the underlying status receiver's HandleStatus method and records stats.
-func (ir *StatusReceiver[I, F]) HandleStatus(have filter.Filter[I], want []I) {
+func (ir *StatusReceiver[I]) HandleStatus(have filter.Filter[I], want []I) {
 	ir.stats.Logger().Debugw("StatusReceiver", "method", "HandleStatus", "haves", have.Count(), "wants", len(want))
 	ir.receiver.HandleStatus(have, want)
 }

@@ -308,12 +308,12 @@ func (bro *BatchSinkOrchestrator) IsClosed() bool {
 }
 
 type SimpleBatchStatusReceiver[I BlockId] struct {
-	session      StatusReceiver[I, BatchState]
+	session      StatusReceiver[I]
 	orchestrator Orchestrator[BatchState]
 }
 
 // NewSimpleBatchStatusReceiver creates a new SimpleBatchStatusReceiver.
-func NewSimpleBatchStatusReceiver[I BlockId](rs StatusReceiver[I, BatchState], orchestrator Orchestrator[BatchState]) *SimpleBatchStatusReceiver[I] {
+func NewSimpleBatchStatusReceiver[I BlockId](rs StatusReceiver[I], orchestrator Orchestrator[BatchState]) *SimpleBatchStatusReceiver[I] {
 	return &SimpleBatchStatusReceiver[I]{
 		session:      rs,
 		orchestrator: orchestrator,
