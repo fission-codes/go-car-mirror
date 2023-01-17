@@ -29,6 +29,7 @@ const TYPICAL_LATENCY = 20
 const GBIT_SECOND = (1 << 30) / 8 / 1000 // Gigabit per second -> to bytes per second -> to bytes per millisecond
 
 var testdataDir string = "../testdata"
+var stateDiagramsFile string = filepath.Join(testdataDir, "state-diagrams.md")
 var blockStoreConfig mock.Config = mock.Config{
 	ReadStorageLatency:   time.Microsecond * 250,
 	WriteStorageLatency:  time.Microsecond * 250,
@@ -41,8 +42,8 @@ func init() {
 
 	stats.InitDefault()
 
-	// Cleanup testdata dir
-	os.RemoveAll(testdataDir)
+	// Remove the state diagram file
+	os.Remove(stateDiagramsFile)
 	os.Mkdir(testdataDir, 0755)
 }
 
@@ -322,9 +323,7 @@ func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, roo
 	diff.Write(&log.SugaredLogger)
 	if diagram {
 		// Write the state diagrammer to a file
-		// Join paths for testdataDir and file
-		filename := filepath.Join(testdataDir, "state-diagrams.md")
-		f, err := os.OpenFile(filename, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+		f, err := os.OpenFile(stateDiagramsFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 		if err != nil {
 			panic(err)
 		}
