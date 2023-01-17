@@ -342,13 +342,8 @@ func NewSinkSession[I BlockId, F Flags](
 }
 
 // Get the current state from this session
-func (ss *SinkSession[I, F]) State() F {
-	return ss.orchestrator.State()
-}
-
-// Notify the session of some event which may change state
-func (ss *SinkSession[I, F]) Notify(event SessionEvent) error {
-	return ss.orchestrator.Notify(event)
+func (ss *SinkSession[I, F]) Orchestrator() Orchestrator[F] {
+	return ss.orchestrator
 }
 
 // Get information about this session
@@ -514,13 +509,8 @@ func NewSourceSession[I BlockId, F Flags](store BlockStore[I], filter filter.Fil
 }
 
 // Retrieve the current session state
-func (ss *SourceSession[I, F]) State() F {
-	return ss.orchestrator.State()
-}
-
-// Notify the session of some event which may change state
-func (ss *SourceSession[I, F]) Notify(event SessionEvent) error {
-	return ss.orchestrator.Notify(event)
+func (ss *SourceSession[I, F]) Orchestrator() Orchestrator[F] {
+	return ss.orchestrator
 }
 
 // Retrieve information about this session

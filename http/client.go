@@ -52,11 +52,11 @@ func (c *Client[I, R]) startSourceSession(url string) *core.SourceSession[I, cor
 		panic(err)
 	}
 
-	newReceiver := core.NewSimpleBatchStatusReceiver[I](newSession, newSession)
+	newReceiver := core.NewSimpleBatchStatusReceiver[I](newSession, newSession.Orchestrator())
 
 	newSender := core.NewSimpleBatchBlockSender[I](
 		&RequestBatchBlockSender[I, R]{&http.Client{Jar: jar}, url + "/dag/cm/blocks", newReceiver},
-		newSession,
+		newSession.Orchestrator(),
 		c.maxBatchSize,
 	)
 
@@ -105,10 +105,10 @@ func (c *Client[I, R]) startSinkSession(url string) *core.SinkSession[I, core.Ba
 	}
 
 	sender := &RequestStatusSender[I, R]{
-		newSession,
+		newSession.Orchestrator(),
 		&http.Client{Jar: jar}, //binks
 		url + "/dag/cm/status",
-		core.NewSimpleBatchBlockReceiver[I](newSession, newSession),
+		core.NewSimpleBatchBlockReceiver[I](newSession, newSession.Orchestrator()),
 	}
 
 	go func() {
