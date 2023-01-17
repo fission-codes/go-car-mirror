@@ -5,13 +5,16 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"math/rand"
 
 	. "github.com/fission-codes/go-car-mirror/core"
+	"github.com/fission-codes/go-car-mirror/core/diagrammed"
 	instrumented "github.com/fission-codes/go-car-mirror/core/instrumented"
+	"github.com/fission-codes/go-car-mirror/diagrammer"
 	"github.com/fission-codes/go-car-mirror/filter"
 	mock "github.com/fission-codes/go-car-mirror/fixtures"
 	"github.com/fission-codes/go-car-mirror/messages"
@@ -25,6 +28,8 @@ var log = golog.Logger("go-car-mirror")
 const TYPICAL_LATENCY = 20
 const GBIT_SECOND = (1 << 30) / 8 / 1000 // Gigabit per second -> to bytes per second -> to bytes per millisecond
 
+var testdataDir string = "../testdata"
+var stateDiagramsFile string = filepath.Join(testdataDir, "state-diagrams.md")
 var blockStoreConfig mock.Config = mock.Config{
 	ReadStorageLatency:   time.Microsecond * 250,
 	WriteStorageLatency:  time.Microsecond * 250,
@@ -36,6 +41,10 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 
 	stats.InitDefault()
+
+	// Remove the state diagram file
+	os.Remove(stateDiagramsFile)
+	os.Mkdir(testdataDir, 0755)
 }
 
 var ErrReceiverNotSet error = errors.New("receiver not set")
@@ -190,7 +199,7 @@ func (sn *MockStatusSender) Close() error {
 
 // Filter
 
-func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, root mock.BlockId, max_batch_size uint, bytes_per_ms int64, latency_ms int64) error {
+func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, root mock.BlockId, max_batch_size uint, bytes_per_ms int64, latency_ms int64, diagram bool) error {
 
 	snapshotBefore := stats.GLOBAL_REPORTING.Snapshot()
 
@@ -208,10 +217,25 @@ func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, roo
 		latency_ms,
 	}
 
+	// If diagram is true, wrap the orchestrators in a diagrammer, to generate mermaid diagrams.
+	var batchSourceOrchestratorDiagrammer *diagrammer.StateDiagrammer
+	var batchSinkOrchestratorDiagrammer *diagrammer.StateDiagrammer
+	var batchSourceOrchestrator Orchestrator[BatchState]
+	var batchSinkOrchestrator Orchestrator[BatchState]
+	if diagram {
+		batchSourceOrchestratorDiagrammer = diagrammer.NewStateDiagrammer("BatchSourceOrchestrator")
+		batchSinkOrchestratorDiagrammer = diagrammer.NewStateDiagrammer("BatchSinkOrchestrator")
+		batchSourceOrchestrator = diagrammed.NewDiagrammedBatchSourceOrchestrator(NewBatchSourceOrchestrator(), batchSourceOrchestratorDiagrammer)
+		batchSinkOrchestrator = diagrammed.NewDiagrammedBatchSinkOrchestrator(NewBatchSinkOrchestrator(), batchSinkOrchestratorDiagrammer)
+	} else {
+		batchSourceOrchestrator = NewBatchSourceOrchestrator()
+		batchSinkOrchestrator = NewBatchSinkOrchestrator()
+	}
+
 	sender_session := instrumented.NewSourceSession[mock.BlockId, BatchState](
 		sender_store,
 		filter.NewSynchronizedFilter(makeBloom(1024)),
-		NewBatchSourceOrchestrator(),
+		batchSourceOrchestrator,
 		stats.GLOBAL_STATS.WithContext("SourceSession"),
 		instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE,
 	)
@@ -221,7 +245,7 @@ func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, roo
 	receiver_session := instrumented.NewSinkSession[mock.BlockId, BatchState](
 		NewSynchronizedBlockStore[mock.BlockId](receiver_store),
 		NewSimpleStatusAccumulator[mock.BlockId](filter.NewSynchronizedFilter(makeBloom(1024))),
-		NewBatchSinkOrchestrator(),
+		batchSinkOrchestrator,
 		stats.GLOBAL_STATS.WithContext("SourceSession"),
 		instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE,
 	)
@@ -297,6 +321,18 @@ func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, roo
 	snapshotAfter := stats.GLOBAL_REPORTING.Snapshot()
 	diff := snapshotBefore.Diff(snapshotAfter)
 	diff.Write(&log.SugaredLogger)
+	if diagram {
+		// Write the state diagrammer to a file
+		f, err := os.OpenFile(stateDiagramsFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+		if err != nil {
+			panic(err)
+		}
+		defer f.Close()
+		batchSourceOrchestratorDiagrammer.Close()
+		batchSinkOrchestratorDiagrammer.Close()
+		batchSourceOrchestratorDiagrammer.Write(f)
+		batchSinkOrchestratorDiagrammer.Write(f)
+	}
 	return nil
 }
 
@@ -304,7 +340,7 @@ func TestMockTransferToEmptyStoreSingleBatchNoDelay(t *testing.T) {
 	senderStore := mock.NewStore(mock.DefaultConfig())
 	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
 	receiverStore := mock.NewStore(mock.DefaultConfig())
-	MockBatchTransfer(senderStore, receiverStore, root, 5000, 0, 0)
+	MockBatchTransfer(senderStore, receiverStore, root, 5000, 0, 0, true)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
 	}
@@ -316,7 +352,7 @@ func TestMockTransferToEmptyStoreSingleBatch(t *testing.T) {
 	receiverStore := mock.NewStore(mock.DefaultConfig())
 	receiverStore.Reconfigure(blockStoreConfig)
 	senderStore.Reconfigure(blockStoreConfig)
-	MockBatchTransfer(senderStore, receiverStore, root, 5000, GBIT_SECOND, TYPICAL_LATENCY)
+	MockBatchTransfer(senderStore, receiverStore, root, 5000, GBIT_SECOND, TYPICAL_LATENCY, false)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
 	}
@@ -326,7 +362,7 @@ func TestMockTransferToEmptyStoreMultiBatchNoDelay(t *testing.T) {
 	senderStore := mock.NewStore(mock.DefaultConfig())
 	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
 	receiverStore := mock.NewStore(mock.DefaultConfig())
-	MockBatchTransfer(senderStore, receiverStore, root, 50, 0, 0)
+	MockBatchTransfer(senderStore, receiverStore, root, 50, 0, 0, false)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
 	}
@@ -338,7 +374,7 @@ func TestMockTransferToEmptyStoreMultiBatch(t *testing.T) {
 	receiverStore := mock.NewStore(mock.DefaultConfig())
 	receiverStore.Reconfigure(blockStoreConfig)
 	senderStore.Reconfigure(blockStoreConfig)
-	MockBatchTransfer(senderStore, receiverStore, root, 50, GBIT_SECOND, TYPICAL_LATENCY)
+	MockBatchTransfer(senderStore, receiverStore, root, 50, GBIT_SECOND, TYPICAL_LATENCY, false)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
 	}
@@ -354,7 +390,7 @@ func TestMockTransferSingleMissingBlockBatchNoDelay(t *testing.T) {
 		t.Errorf("Could not find random block %v", err)
 	}
 	receiverStore.Remove(block.Id())
-	MockBatchTransfer(senderStore, receiverStore, root, 10, 0, 0)
+	MockBatchTransfer(senderStore, receiverStore, root, 10, 0, 0, false)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
 	}
@@ -372,7 +408,7 @@ func TestMockTransferSingleMissingBlockBatch(t *testing.T) {
 	receiverStore.Remove(block.Id())
 	receiverStore.Reconfigure(blockStoreConfig)
 	senderStore.Reconfigure(blockStoreConfig)
-	MockBatchTransfer(senderStore, receiverStore, root, 10, GBIT_SECOND, TYPICAL_LATENCY)
+	MockBatchTransfer(senderStore, receiverStore, root, 10, GBIT_SECOND, TYPICAL_LATENCY, false)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
 	}
@@ -384,7 +420,7 @@ func TestMockTransferSingleMissingTreeBlockBatchNoDelay(t *testing.T) {
 	receiverStore := mock.NewStore(mock.DefaultConfig())
 	receiverStore.AddAll(context.Background(), senderStore)
 	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.1)
-	MockBatchTransfer(senderStore, receiverStore, root, 50, 0, 0)
+	MockBatchTransfer(senderStore, receiverStore, root, 50, 0, 0, false)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
 		receiverStore.Dump(root, &log.SugaredLogger, "")
@@ -399,7 +435,7 @@ func TestMockTransferSingleMissingTreeBlockBatch(t *testing.T) {
 	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.1)
 	receiverStore.Reconfigure(blockStoreConfig)
 	senderStore.Reconfigure(blockStoreConfig)
-	MockBatchTransfer(senderStore, receiverStore, root, 50, GBIT_SECOND, TYPICAL_LATENCY)
+	MockBatchTransfer(senderStore, receiverStore, root, 50, GBIT_SECOND, TYPICAL_LATENCY, false)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
 		receiverStore.Dump(root, &log.SugaredLogger, "")
