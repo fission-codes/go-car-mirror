@@ -348,20 +348,18 @@ func TestMockTransferToEmptyStoreSingleBatchNoDelay(t *testing.T) {
 
 	// Set up diagrammers
 	w := diagramWriterForTest(t)
+	defer w.Close()
 	sourceDiagrammer := diagrammer.NewStateDiagrammer("BatchSourceOrchestrator", w)
+	defer sourceDiagrammer.Close()
 	sinkDiagrammer := diagrammer.NewStateDiagrammer("BatchSinkOrchestrator", w)
+	defer sinkDiagrammer.Close()
+
 	sourceOrchestrator := NewTestBatchSourceOrchestrator(sourceDiagrammer)
 	sinkOrchestrator := NewTestBatchSinkOrchestrator(sinkDiagrammer)
-
 	MockBatchTransfer(senderStore, receiverStore, root, sourceOrchestrator, sinkOrchestrator, 5000, 0, 0)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
 	}
-
-	// Close the diagrammers and flush to disk
-	sourceDiagrammer.Close()
-	sinkDiagrammer.Close()
-	w.Close()
 }
 
 func TestMockTransferToEmptyStoreSingleBatch(t *testing.T) {
