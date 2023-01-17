@@ -7,20 +7,22 @@ import (
 )
 
 type StateDiagrammer struct {
-	name     string
+	title    string
 	lines    []string
 	linesMap map[string]bool
 	mutex    sync.RWMutex
 	started  bool
+	writer   io.Writer
 }
 
-func NewStateDiagrammer(name string) *StateDiagrammer {
+func NewStateDiagrammer(title string, writer io.Writer) *StateDiagrammer {
 	d := &StateDiagrammer{
-		name:     name,
+		title:    title,
 		lines:    make([]string, 0),
 		linesMap: make(map[string]bool),
 		mutex:    sync.RWMutex{},
 		started:  false,
+		writer:   writer,
 	}
 
 	d.begin()
@@ -33,10 +35,13 @@ func (d *StateDiagrammer) addLine(line string) {
 
 func (d *StateDiagrammer) begin() {
 	d.addLine("```mermaid")
+	d.addLine("---")
+	d.addLine(fmt.Sprintf("title: %s", d.title))
+	d.addLine("---")
 	d.addLine("stateDiagram-v2")
 }
 
-func (d *StateDiagrammer) end() {
+func (d *StateDiagrammer) End() {
 	d.addLine("```")
 }
 
@@ -68,18 +73,23 @@ func (d *StateDiagrammer) Transition(event string, fromState string, toState str
 	d.started = true
 }
 
-func (d *StateDiagrammer) Close() {
+func (d *StateDiagrammer) Close() error {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
-	d.end()
+	d.End()
+	return d.Write(d.writer)
 }
 
-func (d *StateDiagrammer) Write(w io.Writer) {
-	d.mutex.RLock()
-	defer d.mutex.RUnlock()
-	fmt.Fprintf(w, "## %s\n\n", d.name)
+func (d *StateDiagrammer) Write(w io.Writer) error {
 	for _, line := range d.lines {
-		fmt.Fprintln(w, line)
+		if _, err := fmt.Fprintln(w, line); err != nil {
+			return err
+		}
 	}
-	fmt.Fprintln(w)
+
+	if _, err := fmt.Fprintln(w); err != nil {
+		return err
+	}
+
+	return nil
 }

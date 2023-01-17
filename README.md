@@ -37,9 +37,12 @@ export GOLOG_LOG_LEVEL="go-car-mirror=debug"
 
 These diagrams are generated when running `make test`.  See the output in `testdata/state-diagrams.md`.  Currently you have to copy any markup into this README manually.
 
-### BatchSourceOrchestrator
+### TestMockTransferToEmptyStoreSingleBatchNoDelay
 
 ```mermaid
+---
+title: BatchSourceOrchestrator
+---
 stateDiagram-v2
   [*] --> NO_STATE: BEGIN_ENQUEUE
   NO_STATE --> SOURCE_PROCESSING: END_ENQUEUE
@@ -65,9 +68,10 @@ stateDiagram-v2
   SINK_CLOSED|SINK_SENDING|SOURCE_CLOSING|SOURCE_CLOSED --> SINK_CLOSED|SINK_SENDING|SOURCE_CLOSED: END_SESSION
 ```
 
-### BatchSinkOrchestrator
-
 ```mermaid
+---
+title: BatchSinkOrchestrator
+---
 stateDiagram-v2
   [*] --> NO_STATE: BEGIN_SESSION
   NO_STATE --> NO_STATE: BEGIN_BATCH
