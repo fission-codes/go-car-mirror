@@ -229,17 +229,17 @@ func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, roo
 	log.Debugf("created receiver_session")
 
 	blockSender := instrumented.NewBlockSender[mock.BlockId](
-		NewSimpleBatchBlockSender[mock.BlockId](&blockChannel, sender_session, uint32(max_batch_size)),
+		NewSimpleBatchBlockSender[mock.BlockId](&blockChannel, sender_session.Orchestrator(), uint32(max_batch_size)),
 		stats.GLOBAL_STATS.WithContext("MockBlockSender"),
 	)
 
 	statusSender := instrumented.NewStatusSender[mock.BlockId](
-		NewMockStatusSender(&statusChannel, receiver_session),
+		NewMockStatusSender(&statusChannel, receiver_session.Orchestrator()),
 		stats.GLOBAL_STATS.WithContext("MockStatusSender"),
 	)
 
-	statusChannel.SetStatusListener(NewSimpleBatchStatusReceiver[mock.BlockId](sender_session, sender_session))
-	blockChannel.SetBlockListener(NewSimpleBatchBlockReceiver[mock.BlockId](receiver_session, receiver_session))
+	statusChannel.SetStatusListener(NewSimpleBatchStatusReceiver[mock.BlockId](sender_session, sender_session.Orchestrator()))
+	blockChannel.SetBlockListener(NewSimpleBatchBlockReceiver[mock.BlockId](receiver_session, receiver_session.Orchestrator()))
 
 	log.Debugf("created receiver_session")
 
@@ -453,17 +453,17 @@ func TestSessionQuiescence(t *testing.T) {
 	log.Debugf("created receiver_session")
 
 	blockSender := instrumented.NewBlockSender[mock.BlockId](
-		NewSimpleBatchBlockSender[mock.BlockId](&blockChannel, sender_session, 100),
+		NewSimpleBatchBlockSender[mock.BlockId](&blockChannel, sender_session.Orchestrator(), 100),
 		stats.GLOBAL_STATS.WithContext("MockBlockSender"),
 	)
 
 	statusSender := instrumented.NewStatusSender[mock.BlockId](
-		NewMockStatusSender(&statusChannel, receiver_session),
+		NewMockStatusSender(&statusChannel, receiver_session.Orchestrator()),
 		stats.GLOBAL_STATS.WithContext("MockStatusSender"),
 	)
 
-	statusChannel.SetStatusListener(NewSimpleBatchStatusReceiver[mock.BlockId](sender_session, sender_session))
-	blockChannel.SetBlockListener(NewSimpleBatchBlockReceiver[mock.BlockId](receiver_session, receiver_session))
+	statusChannel.SetStatusListener(NewSimpleBatchStatusReceiver[mock.BlockId](sender_session, sender_session.Orchestrator()))
+	blockChannel.SetBlockListener(NewSimpleBatchBlockReceiver[mock.BlockId](receiver_session, receiver_session.Orchestrator()))
 
 	log.Debugf("created receiver_session")
 
