@@ -5,9 +5,12 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/fission-codes/go-car-mirror/batch"
 	"github.com/fission-codes/go-car-mirror/core"
+	"github.com/fission-codes/go-car-mirror/core/instrumented"
 	"github.com/fission-codes/go-car-mirror/filter"
 	messages "github.com/fission-codes/go-car-mirror/messages"
+	"github.com/fission-codes/go-car-mirror/stats"
 )
 
 const CONTENT_TYPE_CBOR = "application/cbor"
@@ -79,15 +82,13 @@ func (bbs *ResponseBatchBlockSender[I, R]) Close() error {
 }
 
 type RequestStatusSender[I core.BlockId, R core.BlockIdRef[I]] struct {
-	orchestrator    core.Orchestrator[core.BatchState]
 	client          *http.Client
 	url             string
 	responseHandler core.BatchBlockReceiver[I]
 }
 
-func (ss *RequestStatusSender[I, R]) SendStatus(have filter.Filter[I], want []I) error {
+func (ss *RequestStatusSender[I, R]) SendStatus(state core.BatchState, have filter.Filter[I], want []I) error {
 	log.Debugw("enter", "object", "RequestStatusSender", "method", "SendStatus", "have", have.Count(), "want", len(want))
-	state := ss.orchestrator.State()
 	message := messages.NewStatusMessage[I, R](state, have, want)
 	reader, writer := io.Pipe()
 
@@ -131,14 +132,11 @@ func (ss *RequestStatusSender[I, R]) Close() error {
 }
 
 type ResponseStatusSender[I core.BlockId, R core.BlockIdRef[I]] struct {
-	orchestrator core.Orchestrator[core.BatchState]
-	messages     chan<- *messages.StatusMessage[I, R, core.BatchState]
+	messages chan<- *messages.StatusMessage[I, R, core.BatchState]
 }
 
-func (ss *ResponseStatusSender[I, R]) SendStatus(have filter.Filter[I], want []I) error {
+func (ss *ResponseStatusSender[I, R]) SendStatus(state core.BatchState, have filter.Filter[I], want []I) error {
 	log.Debugw("enter", "object", "ResponseStatusSender", "method", "SendStatus", "have", have.Count(), "want", len(want))
-	state := ss.orchestrator.State()
-	log.Debugw("returning message", "object", "ResponseStatusSender", "method", "SendStatus", "state", state)
 	ss.messages <- messages.NewStatusMessage[I, R](state, have, want)
 	log.Debugw("exit", "object", "ResponseStatusSender", "method", "SendStatus")
 	return nil
@@ -147,4 +145,80 @@ func (ss *ResponseStatusSender[I, R]) SendStatus(have filter.Filter[I], want []I
 func (ss *ResponseStatusSender[I, R]) Close() error {
 	//close(ss.messages)
 	return nil
+}
+
+type HttpServerSourceConnection[I core.BlockId, R core.BlockIdRef[I]] struct {
+	*batch.GenericBatchSourceConnection[I]
+	messages chan *messages.BlocksMessage[I, R, core.BatchState]
+}
+
+func NewHttpServerSourceConnection[I core.BlockId, R core.BlockIdRef[I]](stats stats.Stats, instrument instrumented.InstrumentationOptions) *HttpServerSourceConnection[I, R] {
+	return &HttpServerSourceConnection[I, R]{
+		(*batch.GenericBatchSourceConnection[I])(batch.NewGenericBatchSourceConnection[I](stats, instrument)),
+		make(chan *messages.BlocksMessage[I, R, core.BatchState]),
+	}
+}
+
+func (conn *HttpServerSourceConnection[I, R]) DeferredSender(batchSize uint32) core.BlockSender[I] {
+	return conn.Sender(&ResponseBatchBlockSender[I, R]{conn.messages}, batchSize)
+}
+
+func (conn *HttpServerSourceConnection[I, R]) PendingResponse() *messages.BlocksMessage[I, R, core.BatchState] {
+	return <-conn.messages
+}
+
+type HttpServerSinkConnection[I core.BlockId, R core.BlockIdRef[I]] struct {
+	*batch.GenericBatchSinkConnection[I]
+	messages chan *messages.StatusMessage[I, R, core.BatchState]
+}
+
+func NewHttpServerSinkConnection[I core.BlockId, R core.BlockIdRef[I]](stats stats.Stats, instrument instrumented.InstrumentationOptions) *HttpServerSinkConnection[I, R] {
+	return &HttpServerSinkConnection[I, R]{
+		(*batch.GenericBatchSinkConnection[I])(batch.NewGenericBatchSinkConnection[I](stats, instrument)),
+		make(chan *messages.StatusMessage[I, R, core.BatchState]),
+	}
+}
+
+func (conn *HttpServerSinkConnection[I, R]) DeferredSender() core.StatusSender[I] {
+	return conn.Sender(&ResponseStatusSender[I, R]{conn.messages})
+}
+
+func (conn *HttpServerSinkConnection[I, R]) PendingResponse() *messages.StatusMessage[I, R, core.BatchState] {
+	return <-conn.messages
+}
+
+type HttpClientSourceConnection[I core.BlockId, R core.BlockIdRef[I]] struct {
+	*batch.GenericBatchSourceConnection[I]
+	client *http.Client
+	url    string
+}
+
+func NewHttpClientSourceConnection[I core.BlockId, R core.BlockIdRef[I]](client *http.Client, url string, stats stats.Stats, instrument instrumented.InstrumentationOptions) *HttpClientSourceConnection[I, R] {
+	return &HttpClientSourceConnection[I, R]{
+		(*batch.GenericBatchSourceConnection[I])(batch.NewGenericBatchSourceConnection[I](stats, instrument)),
+		client,
+		url,
+	}
+}
+
+func (conn *HttpClientSourceConnection[I, R]) ImmediateSender(session *core.SourceSession[I, core.BatchState], batchSize uint32) core.BlockSender[I] {
+	return conn.Sender(&RequestBatchBlockSender[I, R]{conn.client, conn.url, conn.Receiver(session)}, batchSize)
+}
+
+type HttpClientSinkConnection[I core.BlockId, R core.BlockIdRef[I]] struct {
+	*batch.GenericBatchSinkConnection[I]
+	client *http.Client
+	url    string
+}
+
+func NewHttpClientSinkConnection[I core.BlockId, R core.BlockIdRef[I]](client *http.Client, url string, stats stats.Stats, instrument instrumented.InstrumentationOptions) *HttpClientSinkConnection[I, R] {
+	return &HttpClientSinkConnection[I, R]{
+		(*batch.GenericBatchSinkConnection[I])(batch.NewGenericBatchSinkConnection[I](stats, instrument)),
+		client,
+		url,
+	}
+}
+
+func (conn *HttpClientSinkConnection[I, R]) ImmediateSender(session *core.SinkSession[I, core.BatchState]) core.StatusSender[I] {
+	return conn.Sender(&RequestStatusSender[I, R]{conn.client, conn.url, conn.Receiver(session)})
 }

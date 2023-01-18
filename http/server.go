@@ -20,13 +20,13 @@ import (
 type SessionToken string
 
 type ServerSourceSessionData[I core.BlockId, R core.BlockIdRef[I]] struct {
-	ResponseChannel <-chan *messages.BlocksMessage[I, R, core.BatchState]
-	Session         *core.SourceSession[I, core.BatchState]
+	conn    *HttpServerSourceConnection[I, R]
+	Session *core.SourceSession[I, core.BatchState]
 }
 
 type ServerSinkSessionData[I core.BlockId, R core.BlockIdRef[I]] struct {
-	ResponseChannel <-chan *messages.StatusMessage[I, R, core.BatchState]
-	Session         *core.SinkSession[I, core.BatchState]
+	conn    *HttpServerSinkConnection[I, R]
+	Session *core.SinkSession[I, core.BatchState]
 }
 
 type Server[I core.BlockId, R core.BlockIdRef[I]] struct {
@@ -98,23 +98,14 @@ func (srv *Server[I, R]) generateToken(remoteAddr string) SessionToken {
 
 func (srv *Server[I, R]) startSourceSession(token SessionToken) *ServerSourceSessionData[I, R] {
 
-	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSourceOrchestrator()
+	source_connection := NewHttpServerSourceConnection[I, R](stats.GLOBAL_STATS.WithContext(string(token)), srv.instrumented)
 
-	newSession := instrumented.NewSourceSession[I](
+	newSession := source_connection.Session(
 		srv.store,
 		filter.NewSynchronizedFilter[I](filter.NewEmptyFilter(srv.allocator)),
-		orchestrator,
-		stats.GLOBAL_STATS.WithContext(string(token)),
-		srv.instrumented,
 	)
 
-	responseChannel := make(chan *messages.BlocksMessage[I, R, core.BatchState])
-
-	newSender := core.NewSimpleBatchBlockSender[I](
-		&ResponseBatchBlockSender[I, R]{responseChannel},
-		orchestrator,
-		srv.maxBatchSize,
-	)
+	newSender := source_connection.DeferredSender(srv.maxBatchSize)
 
 	go func() {
 		log.Debugw("starting source session", "object", "Server", "method", "startSourceSession", "token", token)
@@ -129,7 +120,7 @@ func (srv *Server[I, R]) startSourceSession(token SessionToken) *ServerSourceSes
 		log.Debugw("source session ended", "object", "Server", "method", "startSourceSession", "token", token)
 	}()
 
-	return &ServerSourceSessionData[I, R]{responseChannel, newSession}
+	return &ServerSourceSessionData[I, R]{source_connection, newSession}
 }
 
 func (srv *Server[I, R]) GetSourceSession(token SessionToken) (*ServerSourceSessionData[I, R], error) {
@@ -192,13 +183,12 @@ func (srv *Server[I, R]) HandleStatus(response http.ResponseWriter, request *htt
 	}
 
 	// Send the status message to the session
-	sourceSession.Session.HandleStatus(message.Have.Any(), message.Want)
-	sourceSession.Session.ReceiveState(message.State)
+	sourceSession.conn.Receiver(sourceSession.Session).HandleStatus(message.State, message.Have.Any(), message.Want)
 	request.Body.Close()
 
 	// Wait for a response from the session
 	log.Debugw("waiting on session", "object", "Server", "method", "HandleStatus", "session", sessionToken)
-	blocks := <-sourceSession.ResponseChannel
+	blocks := sourceSession.conn.PendingResponse()
 	log.Debugw("session returned blocks", "object", "Server", "method", "HandleStatus", "len", len(blocks.Car.Blocks))
 
 	// Write the response
@@ -213,22 +203,14 @@ func (srv *Server[I, R]) HandleStatus(response http.ResponseWriter, request *htt
 
 func (srv *Server[I, R]) startSinkSession(token SessionToken) *ServerSinkSessionData[I, R] {
 
-	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSinkOrchestrator()
+	source_connection := NewHttpServerSinkConnection[I, R](stats.GLOBAL_STATS.WithContext(string(token)), srv.instrumented)
 
-	newSession := instrumented.NewSinkSession[I](
+	newSession := source_connection.Session(
 		srv.store,
 		core.NewSimpleStatusAccumulator(srv.allocator()),
-		orchestrator,
-		stats.GLOBAL_STATS.WithContext(string(token)),
-		srv.instrumented,
 	)
 
-	responseChannel := make(chan *messages.StatusMessage[I, R, core.BatchState])
-
-	sender := &ResponseStatusSender[I, R]{
-		orchestrator,
-		responseChannel,
-	}
+	sender := source_connection.DeferredSender()
 
 	go func() {
 		err := newSession.Run(sender)
@@ -240,7 +222,7 @@ func (srv *Server[I, R]) startSinkSession(token SessionToken) *ServerSinkSession
 	}()
 
 	return &ServerSinkSessionData[I, R]{
-		responseChannel,
+		source_connection,
 		newSession,
 	}
 }
@@ -309,15 +291,14 @@ func (srv *Server[I, R]) HandleBlocks(response http.ResponseWriter, request *htt
 	log.Debugw("processed blocks", "object", "Server", "method", "HandleBlocks", "session", sessionToken, "count", len(message.Car.Blocks))
 
 	// Send the blocks to the sessions
-	receiver := core.NewSimpleBatchBlockReceiver[I](sinkSession.Session, sinkSession.Session.Orchestrator())
-	err = receiver.HandleList(message.State, message.Car.Blocks)
+	err = sinkSession.conn.Receiver(sinkSession.Session).HandleList(message.State, message.Car.Blocks)
 	if err != nil {
 		log.Errorw("could not handle block list", "object", "server", "method", "HandleBlocks", "session", sessionToken, "error", err)
 	}
 
 	// Wait for a response from the session
 	log.Debugw("waiting on session", "object", "Server", "method", "HandleBlocks", "session", sessionToken)
-	status := <-sinkSession.ResponseChannel
+	status := sinkSession.conn.PendingResponse()
 	log.Debugw("session returned status", "object", "Server", "method", "HandleBlocks", "status", status)
 
 	// Write the response
