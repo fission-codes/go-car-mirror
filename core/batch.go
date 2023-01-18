@@ -166,14 +166,14 @@ func (sbbs *SimpleBatchBlockSender[I]) Flush() error {
 }
 
 // BatchSourceOrchestrator is an orchestrator for sending batches of blocks.
-type BatchSourceOrchestrator struct {
+type BatchSourceOrchestrator[I BlockId] struct {
 	state util.SharedFlagSet[BatchState]
 	log   *zap.SugaredLogger
 }
 
 // NewBatchSourceOrchestrator creates a new BatchSourceOrchestrator.
-func NewBatchSourceOrchestrator() *BatchSourceOrchestrator {
-	return &BatchSourceOrchestrator{
+func NewBatchSourceOrchestrator[I BlockId]() *BatchSourceOrchestrator[I] {
+	return &BatchSourceOrchestrator[I]{
 		state: *util.NewSharedFlagSet(BatchState(0)),
 		log:   log.With("component", "BatchSourceOrchestrator"),
 	}
@@ -182,7 +182,7 @@ func NewBatchSourceOrchestrator() *BatchSourceOrchestrator {
 // Notify notifies the orchestrator of a session event.
 // Events lead to state transitions in the orchestrator.
 //
-func (bso *BatchSourceOrchestrator) Notify(event SessionEvent) error {
+func (bso *BatchSourceOrchestrator[I]) Notify(event SessionEvent) error {
 	switch event {
 	case BEGIN_SEND:
 		state := bso.state.WaitAny(SOURCE_PROCESSING|CANCELLED, 0)
@@ -219,18 +219,18 @@ func (bso *BatchSourceOrchestrator) Notify(event SessionEvent) error {
 }
 
 // State returns the current state of the orchestrator.
-func (bso *BatchSourceOrchestrator) State() BatchState {
+func (bso *BatchSourceOrchestrator[I]) State() BatchState {
 	return bso.state.All()
 }
 
 // ReceiveState unsets any current receiver state flags, and sets the specified state flags.
-func (bso *BatchSourceOrchestrator) ReceiveState(batchState BatchState) error {
+func (bso *BatchSourceOrchestrator[I]) ReceiveState(batchState BatchState) error {
 	bso.state.Update(SINK, batchState)
 	return nil
 }
 
 // IsClosed returns true if the sender is closed.
-func (bso *BatchSourceOrchestrator) IsClosed() bool {
+func (bso *BatchSourceOrchestrator[I]) IsClosed() bool {
 	return bso.state.Contains(SOURCE_CLOSED|SINK_CLOSED) || bso.state.Contains(CANCELLED)
 }
 

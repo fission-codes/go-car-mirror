@@ -447,11 +447,6 @@ func (ss *SinkSession[I, F]) Run(statusSender StatusSender[I]) error {
 	return nil
 }
 
-// Receive state from the remote session.
-func (ss *SinkSession[I, F]) ReceiveState(state F) error {
-	return ss.orchestrator.ReceiveState(state)
-}
-
 // Close closes the sender session.
 func (ss *SinkSession[I, F]) Close() error {
 	if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
@@ -612,11 +607,6 @@ func (ss *SourceSession[I, F]) Enqueue(id I) error {
 	ss.orchestrator.Notify(BEGIN_ENQUEUE)
 	defer ss.orchestrator.Notify(END_ENQUEUE)
 	return ss.pendingBlocks.PushBack(id)
-}
-
-// HandleState handles incoming session state.
-func (ss *SourceSession[I, F]) ReceiveState(state F) error {
-	return ss.orchestrator.ReceiveState(state)
 }
 
 // IsClosed returns true if the session is closed.
