@@ -222,13 +222,13 @@ func (ds *DefaultStatsAndReporting) WithContext(name string) Stats {
 	return &Context{
 		parent: ds,
 		name:   name,
-		logger: ds.logger,
+		logger: ds.logger.With("for", name),
 	}
 }
 
 // Logger returns a logger that adds a prefix to all events.
 func (ds *DefaultStatsAndReporting) Logger() *zap.SugaredLogger {
-	return ds.logger.With("for", ds.Name())
+	return ds.logger
 }
 
 // Name returns the name of this DefaultStatsAndReporting instance.
