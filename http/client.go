@@ -45,7 +45,7 @@ func (c *Client[I, R]) startSourceSession(url string) *core.SourceSession[I, cor
 	source_connection := NewHttpClientSourceConnection[I, R](
 		&http.Client{Jar: jar},
 		url+"/dag/cm/blocks",
-		stats.GLOBAL_STATS,
+		stats.GLOBAL_STATS.WithContext(url),
 		c.instrumented,
 	)
 
@@ -95,7 +95,7 @@ func (c *Client[I, R]) startSinkSession(url string) *core.SinkSession[I, core.Ba
 	sink_connection := NewHttpClientSinkConnection[I, R](
 		&http.Client{Jar: jar},
 		url+"/dag/cm/status",
-		stats.GLOBAL_STATS,
+		stats.GLOBAL_STATS.WithContext(url),
 		c.instrumented,
 	)
 
