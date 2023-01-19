@@ -14,6 +14,7 @@ import (
 
 	"math/rand"
 
+	"github.com/fission-codes/go-car-mirror/batch"
 	. "github.com/fission-codes/go-car-mirror/core"
 	"github.com/fission-codes/go-car-mirror/core/diagrammed"
 	instrumented "github.com/fission-codes/go-car-mirror/core/instrumented"
@@ -249,38 +250,29 @@ func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, roo
 		latency_ms,
 	}
 
-	sender_session := instrumented.NewSourceSession[mock.BlockId, BatchState](
+	source_connection := batch.NewGenericBatchSourceConnection[mock.BlockId](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE)
+
+	sender_session := source_connection.Session(
 		sender_store,
 		filter.NewSynchronizedFilter(makeBloom(1024)),
-		sourceOrchestrator,
-		stats.GLOBAL_STATS.WithContext("SourceSession"),
-		instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE,
 	)
 
 	log.Debugf("created sender_session")
 
-	receiver_session := instrumented.NewSinkSession[mock.BlockId, BatchState](
-		NewSynchronizedBlockStore[mock.BlockId](receiver_store),
+	sink_connection := batch.NewGenericBatchSinkConnection[mock.BlockId](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE)
+
+	receiver_session := sink_connection.Session(
+		NewSynchronizedBlockStore[mock.BlockId](NewSynchronizedBlockStore[mock.BlockId](receiver_store)),
 		NewSimpleStatusAccumulator[mock.BlockId](filter.NewSynchronizedFilter(makeBloom(1024))),
-		sinkOrchestrator,
-		stats.GLOBAL_STATS.WithContext("SinkSession"),
-		instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE,
 	)
 
 	log.Debugf("created receiver_session")
 
-	blockSender := instrumented.NewBlockSender[mock.BlockId](
-		NewSimpleBatchBlockSender[mock.BlockId](&blockChannel, sender_session, uint32(max_batch_size)),
-		stats.GLOBAL_STATS.WithContext("MockBlockSender"),
-	)
+	blockSender := source_connection.Sender(&blockChannel, uint32(max_batch_size))
+	statusSender := sink_connection.Sender(&statusChannel)
 
-	statusSender := instrumented.NewStatusSender[mock.BlockId](
-		NewMockStatusSender(&statusChannel, receiver_session),
-		stats.GLOBAL_STATS.WithContext("MockStatusSender"),
-	)
-
-	statusChannel.SetStatusListener(NewSimpleBatchStatusReceiver[mock.BlockId](sender_session, sender_session))
-	blockChannel.SetBlockListener(NewSimpleBatchBlockReceiver[mock.BlockId](receiver_session, receiver_session))
+	statusChannel.SetStatusListener(source_connection.Receiver(sender_session))
+	blockChannel.SetBlockListener(sink_connection.Receiver(receiver_session))
 
 	log.Debugf("created receiver_session")
 
@@ -498,38 +490,29 @@ func TestSessionQuiescence(t *testing.T) {
 	root := mock.RandId()
 	mock.NewBlock(root, 100)
 
-	sender_session := instrumented.NewSourceSession[mock.BlockId, BatchState](
+	source_connection := batch.NewGenericBatchSourceConnection[mock.BlockId](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE)
+
+	sender_session := source_connection.Session(
 		senderStore,
 		filter.NewSynchronizedFilter(makeBloom(1024)),
-		NewBatchSourceOrchestrator(),
-		stats.GLOBAL_STATS.WithContext("SourceSession"),
-		instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE,
 	)
 
 	log.Debugf("created sender_session")
 
-	receiver_session := instrumented.NewSinkSession[mock.BlockId, BatchState](
+	sink_connection := batch.NewGenericBatchSinkConnection[mock.BlockId](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE)
+
+	receiver_session := sink_connection.Session(
 		NewSynchronizedBlockStore[mock.BlockId](receiverStore),
 		NewSimpleStatusAccumulator[mock.BlockId](filter.NewSynchronizedFilter(makeBloom(1024))),
-		NewBatchSinkOrchestrator(),
-		stats.GLOBAL_STATS.WithContext("SourceSession"),
-		instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE,
 	)
 
 	log.Debugf("created receiver_session")
 
-	blockSender := instrumented.NewBlockSender[mock.BlockId](
-		NewSimpleBatchBlockSender[mock.BlockId](&blockChannel, sender_session, 100),
-		stats.GLOBAL_STATS.WithContext("MockBlockSender"),
-	)
+	blockSender := source_connection.Sender(&blockChannel, 100)
+	statusSender := sink_connection.Sender(&statusChannel)
 
-	statusSender := instrumented.NewStatusSender[mock.BlockId](
-		NewMockStatusSender(&statusChannel, receiver_session),
-		stats.GLOBAL_STATS.WithContext("MockStatusSender"),
-	)
-
-	statusChannel.SetStatusListener(NewSimpleBatchStatusReceiver[mock.BlockId](sender_session, sender_session))
-	blockChannel.SetBlockListener(NewSimpleBatchBlockReceiver[mock.BlockId](receiver_session, receiver_session))
+	statusChannel.SetStatusListener(source_connection.Receiver(sender_session))
+	blockChannel.SetBlockListener(sink_connection.Receiver(receiver_session))
 
 	log.Debugf("created receiver_session")
 

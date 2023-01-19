@@ -262,19 +262,16 @@ const (
 	INSTRUMENT_STORE InstrumentationOptions = 1 << iota
 	INSTRUMENT_ORCHESTRATOR
 	INSTRUMENT_FILTER
+	INSTRUMENT_SENDER
 )
 
 func NewSourceSession[I core.BlockId, F core.Flags](store core.BlockStore[I], filter filter.Filter[I], orchestrator core.Orchestrator[F], stats stats.Stats, options InstrumentationOptions) *core.SourceSession[I, F] {
 
-	if options&INSTRUMENT_STORE > 0 {
+	if options&INSTRUMENT_STORE != 0 {
 		store = NewBlockStore(store, stats.WithContext("SourceStore"))
 	}
 
-	if options&INSTRUMENT_ORCHESTRATOR > 0 {
-		orchestrator = NewOrchestrator(orchestrator, stats.WithContext("SourceOrchestrator"))
-	}
-
-	if options&INSTRUMENT_FILTER > 0 {
+	if options&INSTRUMENT_FILTER != 0 {
 		filter = inf.New(filter, stats.WithContext("SourceFilter"))
 	}
 
@@ -293,8 +290,5 @@ func NewSinkSession[I core.BlockId, F core.Flags](
 		store = NewBlockStore(store, stats.WithContext("SinkStore"))
 	}
 
-	if options&INSTRUMENT_ORCHESTRATOR > 0 {
-		orchestrator = NewOrchestrator(orchestrator, stats.WithContext("SinkOrchestrator"))
-	}
 	return core.NewSinkSession(store, statusAccumulator, orchestrator, stats)
 }

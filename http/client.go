@@ -37,28 +37,24 @@ func NewClient[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], c
 
 func (c *Client[I, R]) startSourceSession(url string) *core.SourceSession[I, core.BatchState] {
 
-	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSourceOrchestrator()
-
-	newSession := instrumented.NewSourceSession[I](
-		c.store,
-		filter.NewSynchronizedFilter[I](filter.NewEmptyFilter(c.allocator)),
-		orchestrator,
-		stats.GLOBAL_STATS.WithContext(url),
-		c.instrumented,
-	)
-
 	jar, err := cookiejar.New(&cookiejar.Options{}) // TODO: set public suffix list
 	if err != nil {
 		panic(err)
 	}
 
-	newReceiver := core.NewSimpleBatchStatusReceiver[I](newSession, newSession)
-
-	newSender := core.NewSimpleBatchBlockSender[I](
-		&RequestBatchBlockSender[I, R]{&http.Client{Jar: jar}, url + "/dag/cm/blocks", newReceiver},
-		newSession,
-		c.maxBatchSize,
+	source_connection := NewHttpClientSourceConnection[I, R](
+		&http.Client{Jar: jar},
+		url+"/dag/cm/blocks",
+		stats.GLOBAL_STATS.WithContext(url),
+		c.instrumented,
 	)
+
+	newSession := source_connection.Session(
+		c.store,
+		filter.NewSynchronizedFilter[I](filter.NewEmptyFilter(c.allocator)),
+	)
+
+	newSender := source_connection.ImmediateSender(newSession, c.maxBatchSize)
 
 	go func() {
 		log.Debugw("starting source session", "object", "Client", "method", "startSourceSession", "url", url)
@@ -91,25 +87,24 @@ func (c *Client[I, R]) GetSourceSession(url string) (*core.SourceSession[I, core
 
 func (c *Client[I, R]) startSinkSession(url string) *core.SinkSession[I, core.BatchState] {
 
-	newSession := instrumented.NewSinkSession[I, core.BatchState](
-		c.store,
-		core.NewSimpleStatusAccumulator(c.allocator()),
-		core.NewBatchSinkOrchestrator(),
-		stats.GLOBAL_STATS.WithContext(url),
-		c.instrumented,
-	)
-
 	jar, err := cookiejar.New(&cookiejar.Options{}) // TODO: set public suffix list
 	if err != nil {
 		panic(err)
 	}
 
-	sender := &RequestStatusSender[I, R]{
-		newSession,
-		&http.Client{Jar: jar}, //binks
-		url + "/dag/cm/status",
-		core.NewSimpleBatchBlockReceiver[I](newSession, newSession),
-	}
+	sink_connection := NewHttpClientSinkConnection[I, R](
+		&http.Client{Jar: jar},
+		url+"/dag/cm/status",
+		stats.GLOBAL_STATS.WithContext(url),
+		c.instrumented,
+	)
+
+	newSession := sink_connection.Session(
+		c.store,
+		core.NewSimpleStatusAccumulator(c.allocator()),
+	)
+
+	sender := sink_connection.ImmediateSender(newSession)
 
 	go func() {
 		log.Debugw("starting sink session", "object", "Client", "method", "startSinkSession", "url", url)

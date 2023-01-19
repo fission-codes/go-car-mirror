@@ -342,13 +342,8 @@ func NewSinkSession[I BlockId, F Flags](
 }
 
 // Get the current state from this session
-func (ss *SinkSession[I, F]) State() F {
-	return ss.orchestrator.State()
-}
-
-// Notify the session of some event which may change state
-func (ss *SinkSession[I, F]) Notify(event SessionEvent) error {
-	return ss.orchestrator.Notify(event)
+func (ss *SinkSession[I, F]) Orchestrator() Orchestrator[F] {
+	return ss.orchestrator
 }
 
 // Get information about this session
@@ -452,11 +447,6 @@ func (ss *SinkSession[I, F]) Run(statusSender StatusSender[I]) error {
 	return nil
 }
 
-// Receive state from the remote session.
-func (ss *SinkSession[I, F]) ReceiveState(state F) error {
-	return ss.orchestrator.ReceiveState(state)
-}
-
 // Close closes the sender session.
 func (ss *SinkSession[I, F]) Close() error {
 	if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
@@ -514,13 +504,8 @@ func NewSourceSession[I BlockId, F Flags](store BlockStore[I], filter filter.Fil
 }
 
 // Retrieve the current session state
-func (ss *SourceSession[I, F]) State() F {
-	return ss.orchestrator.State()
-}
-
-// Notify the session of some event which may change state
-func (ss *SourceSession[I, F]) Notify(event SessionEvent) error {
-	return ss.orchestrator.Notify(event)
+func (ss *SourceSession[I, F]) Orchestrator() Orchestrator[F] {
+	return ss.orchestrator
 }
 
 // Retrieve information about this session
@@ -622,11 +607,6 @@ func (ss *SourceSession[I, F]) Enqueue(id I) error {
 	ss.orchestrator.Notify(BEGIN_ENQUEUE)
 	defer ss.orchestrator.Notify(END_ENQUEUE)
 	return ss.pendingBlocks.PushBack(id)
-}
-
-// HandleState handles incoming session state.
-func (ss *SourceSession[I, F]) ReceiveState(state F) error {
-	return ss.orchestrator.ReceiveState(state)
 }
 
 // IsClosed returns true if the session is closed.
