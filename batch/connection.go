@@ -54,7 +54,7 @@ func (conn *GenericBatchSourceConnection[I]) Session(store core.BlockStore[I], f
 
 func NewGenericBatchSourceConnection[I core.BlockId](stats stats.Stats, instrument instrumented.InstrumentationOptions) *GenericBatchSourceConnection[I] {
 
-	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSourceOrchestrator[I]()
+	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSourceOrchestrator()
 
 	if instrument&instrumented.INSTRUMENT_ORCHESTRATOR != 0 {
 		orchestrator = instrumented.NewOrchestrator(orchestrator, stats.WithContext("SourceOrchestrator"))
@@ -91,7 +91,7 @@ func (conn *GenericBatchSinkConnection[I]) Session(store core.BlockStore[I], acc
 
 func NewGenericBatchSinkConnection[I core.BlockId](stats stats.Stats, instrument instrumented.InstrumentationOptions) *GenericBatchSinkConnection[I] {
 
-	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSourceOrchestrator[I]()
+	var orchestrator core.Orchestrator[core.BatchState] = core.NewBatchSourceOrchestrator()
 
 	if instrument&instrumented.INSTRUMENT_ORCHESTRATOR != 0 {
 		orchestrator = instrumented.NewOrchestrator(orchestrator, stats.WithContext("SinkOrchestrator"))
