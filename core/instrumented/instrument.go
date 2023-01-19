@@ -290,8 +290,5 @@ func NewSinkSession[I core.BlockId, F core.Flags](
 		store = NewBlockStore(store, stats.WithContext("SinkStore"))
 	}
 
-	if options&INSTRUMENT_ORCHESTRATOR > 0 {
-		orchestrator = NewOrchestrator(orchestrator, stats.WithContext("SinkOrchestrator"))
-	}
 	return core.NewSinkSession(store, statusAccumulator, orchestrator, stats)
 }
