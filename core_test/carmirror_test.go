@@ -4,11 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
-	"io"
 	"os"
-	"path"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -16,9 +12,7 @@ import (
 
 	"github.com/fission-codes/go-car-mirror/batch"
 	. "github.com/fission-codes/go-car-mirror/core"
-	"github.com/fission-codes/go-car-mirror/core/diagrammed"
 	instrumented "github.com/fission-codes/go-car-mirror/core/instrumented"
-	"github.com/fission-codes/go-car-mirror/diagrammer"
 	"github.com/fission-codes/go-car-mirror/filter"
 	mock "github.com/fission-codes/go-car-mirror/fixtures"
 	"github.com/fission-codes/go-car-mirror/messages"
@@ -32,8 +26,6 @@ var log = golog.Logger("go-car-mirror")
 const TYPICAL_LATENCY = 20
 const GBIT_SECOND = (1 << 30) / 8 / 1000 // Gigabit per second -> to bytes per second -> to bytes per millisecond
 
-var testdataDir string = "../testdata"
-var stateDiagramsDir string = filepath.Join(testdataDir, "state-diagrams")
 var blockStoreConfig mock.Config = mock.Config{
 	ReadStorageLatency:   time.Microsecond * 250,
 	WriteStorageLatency:  time.Microsecond * 250,
@@ -45,42 +37,9 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 
 	stats.InitDefault()
-
-	// Remove the state diagram file
-	os.RemoveAll(stateDiagramsDir)
-	os.MkdirAll(stateDiagramsDir, 0755)
 }
 
 var ErrReceiverNotSet error = errors.New("receiver not set")
-
-func NewTestBatchSinkOrchestrator(diagrammers ...*diagrammer.StateDiagrammer) Orchestrator[BatchState] {
-	if len(diagrammers) == 1 {
-		return diagrammed.NewDiagrammedBatchSinkOrchestrator(NewBatchSinkOrchestrator(), diagrammers[0])
-	} else if len(diagrammers) > 1 {
-		panic("too many diagrammers")
-	}
-	return NewBatchSinkOrchestrator()
-}
-
-func NewTestBatchSourceOrchestrator(diagrammers ...*diagrammer.StateDiagrammer) Orchestrator[BatchState] {
-	if len(diagrammers) == 1 {
-		return diagrammed.NewDiagrammedBatchSourceOrchestrator(NewBatchSourceOrchestrator(), diagrammers[0])
-	} else if len(diagrammers) > 1 {
-		panic("too many diagrammers")
-	}
-	return NewBatchSourceOrchestrator()
-}
-
-func diagramWriterForTest(t *testing.T) io.WriteCloser {
-	fileName := fmt.Sprintf("%s.md", t.Name())
-	stateDiagramFileName := path.Join(stateDiagramsDir, fileName)
-	stateDiagramsFile, err := os.OpenFile(stateDiagramFileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	fmt.Fprintf(stateDiagramsFile, "### %s\n\n", t.Name())
-	if err != nil {
-		t.Errorf("Failed to open state diagram file: %s", err)
-	}
-	return stateDiagramsFile
-}
 
 func TestAntiEvergreen(t *testing.T) {
 	senderStore := mock.NewStore(mock.DefaultConfig())
@@ -338,16 +297,8 @@ func TestMockTransferToEmptyStoreSingleBatchNoDelay(t *testing.T) {
 	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
 	receiverStore := mock.NewStore(mock.DefaultConfig())
 
-	// Set up diagrammers
-	w := diagramWriterForTest(t)
-	defer w.Close()
-	sourceDiagrammer := diagrammer.NewStateDiagrammer("BatchSourceOrchestrator", w)
-	defer sourceDiagrammer.Close()
-	sinkDiagrammer := diagrammer.NewStateDiagrammer("BatchSinkOrchestrator", w)
-	defer sinkDiagrammer.Close()
-
-	sourceOrchestrator := NewTestBatchSourceOrchestrator(sourceDiagrammer)
-	sinkOrchestrator := NewTestBatchSinkOrchestrator(sinkDiagrammer)
+	sourceOrchestrator := NewBatchSourceOrchestrator()
+	sinkOrchestrator := NewBatchSinkOrchestrator()
 	MockBatchTransfer(senderStore, receiverStore, root, sourceOrchestrator, sinkOrchestrator, 5000, 0, 0)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
@@ -360,8 +311,8 @@ func TestMockTransferToEmptyStoreSingleBatch(t *testing.T) {
 	receiverStore := mock.NewStore(mock.DefaultConfig())
 	receiverStore.Reconfigure(blockStoreConfig)
 	senderStore.Reconfigure(blockStoreConfig)
-	sourceOrchestrator := NewTestBatchSourceOrchestrator()
-	sinkOrchestrator := NewTestBatchSinkOrchestrator()
+	sourceOrchestrator := NewBatchSourceOrchestrator()
+	sinkOrchestrator := NewBatchSinkOrchestrator()
 	MockBatchTransfer(senderStore, receiverStore, root, sourceOrchestrator, sinkOrchestrator, 5000, GBIT_SECOND, TYPICAL_LATENCY)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
@@ -372,8 +323,8 @@ func TestMockTransferToEmptyStoreMultiBatchNoDelay(t *testing.T) {
 	senderStore := mock.NewStore(mock.DefaultConfig())
 	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
 	receiverStore := mock.NewStore(mock.DefaultConfig())
-	sourceOrchestrator := NewTestBatchSourceOrchestrator()
-	sinkOrchestrator := NewTestBatchSinkOrchestrator()
+	sourceOrchestrator := NewBatchSourceOrchestrator()
+	sinkOrchestrator := NewBatchSinkOrchestrator()
 	MockBatchTransfer(senderStore, receiverStore, root, sourceOrchestrator, sinkOrchestrator, 50, 0, 0)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
@@ -386,8 +337,8 @@ func TestMockTransferToEmptyStoreMultiBatch(t *testing.T) {
 	receiverStore := mock.NewStore(mock.DefaultConfig())
 	receiverStore.Reconfigure(blockStoreConfig)
 	senderStore.Reconfigure(blockStoreConfig)
-	sourceOrchestrator := NewTestBatchSourceOrchestrator()
-	sinkOrchestrator := NewTestBatchSinkOrchestrator()
+	sourceOrchestrator := NewBatchSourceOrchestrator()
+	sinkOrchestrator := NewBatchSinkOrchestrator()
 	MockBatchTransfer(senderStore, receiverStore, root, sourceOrchestrator, sinkOrchestrator, 50, GBIT_SECOND, TYPICAL_LATENCY)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
@@ -404,8 +355,8 @@ func TestMockTransferSingleMissingBlockBatchNoDelay(t *testing.T) {
 		t.Errorf("Could not find random block %v", err)
 	}
 	receiverStore.Remove(block.Id())
-	sourceOrchestrator := NewTestBatchSourceOrchestrator()
-	sinkOrchestrator := NewTestBatchSinkOrchestrator()
+	sourceOrchestrator := NewBatchSourceOrchestrator()
+	sinkOrchestrator := NewBatchSinkOrchestrator()
 	MockBatchTransfer(senderStore, receiverStore, root, sourceOrchestrator, sinkOrchestrator, 10, 0, 0)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
@@ -424,8 +375,8 @@ func TestMockTransferSingleMissingBlockBatch(t *testing.T) {
 	receiverStore.Remove(block.Id())
 	receiverStore.Reconfigure(blockStoreConfig)
 	senderStore.Reconfigure(blockStoreConfig)
-	sourceOrchestrator := NewTestBatchSourceOrchestrator()
-	sinkOrchestrator := NewTestBatchSinkOrchestrator()
+	sourceOrchestrator := NewBatchSourceOrchestrator()
+	sinkOrchestrator := NewBatchSinkOrchestrator()
 	MockBatchTransfer(senderStore, receiverStore, root, sourceOrchestrator, sinkOrchestrator, 10, GBIT_SECOND, TYPICAL_LATENCY)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
@@ -438,8 +389,8 @@ func TestMockTransferSingleMissingTreeBlockBatchNoDelay(t *testing.T) {
 	receiverStore := mock.NewStore(mock.DefaultConfig())
 	receiverStore.AddAll(context.Background(), senderStore)
 	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.1)
-	sourceOrchestrator := NewTestBatchSourceOrchestrator()
-	sinkOrchestrator := NewTestBatchSinkOrchestrator()
+	sourceOrchestrator := NewBatchSourceOrchestrator()
+	sinkOrchestrator := NewBatchSinkOrchestrator()
 	MockBatchTransfer(senderStore, receiverStore, root, sourceOrchestrator, sinkOrchestrator, 50, 0, 0)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
@@ -455,8 +406,8 @@ func TestMockTransferSingleMissingTreeBlockBatch(t *testing.T) {
 	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.1)
 	receiverStore.Reconfigure(blockStoreConfig)
 	senderStore.Reconfigure(blockStoreConfig)
-	sourceOrchestrator := NewTestBatchSourceOrchestrator()
-	sinkOrchestrator := NewTestBatchSinkOrchestrator()
+	sourceOrchestrator := NewBatchSourceOrchestrator()
+	sinkOrchestrator := NewBatchSinkOrchestrator()
 	MockBatchTransfer(senderStore, receiverStore, root, sourceOrchestrator, sinkOrchestrator, 50, GBIT_SECOND, TYPICAL_LATENCY)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")

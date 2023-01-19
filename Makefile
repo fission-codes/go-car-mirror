@@ -6,20 +6,15 @@ all: build test
 
 clean:
 	go clean ./...
-	rm -rf testdata
-	rm -rf core/diagrammed/
 
-generate:
-	go generate ./...
-
-build: generate
+build:
 	go build ./...
 
-test: generate
+test:
 	go test -count=1 ./...
 	./fuzz.sh
 
-test-v: generate
+test-v:
 	GOLOG_LOG_LEVEL=debug go test -count=1 -v ./...
 	GOLOG_LOG_LEVEL=debug ./fuzz.sh
 
