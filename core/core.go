@@ -541,6 +541,7 @@ func (ss *SourceSession[I, F]) Run(blockSender BlockSender[I]) error {
 						return err
 					}
 				} else {
+					ss.orchestrator.Notify(BEGIN_SEND)
 					if err := blockSender.SendBlock(block); err != nil {
 						return err
 					}
@@ -551,6 +552,7 @@ func (ss *SourceSession[I, F]) Run(blockSender BlockSender[I]) error {
 							}
 						}
 					}
+					ss.orchestrator.Notify(END_SEND)
 				}
 			}
 		} else {

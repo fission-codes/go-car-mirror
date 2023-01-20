@@ -24,10 +24,11 @@ const (
 	SOURCE_PROCESSING // Source is processing a batch of blocks
 	SOURCE_FLUSHING   // Source is flushing blocks
 	SOURCE_WAITING    // Source is waiting for a status message
+	SOURCE_SENDING    // Source has unflushed blocks
 	SOURCE_CLOSING
 	SOURCE_CLOSED
 	CANCELLED
-	SINK   = CANCELLED | SINK_CLOSING | SINK_PROCESSING | SINK_CLOSED | SINK_SENDING | SINK_ENQUEUING | SINK_WAITING
+	SINK   = CANCELLED | SINK_CLOSING | SINK_PROCESSING | SINK_CLOSED | SINK_SENDING | SINK_ENQUEUING | SINK_WAITING | SOURCE_SENDING
 	SOURCE = CANCELLED | SOURCE_PROCESSING | SOURCE_FLUSHING | SOURCE_WAITING | SOURCE_CLOSING | SOURCE_CLOSED
 )
 
@@ -197,7 +198,7 @@ func (bso *BatchSourceOrchestrator) Notify(event SessionEvent) error {
 	case BEGIN_FLUSH:
 		bso.state.Update(SOURCE_PROCESSING, SOURCE_FLUSHING)
 	case END_FLUSH:
-		bso.state.Update(SOURCE_FLUSHING, SOURCE_WAITING)
+		bso.state.Update(SOURCE_FLUSHING|SOURCE_SENDING, SOURCE_WAITING)
 	case BEGIN_DRAINING:
 		if bso.state.ContainsAny(SINK_CLOSING | SOURCE_CLOSING) {
 			bso.state.Set(SOURCE_CLOSED)
@@ -213,6 +214,8 @@ func (bso *BatchSourceOrchestrator) Notify(event SessionEvent) error {
 		bso.state.Update(SOURCE, SOURCE_CLOSED)
 	case CANCEL:
 		bso.state.Update(SOURCE, CANCELLED)
+	case BEGIN_SEND:
+		bso.state.Set(SOURCE_SENDING)
 	}
 
 	return nil
