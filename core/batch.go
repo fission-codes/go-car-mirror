@@ -197,7 +197,7 @@ func NewBatchSourceOrchestrator() *BatchSourceOrchestrator {
 func (bso *BatchSourceOrchestrator) Notify(event SessionEvent) error {
 	switch event {
 	case BEGIN_PROCESSING:
-		state := bso.state.WaitAny(SOURCE_PROCESSING|CANCELLED, 0)
+		state := bso.state.WaitAny(SOURCE_PROCESSING|CANCELLED|SOURCE_CLOSED, 0)
 		if state&CANCELLED != 0 {
 			bso.log.Errorf("Orchestrator waiting for SOURCE_PROCESSING when CANCELLED seen")
 			return errors.ErrStateError
@@ -205,7 +205,11 @@ func (bso *BatchSourceOrchestrator) Notify(event SessionEvent) error {
 	case END_RECEIVE:
 		bso.state.Update(SOURCE_WAITING, SOURCE_PROCESSING)
 	case BEGIN_CLOSE:
-		bso.state.Set(SOURCE_CLOSING)
+		if bso.state.Contains(SOURCE_WAITING) {
+			bso.state.Update(SOURCE_WAITING, SOURCE_CLOSED)
+		} else {
+			bso.state.Set(SOURCE_CLOSING)
+		}
 	case BEGIN_FLUSH:
 		bso.state.Update(SOURCE_PROCESSING, SOURCE_FLUSHING)
 	case END_FLUSH:
