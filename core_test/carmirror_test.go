@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
@@ -416,10 +415,6 @@ func TestMockTransferSingleMissingTreeDelayed(t *testing.T) {
 }
 
 func TestSessionQuiescence(t *testing.T) {
-	if os.Getenv("CM_TEST_QUIESCENCE") == "" {
-		t.Skip("skipping quiescence test")
-	}
-
 	snapshotBefore := stats.GLOBAL_REPORTING.Snapshot()
 
 	blockChannel := BlockChannel{
@@ -439,9 +434,9 @@ func TestSessionQuiescence(t *testing.T) {
 	senderStore := mock.NewStore(mock.DefaultConfig())
 	receiverStore := mock.NewStore(mock.DefaultConfig())
 	root := mock.RandId()
-	mock.NewBlock(root, 100)
+	senderStore.Add(context.Background(), mock.NewBlock(root, 100))
 
-	source_connection := batch.NewGenericBatchSourceConnection[mock.BlockId](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE)
+	source_connection := batch.NewGenericBatchSourceConnection[mock.BlockId](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE|instrumented.INSTRUMENT_SENDER)
 
 	sender_session := source_connection.Session(
 		senderStore,
@@ -500,7 +495,7 @@ func TestSessionQuiescence(t *testing.T) {
 
 	go func() {
 		log.Debugf("close timeout started")
-		time.Sleep(10 * time.Second)
+		time.Sleep(5 * time.Second)
 		log.Debugf("close timeout elapsed")
 		err_chan <- sender_session.Close()
 	}()
@@ -520,8 +515,8 @@ func TestSessionQuiescence(t *testing.T) {
 	diff := snapshotBefore.Diff(snapshotAfter)
 	diff.Write(&log.SugaredLogger)
 
-	numberOfRounds := diff.Count("MockBlockSender.Flush.Ok")
-	if numberOfRounds > 2 { // One round to exchange data, one round to close session
-		t.Errorf("Expected 2 rounds, actual count %v", numberOfRounds)
+	numberOfRounds := diff.Count("BlockSender.Flush.Ok")
+	if numberOfRounds > 3 { // One round to exchange data, one as transfer completes, one round to close session
+		t.Errorf("Expected 3 rounds, actual count %v", numberOfRounds)
 	}
 }
