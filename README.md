@@ -1,4 +1,4 @@
-<img src="https://raw.githubusercontent.com/fission-codes/go-car-mirror/main/assets/logo.png" alt="go-car-mirror Logo" height="300"></img>
+<img src="https://raw.githubusercontent.com/fission-codes/go-car-mirror/main/assets/mascot.png" alt="go-car-mirror mascot" height="300"></img>
 
 # go-car-mirror
 
