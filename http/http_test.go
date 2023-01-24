@@ -117,7 +117,7 @@ func TestClientReceive(t *testing.T) {
 	info, err := client.SinkInfo("http://localhost:8021")
 	for err == nil {
 		log.Debugf("client info: %s", info.String())
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(1000 * time.Millisecond)
 		info, err = client.SinkInfo("http://localhost:8021")
 	}
 
@@ -138,6 +138,5 @@ func TestClientReceive(t *testing.T) {
 	if !clientStore.HasAll(rootId) {
 		t.Errorf("Expected client store to have all children of %v", rootId)
 		clientStore.Dump(rootId, &log.SugaredLogger, "")
-
 	}
 }

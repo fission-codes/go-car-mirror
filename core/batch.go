@@ -15,26 +15,28 @@ type BatchState uint32
 
 // Named constants for BatchState flags.
 const (
-	SINK_CLOSING BatchState = 1 << iota
+	CLOSING BatchState = 1 << iota
 	SINK_CLOSED
 	SINK_PROCESSING   // Sink is processing a batch of blocks
-	SINK_SENDING      // Sink is in the process of sending a status message
+	SINK_FLUSHING     // Sink is in the process of sending a status message
 	SINK_WAITING      // Sink is waiting for a batch of blocks
 	SINK_ENQUEUING    // Sink is processing a block id that has been explicitly requested
+	SINK_SENDING      // Sink may have status pending flush
 	SOURCE_PROCESSING // Source is processing a batch of blocks
 	SOURCE_FLUSHING   // Source is flushing blocks
 	SOURCE_WAITING    // Source is waiting for a status message
+	SOURCE_SENDING    // Source has unflushed blocks
 	SOURCE_CLOSING
 	SOURCE_CLOSED
 	CANCELLED
-	SINK   = CANCELLED | SINK_CLOSING | SINK_PROCESSING | SINK_CLOSED | SINK_SENDING | SINK_ENQUEUING | SINK_WAITING
-	SOURCE = CANCELLED | SOURCE_PROCESSING | SOURCE_FLUSHING | SOURCE_WAITING | SOURCE_CLOSING | SOURCE_CLOSED
+	SINK   = CLOSING | CANCELLED | SINK_PROCESSING | SINK_FLUSHING | SINK_WAITING | SINK_CLOSED | SINK_SENDING | SINK_ENQUEUING
+	SOURCE = CLOSING | CANCELLED | SOURCE_PROCESSING | SOURCE_FLUSHING | SOURCE_WAITING | SOURCE_CLOSING | SOURCE_CLOSED | SOURCE_SENDING
 )
 
 // Strings returns a slice of strings describing the given BatchState.
 func (bs BatchState) Strings() []string {
 	var strings []string
-	if bs&SINK_CLOSING != 0 {
+	if bs&CLOSING != 0 {
 		strings = append(strings, "SINK_CLOSING")
 	}
 	if bs&SINK_CLOSED != 0 {
@@ -42,6 +44,9 @@ func (bs BatchState) Strings() []string {
 	}
 	if bs&SINK_PROCESSING != 0 {
 		strings = append(strings, "SINK_PROCESSING")
+	}
+	if bs&SINK_FLUSHING != 0 {
+		strings = append(strings, "SINK_FLUSHING")
 	}
 	if bs&SINK_SENDING != 0 {
 		strings = append(strings, "SINK_SENDING")
@@ -60,6 +65,15 @@ func (bs BatchState) Strings() []string {
 	}
 	if bs&SOURCE_CLOSED != 0 {
 		strings = append(strings, "SOURCE_CLOSED")
+	}
+	if bs&SOURCE_SENDING != 0 {
+		strings = append(strings, "SOURCE_SENDING")
+	}
+	if bs&SOURCE_WAITING != 0 {
+		strings = append(strings, "SOURCE_WAITING")
+	}
+	if bs&SOURCE_FLUSHING != 0 {
+		strings = append(strings, "SOURCE_FLUSHING")
 	}
 	if bs&CANCELLED != 0 {
 		strings = append(strings, "CANCELLED")
@@ -108,7 +122,9 @@ func (sbbr *SimpleBatchBlockReceiver[I]) HandleList(state BatchState, list []Raw
 	for _, block := range list {
 		sbbr.session.HandleBlock(block)
 	}
-	sbbr.orchestrator.ReceiveState(state)
+	if state&CLOSING != 0 {
+		sbbr.orchestrator.Notify(BEGIN_CLOSE)
+	}
 	return nil
 }
 
@@ -155,13 +171,15 @@ func (sbbs *SimpleBatchBlockSender[I]) Flush() error {
 	defer sbbs.orchestrator.Notify(END_FLUSH)
 
 	batchState := sbbs.orchestrator.State()
-	sbbs.listMutex.Lock()
-	defer sbbs.listMutex.Unlock()
-	if err := sbbs.batchBlockSender.SendList(batchState&SOURCE, sbbs.list); err != nil {
-		return err
+	// Only actually send a list if we have data OR we are closed, so we would like to communicate this state to the sink
+	if batchState&(SOURCE_SENDING|SOURCE_CLOSED) != 0 {
+		sbbs.listMutex.Lock()
+		defer sbbs.listMutex.Unlock()
+		if err := sbbs.batchBlockSender.SendList(batchState&SOURCE, sbbs.list); err != nil {
+			return err
+		}
+		sbbs.list = sbbs.list[:0]
 	}
-	sbbs.list = sbbs.list[:0]
-
 	return nil
 }
 
@@ -184,8 +202,8 @@ func NewBatchSourceOrchestrator() *BatchSourceOrchestrator {
 //
 func (bso *BatchSourceOrchestrator) Notify(event SessionEvent) error {
 	switch event {
-	case BEGIN_SEND:
-		state := bso.state.WaitAny(SOURCE_PROCESSING|CANCELLED, 0)
+	case BEGIN_PROCESSING:
+		state := bso.state.WaitAny(SOURCE_PROCESSING|CANCELLED|SOURCE_CLOSED, 0)
 		if state&CANCELLED != 0 {
 			bso.log.Errorf("Orchestrator waiting for SOURCE_PROCESSING when CANCELLED seen")
 			return errors.ErrStateError
@@ -193,13 +211,18 @@ func (bso *BatchSourceOrchestrator) Notify(event SessionEvent) error {
 	case END_RECEIVE:
 		bso.state.Update(SOURCE_WAITING, SOURCE_PROCESSING)
 	case BEGIN_CLOSE:
-		bso.state.Set(SOURCE_CLOSING)
+		if bso.state.Contains(SOURCE_WAITING) {
+			bso.state.Update(SOURCE_WAITING, SOURCE_CLOSED)
+		} else {
+			bso.state.Set(SOURCE_CLOSING)
+		}
 	case BEGIN_FLUSH:
 		bso.state.Update(SOURCE_PROCESSING, SOURCE_FLUSHING)
 	case END_FLUSH:
-		bso.state.Update(SOURCE_FLUSHING, SOURCE_WAITING)
+		bso.state.Update(SOURCE_FLUSHING|SOURCE_SENDING, SOURCE_WAITING)
 	case BEGIN_DRAINING:
-		if bso.state.ContainsAny(SINK_CLOSING | SOURCE_CLOSING) {
+		// If we are draining (the queue is empty) and we have no pending blocks to send, we can close
+		if bso.state.ContainsExact(SOURCE_CLOSING|SOURCE_SENDING, SOURCE_CLOSING) {
 			bso.state.Set(SOURCE_CLOSED)
 		}
 	case END_ENQUEUE:
@@ -213,6 +236,8 @@ func (bso *BatchSourceOrchestrator) Notify(event SessionEvent) error {
 		bso.state.Update(SOURCE, SOURCE_CLOSED)
 	case CANCEL:
 		bso.state.Update(SOURCE, CANCELLED)
+	case BEGIN_SEND:
+		bso.state.Set(SOURCE_SENDING)
 	}
 
 	return nil
@@ -223,15 +248,9 @@ func (bso *BatchSourceOrchestrator) State() BatchState {
 	return bso.state.All()
 }
 
-// ReceiveState unsets any current receiver state flags, and sets the specified state flags.
-func (bso *BatchSourceOrchestrator) ReceiveState(batchState BatchState) error {
-	bso.state.Update(SINK, batchState)
-	return nil
-}
-
 // IsClosed returns true if the sender is closed.
 func (bso *BatchSourceOrchestrator) IsClosed() bool {
-	return bso.state.Contains(SOURCE_CLOSED|SINK_CLOSED) || bso.state.Contains(CANCELLED)
+	return bso.state.ContainsAny(SOURCE_CLOSED | CANCELLED)
 }
 
 // BatchSinkOrchestrator is an orchestrator for receiving batches of blocks.
@@ -255,37 +274,43 @@ func (bro *BatchSinkOrchestrator) Notify(event SessionEvent) error {
 	case END_SESSION:
 		bro.state.Set(SINK_CLOSED)
 	case BEGIN_CLOSE:
-		bro.state.Set(SINK_CLOSING)
-	case BEGIN_CHECK:
+		bro.state.Set(CLOSING)
+	case BEGIN_PROCESSING:
 		state := bro.state.WaitAny(SINK_PROCESSING|CANCELLED, 0) // waits for either flag to be set
 		if state&CANCELLED != 0 {
 			bro.log.Errorf("Orchestrator waiting for SINK_PROCESSING when CANCELLED seen")
 			return errors.ErrStateError
 		}
-	case BEGIN_SEND:
-		bro.state.WaitExact(SINK_ENQUEUING, 0) // Can't send while enqueuing
-		bro.state.Update(SINK_PROCESSING, SINK_SENDING)
-		if bro.state.Contains(SOURCE_CLOSED) {
+	case BEGIN_DRAINING:
+		bro.state.WaitExact(SINK_ENQUEUING, 0) // Can't flush while enqueuing
+		bro.state.Update(SINK_PROCESSING, SINK_FLUSHING)
+		// If we are draining (the queue is empty) and we have no pending status to send, we can close
+		if bro.state.ContainsExact(CLOSING|SINK_SENDING, CLOSING) {
 			bro.state.Set(SINK_CLOSED)
 		}
+		//if bro.state.Contains(SOURCE_CLOSED) {
+		//	bro.state.Set(SINK_CLOSED)
+		//}
+	case END_DRAINING:
+		bro.state.Update(SINK_FLUSHING|SINK_SENDING, SINK_WAITING)
 	case END_BATCH:
 		bro.state.Update(SINK_WAITING, SINK_PROCESSING)
-	case END_SEND:
-		bro.state.Update(SINK_SENDING, SINK_WAITING)
 	case CANCEL:
 		bro.state.Update(SINK, CANCELLED)
 	case BEGIN_ENQUEUE:
-		bro.state.WaitExact(SINK_SENDING, 0) // Can't enqueue while sending
+		bro.state.WaitExact(SINK_FLUSHING, 0) // Can't enqueue while sending
 		bro.state.Set(SINK_ENQUEUING)
 	case END_ENQUEUE:
-		bro.state.Unset(SINK_ENQUEUING)
+		bro.state.Update(SINK_ENQUEUING, SINK_SENDING)
 		// This is necessary because if the session is quiescent (e.g. has no in-flight exchange)
 		// the session Run loop will be waiting on SINK_PROCESSING, and we need to set it to send
 		// an initial 'want' message to the block source. If the receiver is not sending, waiting,
 		// or checking, it is quiescent.
-		if !bro.state.ContainsAny(SINK_SENDING | SINK_WAITING | SINK_PROCESSING) {
+		if !bro.state.ContainsAny(SINK_FLUSHING | SINK_WAITING | SINK_PROCESSING) {
 			bro.state.Set(SINK_PROCESSING)
 		}
+	case BEGIN_SEND:
+		bro.state.Set(SINK_SENDING)
 	}
 
 	return nil
@@ -296,15 +321,9 @@ func (bro *BatchSinkOrchestrator) State() BatchState {
 	return bro.state.All()
 }
 
-// ReceiveState unsets any current sender state flags, and sets the specified state flags.
-func (bro *BatchSinkOrchestrator) ReceiveState(batchState BatchState) error {
-	bro.state.Update(SOURCE, batchState)
-	return nil
-}
-
 // IsClosed returns true if the receiver is closed.
 func (bro *BatchSinkOrchestrator) IsClosed() bool {
-	return bro.state.Contains(SOURCE_CLOSED|SINK_CLOSED) || bro.state.Contains(CANCELLED)
+	return bro.state.Contains(SINK_CLOSED) || bro.state.Contains(CANCELLED)
 }
 
 type SimpleBatchStatusReceiver[I BlockId] struct {
@@ -323,5 +342,10 @@ func NewSimpleBatchStatusReceiver[I BlockId](session StatusReceiver[I], orchestr
 // HandleList handles a list of raw blocks.
 func (sbbr *SimpleBatchStatusReceiver[I]) HandleStatus(state BatchState, have filter.Filter[I], want []I) error {
 	sbbr.session.HandleStatus(have, want)
-	return sbbr.orchestrator.ReceiveState(state)
+	// if remote session is closing, ask this side do close as well.
+	if state&CLOSING != 0 {
+		return sbbr.orchestrator.Notify(BEGIN_CLOSE)
+	} else {
+		return nil
+	}
 }

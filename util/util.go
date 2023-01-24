@@ -40,10 +40,10 @@ func (fs *SharedFlagSet[F]) All() F {
 }
 
 // Update updates the flag set with the given flags.
-// The unset flags are cleared, and the set flags are set.
-func (fs *SharedFlagSet[F]) Update(unset F, set F) {
+// The mask flags are cleared, and replaced with the set values.
+func (fs *SharedFlagSet[F]) Update(mask F, set F) {
 	fs.condvar.L.Lock()
-	fs.flags.Store(fs.flags.Load().(F)&^unset | set)
+	fs.flags.Store(fs.flags.Load().(F)&^mask | set)
 	fs.condvar.L.Unlock()
 	fs.condvar.Broadcast()
 }
@@ -99,6 +99,13 @@ func (fs *SharedFlagSet[F]) ContainsAny(flags F) bool {
 	fs.condvar.L.Lock()
 	defer fs.condvar.L.Unlock()
 	return fs.flags.Load().(F)&flags != 0
+}
+
+// ContainsExact returns true if the masked bits have exactly the given values.
+func (fs *SharedFlagSet[F]) ContainsExact(mask F, flags F) bool {
+	fs.condvar.L.Lock()
+	defer fs.condvar.L.Unlock()
+	return fs.flags.Load().(F)&mask == flags
 }
 
 // Min returns the minimum of the two values.
