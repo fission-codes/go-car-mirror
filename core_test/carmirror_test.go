@@ -235,7 +235,10 @@ func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, roo
 	log.Debugf("created receiver_session")
 
 	sender_session.Enqueue(root)
+
+	// Close both sessions when they become quiescent
 	sender_session.Close()
+	receiver_session.Close()
 
 	log.Debugf("starting goroutines")
 
@@ -497,7 +500,13 @@ func TestSessionQuiescence(t *testing.T) {
 		log.Debugf("close timeout started")
 		time.Sleep(5 * time.Second)
 		log.Debugf("close timeout elapsed")
-		err_chan <- sender_session.Close()
+		if err := sender_session.Close(); err != nil {
+			err_chan <- err
+		} else if err := receiver_session.Close(); err != nil {
+			err_chan <- err
+		} else {
+			err_chan <- nil
+		}
 	}()
 
 	var err error
