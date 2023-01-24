@@ -190,7 +190,7 @@ func (sn *MockStatusSender) Close() error {
 
 // Filter
 
-func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, root mock.BlockId, sourceOrchestrator Orchestrator[BatchState], sinkOrchestrator Orchestrator[BatchState], max_batch_size uint, bytes_per_ms int64, latency_ms int64) error {
+func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, root mock.BlockId, max_batch_size uint, bytes_per_ms int64, latency_ms int64) error {
 
 	snapshotBefore := stats.GLOBAL_REPORTING.Snapshot()
 
@@ -299,9 +299,7 @@ func TestMockTransferToEmptyStoreSingleBatchNoDelay(t *testing.T) {
 	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
 	receiverStore := mock.NewStore(mock.DefaultConfig())
 
-	sourceOrchestrator := NewBatchSourceOrchestrator()
-	sinkOrchestrator := NewBatchSinkOrchestrator()
-	MockBatchTransfer(senderStore, receiverStore, root, sourceOrchestrator, sinkOrchestrator, 5000, 0, 0)
+	MockBatchTransfer(senderStore, receiverStore, root, 5000, 0, 0)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
 	}
@@ -313,9 +311,7 @@ func TestMockTransferToEmptyStoreSingleBatchDelayed(t *testing.T) {
 	receiverStore := mock.NewStore(mock.DefaultConfig())
 	receiverStore.Reconfigure(blockStoreConfig)
 	senderStore.Reconfigure(blockStoreConfig)
-	sourceOrchestrator := NewBatchSourceOrchestrator()
-	sinkOrchestrator := NewBatchSinkOrchestrator()
-	MockBatchTransfer(senderStore, receiverStore, root, sourceOrchestrator, sinkOrchestrator, 5000, GBIT_SECOND, TYPICAL_LATENCY)
+	MockBatchTransfer(senderStore, receiverStore, root, 5000, GBIT_SECOND, TYPICAL_LATENCY)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
 	}
@@ -325,9 +321,7 @@ func TestMockTransferToEmptyStoreMultiBatchNoDelay(t *testing.T) {
 	senderStore := mock.NewStore(mock.DefaultConfig())
 	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
 	receiverStore := mock.NewStore(mock.DefaultConfig())
-	sourceOrchestrator := NewBatchSourceOrchestrator()
-	sinkOrchestrator := NewBatchSinkOrchestrator()
-	MockBatchTransfer(senderStore, receiverStore, root, sourceOrchestrator, sinkOrchestrator, 50, 0, 0)
+	MockBatchTransfer(senderStore, receiverStore, root, 50, 0, 0)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
 	}
@@ -339,9 +333,7 @@ func TestMockTransferToEmptyStoreMultiBatchDelayed(t *testing.T) {
 	receiverStore := mock.NewStore(mock.DefaultConfig())
 	receiverStore.Reconfigure(blockStoreConfig)
 	senderStore.Reconfigure(blockStoreConfig)
-	sourceOrchestrator := NewBatchSourceOrchestrator()
-	sinkOrchestrator := NewBatchSinkOrchestrator()
-	MockBatchTransfer(senderStore, receiverStore, root, sourceOrchestrator, sinkOrchestrator, 50, GBIT_SECOND, TYPICAL_LATENCY)
+	MockBatchTransfer(senderStore, receiverStore, root, 50, GBIT_SECOND, TYPICAL_LATENCY)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
 	}
@@ -357,9 +349,7 @@ func TestMockTransferSingleMissingBlockNoDelay(t *testing.T) {
 		t.Errorf("Could not find random block %v", err)
 	}
 	receiverStore.Remove(block.Id())
-	sourceOrchestrator := NewBatchSourceOrchestrator()
-	sinkOrchestrator := NewBatchSinkOrchestrator()
-	MockBatchTransfer(senderStore, receiverStore, root, sourceOrchestrator, sinkOrchestrator, 10, 0, 0)
+	MockBatchTransfer(senderStore, receiverStore, root, 10, 0, 0)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
 	}
@@ -377,9 +367,7 @@ func TestMockTransferSingleMissingBlockDelayed(t *testing.T) {
 	receiverStore.Remove(block.Id())
 	receiverStore.Reconfigure(blockStoreConfig)
 	senderStore.Reconfigure(blockStoreConfig)
-	sourceOrchestrator := NewBatchSourceOrchestrator()
-	sinkOrchestrator := NewBatchSinkOrchestrator()
-	MockBatchTransfer(senderStore, receiverStore, root, sourceOrchestrator, sinkOrchestrator, 10, GBIT_SECOND, TYPICAL_LATENCY)
+	MockBatchTransfer(senderStore, receiverStore, root, 10, GBIT_SECOND, TYPICAL_LATENCY)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
 	}
@@ -391,9 +379,7 @@ func TestMockTransferSingleMissingTreeNoDelay(t *testing.T) {
 	receiverStore := mock.NewStore(mock.DefaultConfig())
 	receiverStore.AddAll(context.Background(), senderStore)
 	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.1)
-	sourceOrchestrator := NewBatchSourceOrchestrator()
-	sinkOrchestrator := NewBatchSinkOrchestrator()
-	MockBatchTransfer(senderStore, receiverStore, root, sourceOrchestrator, sinkOrchestrator, 50, 0, 0)
+	MockBatchTransfer(senderStore, receiverStore, root, 50, 0, 0)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
 		receiverStore.Dump(root, &log.SugaredLogger, "")
@@ -408,9 +394,7 @@ func TestMockTransferSingleMissingTreeDelayed(t *testing.T) {
 	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.1)
 	receiverStore.Reconfigure(blockStoreConfig)
 	senderStore.Reconfigure(blockStoreConfig)
-	sourceOrchestrator := NewBatchSourceOrchestrator()
-	sinkOrchestrator := NewBatchSinkOrchestrator()
-	MockBatchTransfer(senderStore, receiverStore, root, sourceOrchestrator, sinkOrchestrator, 50, GBIT_SECOND, TYPICAL_LATENCY)
+	MockBatchTransfer(senderStore, receiverStore, root, 50, GBIT_SECOND, TYPICAL_LATENCY)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
 		receiverStore.Dump(root, &log.SugaredLogger, "")
