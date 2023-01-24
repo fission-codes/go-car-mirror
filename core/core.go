@@ -291,11 +291,8 @@ type Orchestrator[F Flags] interface {
 	// Notify is used to notify the orchestrator of an event.
 	Notify(SessionEvent) error
 
-	// State is used to obtain state to send to a remote session.
+	// Get the current state of the Orchestrator.
 	State() F
-
-	// ReceiveState is used to receive state from a remote session.
-	ReceiveState(F) error
 
 	// IsClosed returns true if the orchestrator is closed.
 	IsClosed() bool
@@ -423,6 +420,7 @@ func (ss *SinkSession[I, F]) Run(statusSender StatusSender[I]) error {
 		// Pending blocks are blocks that have been recieved and added to our block store,
 		// but have not had status accumulated on their children yet.
 		if ss.pendingBlocks.Len() > 0 {
+			ss.orchestrator.Notify(BEGIN_SEND)
 			block := ss.pendingBlocks.PollFront()
 
 			for _, child := range block.Children() {
@@ -430,15 +428,16 @@ func (ss *SinkSession[I, F]) Run(statusSender StatusSender[I]) error {
 					return err
 				}
 			}
+			ss.orchestrator.Notify(END_SEND)
 		} else {
 			// If we get here it means we have no more blocks to process. In a batch based process that's
 			// the only time we'd want to send. But for streaming maybe this should be in a separate loop
 			// so it can be triggered by the orchestrator - otherwise we wind up sending a status update every
 			// time the pending blocks list becomes empty.
 
-			ss.orchestrator.Notify(BEGIN_SEND)
+			ss.orchestrator.Notify(BEGIN_DRAINING)
 			ss.statusAccumulator.Send(statusSender)
-			ss.orchestrator.Notify(END_SEND)
+			ss.orchestrator.Notify(END_DRAINING)
 
 		}
 		ss.orchestrator.Notify(END_PROCESSING)

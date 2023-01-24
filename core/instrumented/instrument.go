@@ -41,14 +41,6 @@ func (io *Orchestrator[F]) State() F {
 	return result
 }
 
-// ReceiveState calls the underlying orchestrator's ReceiveState method and records stats.
-func (io *Orchestrator[F]) ReceiveState(state F) error {
-	io.stats.Logger().Debugw("enter", "method", "ReceiveState", "state", state)
-	err := io.orchestrator.ReceiveState(state)
-	io.stats.Logger().Debugw("exit", "method", "ReceiveState", "err", err, "state", io.orchestrator.State())
-	return err
-}
-
 // IsClosed calls the underlying orchestrator's IsClosed method and records stats.
 func (io *Orchestrator[F]) IsClosed() bool {
 	result := io.orchestrator.IsClosed()
