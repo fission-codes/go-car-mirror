@@ -228,8 +228,8 @@ const (
 	END_SEND
 	BEGIN_RECEIVE
 	END_RECEIVE
-	BEGIN_CHECK
-	END_CHECK
+	BEGIN_PROCESSING
+	END_PROCESSING
 	BEGIN_BATCH
 	END_BATCH
 	BEGIN_ENQUEUE
@@ -268,10 +268,10 @@ func (se SessionEvent) String() string {
 		return "BEGIN_BATCH"
 	case END_BATCH:
 		return "END_BATCH"
-	case BEGIN_CHECK:
-		return "BEGIN_CHECK"
-	case END_CHECK:
-		return "END_CHECK"
+	case BEGIN_PROCESSING:
+		return "BEGIN_PROCESSING"
+	case END_PROCESSING:
+		return "END_PROCESSING"
 	case BEGIN_ENQUEUE:
 		return "BEGIN_ENQUEUE"
 	case END_ENQUEUE:
@@ -291,11 +291,8 @@ type Orchestrator[F Flags] interface {
 	// Notify is used to notify the orchestrator of an event.
 	Notify(SessionEvent) error
 
-	// State is used to obtain state to send to a remote session.
+	// Get the current state of the Orchestrator.
 	State() F
-
-	// ReceiveState is used to receive state from a remote session.
-	ReceiveState(F) error
 
 	// IsClosed returns true if the orchestrator is closed.
 	IsClosed() bool
@@ -418,11 +415,12 @@ func (ss *SinkSession[I, F]) Run(statusSender StatusSender[I]) error {
 	defer ss.orchestrator.Notify(END_SESSION)
 
 	for !ss.orchestrator.IsClosed() {
-		ss.orchestrator.Notify(BEGIN_CHECK)
+		ss.orchestrator.Notify(BEGIN_PROCESSING)
 
 		// Pending blocks are blocks that have been recieved and added to our block store,
 		// but have not had status accumulated on their children yet.
 		if ss.pendingBlocks.Len() > 0 {
+			ss.orchestrator.Notify(BEGIN_SEND)
 			block := ss.pendingBlocks.PollFront()
 
 			for _, child := range block.Children() {
@@ -430,18 +428,19 @@ func (ss *SinkSession[I, F]) Run(statusSender StatusSender[I]) error {
 					return err
 				}
 			}
+			ss.orchestrator.Notify(END_SEND)
 		} else {
 			// If we get here it means we have no more blocks to process. In a batch based process that's
 			// the only time we'd want to send. But for streaming maybe this should be in a separate loop
 			// so it can be triggered by the orchestrator - otherwise we wind up sending a status update every
 			// time the pending blocks list becomes empty.
 
-			ss.orchestrator.Notify(BEGIN_SEND)
+			ss.orchestrator.Notify(BEGIN_DRAINING)
 			ss.statusAccumulator.Send(statusSender)
-			ss.orchestrator.Notify(END_SEND)
+			ss.orchestrator.Notify(END_DRAINING)
 
 		}
-		ss.orchestrator.Notify(END_CHECK)
+		ss.orchestrator.Notify(END_PROCESSING)
 	}
 
 	return nil
@@ -526,7 +525,7 @@ func (ss *SourceSession[I, F]) Run(blockSender BlockSender[I]) error {
 
 	for !ss.orchestrator.IsClosed() {
 
-		if err := ss.orchestrator.Notify(BEGIN_SEND); err != nil {
+		if err := ss.orchestrator.Notify(BEGIN_PROCESSING); err != nil {
 			return err
 		}
 
@@ -541,6 +540,7 @@ func (ss *SourceSession[I, F]) Run(blockSender BlockSender[I]) error {
 						return err
 					}
 				} else {
+					ss.orchestrator.Notify(BEGIN_SEND)
 					if err := blockSender.SendBlock(block); err != nil {
 						return err
 					}
@@ -551,6 +551,7 @@ func (ss *SourceSession[I, F]) Run(blockSender BlockSender[I]) error {
 							}
 						}
 					}
+					ss.orchestrator.Notify(END_SEND)
 				}
 			}
 		} else {
@@ -562,7 +563,7 @@ func (ss *SourceSession[I, F]) Run(blockSender BlockSender[I]) error {
 			}
 			ss.orchestrator.Notify(END_DRAINING)
 		}
-		ss.orchestrator.Notify(END_SEND)
+		ss.orchestrator.Notify(END_PROCESSING)
 	}
 	return ss.orchestrator.Notify(END_SESSION)
 }
