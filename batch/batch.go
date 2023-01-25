@@ -1,14 +1,18 @@
-package core
+package batch
 
 import (
 	"strings"
 	"sync"
 
+	"github.com/fission-codes/go-car-mirror/core"
 	"github.com/fission-codes/go-car-mirror/errors"
 	"github.com/fission-codes/go-car-mirror/filter"
 	"github.com/fission-codes/go-car-mirror/util"
+	golog "github.com/ipfs/go-log/v2"
 	"go.uber.org/zap"
 )
+
+var log = golog.Logger("go-car-mirror")
 
 // BatchState is a bitfield that describes the state of a batch session.
 type BatchState uint32
@@ -88,27 +92,27 @@ func (bs BatchState) String() string {
 }
 
 // BatchBlockReceiver is an interface for receiving batches of blocks.
-type BatchBlockReceiver[I BlockId] interface {
+type BatchBlockReceiver[I core.BlockId] interface {
 	// HandleList handles a list of blocks.
-	HandleList(BatchState, []RawBlock[I]) error
+	HandleList(BatchState, []core.RawBlock[I]) error
 }
 
 // BatchBlockSender is an interface for sending batches of blocks.
-type BatchBlockSender[I BlockId] interface {
+type BatchBlockSender[I core.BlockId] interface {
 	// SendList sends a list of blocks.
-	SendList(BatchState, []RawBlock[I]) error
+	SendList(BatchState, []core.RawBlock[I]) error
 	// Close closes the sender.
 	Close() error
 }
 
 // SimpleBatchBlockReceiver is a simple implementation of BatchBlockReceiver.
-type SimpleBatchBlockReceiver[I BlockId] struct {
-	session      BlockReceiver[I, BatchState]
-	orchestrator Orchestrator[BatchState]
+type SimpleBatchBlockReceiver[I core.BlockId] struct {
+	session      core.BlockReceiver[I, BatchState]
+	orchestrator core.Orchestrator[BatchState]
 }
 
 // NewSimpleBatchBlockReceiver creates a new SimpleBatchBlockReceiver.
-func NewSimpleBatchBlockReceiver[I BlockId](session BlockReceiver[I, BatchState], orchestrator Orchestrator[BatchState]) *SimpleBatchBlockReceiver[I] {
+func NewSimpleBatchBlockReceiver[I core.BlockId](session core.BlockReceiver[I, BatchState], orchestrator core.Orchestrator[BatchState]) *SimpleBatchBlockReceiver[I] {
 	return &SimpleBatchBlockReceiver[I]{
 		session:      session,
 		orchestrator: orchestrator,
@@ -116,39 +120,39 @@ func NewSimpleBatchBlockReceiver[I BlockId](session BlockReceiver[I, BatchState]
 }
 
 // HandleList handles a list of raw blocks.
-func (sbbr *SimpleBatchBlockReceiver[I]) HandleList(state BatchState, list []RawBlock[I]) error {
-	sbbr.orchestrator.Notify(BEGIN_BATCH)
-	defer sbbr.orchestrator.Notify(END_BATCH)
+func (sbbr *SimpleBatchBlockReceiver[I]) HandleList(state BatchState, list []core.RawBlock[I]) error {
+	sbbr.orchestrator.Notify(core.BEGIN_BATCH)
+	defer sbbr.orchestrator.Notify(core.END_BATCH)
 	for _, block := range list {
 		sbbr.session.HandleBlock(block)
 	}
 	if state&CLOSING != 0 {
-		sbbr.orchestrator.Notify(BEGIN_CLOSE)
+		sbbr.orchestrator.Notify(core.BEGIN_CLOSE)
 	}
 	return nil
 }
 
 // SimpleBatchBlockSender is a simple implementation of BlockSender which wraps a BatchBlockSender
-type SimpleBatchBlockSender[I BlockId] struct {
-	orchestrator     Orchestrator[BatchState]
-	list             []RawBlock[I]
+type SimpleBatchBlockSender[I core.BlockId] struct {
+	orchestrator     core.Orchestrator[BatchState]
+	list             []core.RawBlock[I]
 	listMutex        sync.Mutex
 	batchBlockSender BatchBlockSender[I]
 	maxBatchSize     uint32
 }
 
 // NewSimpleBatchBlockSender creates a new SimpleBatchBlockSender.
-func NewSimpleBatchBlockSender[I BlockId](batchBlockSender BatchBlockSender[I], orchestrator Orchestrator[BatchState], maxBatchSize uint32) *SimpleBatchBlockSender[I] {
+func NewSimpleBatchBlockSender[I core.BlockId](batchBlockSender BatchBlockSender[I], orchestrator core.Orchestrator[BatchState], maxBatchSize uint32) *SimpleBatchBlockSender[I] {
 	return &SimpleBatchBlockSender[I]{
 		orchestrator:     orchestrator,
-		list:             make([]RawBlock[I], 0, maxBatchSize),
+		list:             make([]core.RawBlock[I], 0, maxBatchSize),
 		batchBlockSender: batchBlockSender,
 		maxBatchSize:     maxBatchSize,
 	}
 }
 
 // SendBlock adds a block to the batch and sends the batch if it is full.
-func (sbbs *SimpleBatchBlockSender[I]) SendBlock(block RawBlock[I]) error {
+func (sbbs *SimpleBatchBlockSender[I]) SendBlock(block core.RawBlock[I]) error {
 	sbbs.listMutex.Lock()
 	sbbs.list = append(sbbs.list, block)
 	sbbs.listMutex.Unlock()
@@ -167,8 +171,8 @@ func (sbbs *SimpleBatchBlockSender[I]) Close() error {
 
 // Flush sends the current batch of blocks.
 func (sbbs *SimpleBatchBlockSender[I]) Flush() error {
-	sbbs.orchestrator.Notify(BEGIN_FLUSH)
-	defer sbbs.orchestrator.Notify(END_FLUSH)
+	sbbs.orchestrator.Notify(core.BEGIN_FLUSH)
+	defer sbbs.orchestrator.Notify(core.END_FLUSH)
 
 	batchState := sbbs.orchestrator.State()
 	// Only actually send a list if we have data OR we are closed, so we would like to communicate this state to the sink
@@ -200,43 +204,43 @@ func NewBatchSourceOrchestrator() *BatchSourceOrchestrator {
 // Notify notifies the orchestrator of a session event.
 // Events lead to state transitions in the orchestrator.
 //
-func (bso *BatchSourceOrchestrator) Notify(event SessionEvent) error {
+func (bso *BatchSourceOrchestrator) Notify(event core.SessionEvent) error {
 	switch event {
-	case BEGIN_PROCESSING:
+	case core.BEGIN_PROCESSING:
 		state := bso.state.WaitAny(SOURCE_PROCESSING|CANCELLED|SOURCE_CLOSED, 0)
 		if state&CANCELLED != 0 {
-			bso.log.Errorf("Orchestrator waiting for SOURCE_PROCESSING when CANCELLED seen")
+			bso.log.Errorf("core.Orchestrator waiting for SOURCE_PROCESSING when CANCELLED seen")
 			return errors.ErrStateError
 		}
-	case END_RECEIVE:
+	case core.END_RECEIVE:
 		bso.state.Update(SOURCE_WAITING, SOURCE_PROCESSING)
-	case BEGIN_CLOSE:
+	case core.BEGIN_CLOSE:
 		if bso.state.Contains(SOURCE_WAITING) {
 			bso.state.Update(SOURCE_WAITING, SOURCE_CLOSED)
 		} else {
 			bso.state.Set(SOURCE_CLOSING)
 		}
-	case BEGIN_FLUSH:
+	case core.BEGIN_FLUSH:
 		bso.state.Update(SOURCE_PROCESSING, SOURCE_FLUSHING)
-	case END_FLUSH:
+	case core.END_FLUSH:
 		bso.state.Update(SOURCE_FLUSHING|SOURCE_SENDING, SOURCE_WAITING)
-	case BEGIN_DRAINING:
+	case core.BEGIN_DRAINING:
 		// If we are draining (the queue is empty) and we have no pending blocks to send, we can close
 		if bso.state.ContainsExact(SOURCE_CLOSING|SOURCE_SENDING, SOURCE_CLOSING) {
 			bso.state.Set(SOURCE_CLOSED)
 		}
-	case END_ENQUEUE:
+	case core.END_ENQUEUE:
 		// This is necessary because if the session is quiescent (e.g. has no in-flight exchange)
 		// the session Run loop will be waiting on SOURCE_PROCESSING, and we need to set it to wake
 		// up the session.  If the receiver is not flushing, waiting, or ready, it is quiescent.
 		if !bso.state.ContainsAny(SOURCE_FLUSHING | SOURCE_WAITING | SOURCE_PROCESSING) {
 			bso.state.Set(SOURCE_PROCESSING)
 		}
-	case END_SESSION:
+	case core.END_SESSION:
 		bso.state.Update(SOURCE, SOURCE_CLOSED)
-	case CANCEL:
+	case core.CANCEL:
 		bso.state.Update(SOURCE, CANCELLED)
-	case BEGIN_SEND:
+	case core.BEGIN_SEND:
 		bso.state.Set(SOURCE_SENDING)
 	}
 
@@ -268,20 +272,20 @@ func NewBatchSinkOrchestrator() *BatchSinkOrchestrator {
 }
 
 // Notify notifies the orchestrator of a session event, updating the state as appropriate.
-func (bro *BatchSinkOrchestrator) Notify(event SessionEvent) error {
+func (bro *BatchSinkOrchestrator) Notify(event core.SessionEvent) error {
 	// TODO: at this point we probably need to enclose all this in a mutex.
 	switch event {
-	case END_SESSION:
+	case core.END_SESSION:
 		bro.state.Set(SINK_CLOSED)
-	case BEGIN_CLOSE:
+	case core.BEGIN_CLOSE:
 		bro.state.Set(CLOSING)
-	case BEGIN_PROCESSING:
+	case core.BEGIN_PROCESSING:
 		state := bro.state.WaitAny(SINK_PROCESSING|CANCELLED, 0) // waits for either flag to be set
 		if state&CANCELLED != 0 {
-			bro.log.Errorf("Orchestrator waiting for SINK_PROCESSING when CANCELLED seen")
+			bro.log.Errorf("core.Orchestrator waiting for SINK_PROCESSING when CANCELLED seen")
 			return errors.ErrStateError
 		}
-	case BEGIN_DRAINING:
+	case core.BEGIN_DRAINING:
 		bro.state.WaitExact(SINK_ENQUEUING, 0) // Can't flush while enqueuing
 		bro.state.Update(SINK_PROCESSING, SINK_FLUSHING)
 		// If we are draining (the queue is empty) and we have no pending status to send, we can close
@@ -291,16 +295,16 @@ func (bro *BatchSinkOrchestrator) Notify(event SessionEvent) error {
 		//if bro.state.Contains(SOURCE_CLOSED) {
 		//	bro.state.Set(SINK_CLOSED)
 		//}
-	case END_DRAINING:
+	case core.END_DRAINING:
 		bro.state.Update(SINK_FLUSHING|SINK_SENDING, SINK_WAITING)
-	case END_BATCH:
+	case core.END_BATCH:
 		bro.state.Update(SINK_WAITING, SINK_PROCESSING)
-	case CANCEL:
+	case core.CANCEL:
 		bro.state.Update(SINK, CANCELLED)
-	case BEGIN_ENQUEUE:
+	case core.BEGIN_ENQUEUE:
 		bro.state.WaitExact(SINK_FLUSHING, 0) // Can't enqueue while sending
 		bro.state.Set(SINK_ENQUEUING)
-	case END_ENQUEUE:
+	case core.END_ENQUEUE:
 		bro.state.Update(SINK_ENQUEUING, SINK_SENDING)
 		// This is necessary because if the session is quiescent (e.g. has no in-flight exchange)
 		// the session Run loop will be waiting on SINK_PROCESSING, and we need to set it to send
@@ -309,7 +313,7 @@ func (bro *BatchSinkOrchestrator) Notify(event SessionEvent) error {
 		if !bro.state.ContainsAny(SINK_FLUSHING | SINK_WAITING | SINK_PROCESSING) {
 			bro.state.Set(SINK_PROCESSING)
 		}
-	case BEGIN_SEND:
+	case core.BEGIN_SEND:
 		bro.state.Set(SINK_SENDING)
 	}
 
@@ -326,13 +330,13 @@ func (bro *BatchSinkOrchestrator) IsClosed() bool {
 	return bro.state.Contains(SINK_CLOSED) || bro.state.Contains(CANCELLED)
 }
 
-type SimpleBatchStatusReceiver[I BlockId] struct {
-	session      StatusReceiver[I]
-	orchestrator Orchestrator[BatchState]
+type SimpleBatchStatusReceiver[I core.BlockId] struct {
+	session      core.StatusReceiver[I]
+	orchestrator core.Orchestrator[BatchState]
 }
 
 // NewSimpleBatchStatusReceiver creates a new SimpleBatchStatusReceiver.
-func NewSimpleBatchStatusReceiver[I BlockId](session StatusReceiver[I], orchestrator Orchestrator[BatchState]) *SimpleBatchStatusReceiver[I] {
+func NewSimpleBatchStatusReceiver[I core.BlockId](session core.StatusReceiver[I], orchestrator core.Orchestrator[BatchState]) *SimpleBatchStatusReceiver[I] {
 	return &SimpleBatchStatusReceiver[I]{
 		session:      session,
 		orchestrator: orchestrator,
@@ -344,7 +348,7 @@ func (sbbr *SimpleBatchStatusReceiver[I]) HandleStatus(state BatchState, have fi
 	sbbr.session.HandleStatus(have, want)
 	// if remote session is closing, ask this side do close as well.
 	if state&CLOSING != 0 {
-		return sbbr.orchestrator.Notify(BEGIN_CLOSE)
+		return sbbr.orchestrator.Notify(core.BEGIN_CLOSE)
 	} else {
 		return nil
 	}

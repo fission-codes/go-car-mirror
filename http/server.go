@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/fission-codes/go-car-mirror/batch"
 	"github.com/fission-codes/go-car-mirror/core"
 	"github.com/fission-codes/go-car-mirror/core/instrumented"
 	"github.com/fission-codes/go-car-mirror/filter"
@@ -21,12 +22,12 @@ type SessionToken string
 
 type ServerSourceSessionData[I core.BlockId, R core.BlockIdRef[I]] struct {
 	conn    *HttpServerSourceConnection[I, R]
-	Session *core.SourceSession[I, core.BatchState]
+	Session *core.SourceSession[I, batch.BatchState]
 }
 
 type ServerSinkSessionData[I core.BlockId, R core.BlockIdRef[I]] struct {
 	conn    *HttpServerSinkConnection[I, R]
-	Session *core.SinkSession[I, core.BatchState]
+	Session *core.SinkSession[I, batch.BatchState]
 }
 
 type Server[I core.BlockId, R core.BlockIdRef[I]] struct {
@@ -174,7 +175,7 @@ func (srv *Server[I, R]) HandleStatus(response http.ResponseWriter, request *htt
 	log.Debugw("have session for token", "object", "Server", "method", "HandleStatus", "session", sessionToken)
 
 	// Parse the request to get the status message
-	message := messages.StatusMessage[I, R, core.BatchState]{}
+	message := messages.StatusMessage[I, R, batch.BatchState]{}
 	messageReader := bufio.NewReader(request.Body)
 	if err := message.Read(messageReader); err != nil {
 		log.Errorw("parsing status message", "object", "Server", "method", "HandleStatus", "session", sessionToken, "error", err)
@@ -279,7 +280,7 @@ func (srv *Server[I, R]) HandleBlocks(response http.ResponseWriter, request *htt
 	log.Debugw("have session for token", "object", "Server", "method", "HandleBlocks", "session", sessionToken)
 
 	// Parse the request to get the blocks message
-	message := messages.BlocksMessage[I, R, core.BatchState]{}
+	message := messages.BlocksMessage[I, R, batch.BatchState]{}
 	messageReader := bufio.NewReader(request.Body)
 	if err := message.Read(messageReader); err != io.EOF {
 		log.Errorw("parsing blocks message", "object", "Server", "method", "HandleBlocks", "session", sessionToken, "error", err)
@@ -314,7 +315,7 @@ func (srv *Server[I, R]) SourceSessions() []SessionToken {
 	return srv.sourceSessions.Keys()
 }
 
-func (srv *Server[I, R]) SourceInfo(token SessionToken) (*core.SourceSessionInfo[core.BatchState], error) {
+func (srv *Server[I, R]) SourceInfo(token SessionToken) (*core.SourceSessionInfo[batch.BatchState], error) {
 	if session, ok := srv.sourceSessions.Get(token); ok {
 		return session.Session.Info(), nil
 	} else {
@@ -326,7 +327,7 @@ func (srv *Server[I, R]) SinkSessions() []SessionToken {
 	return srv.sinkSessions.Keys()
 }
 
-func (srv *Server[I, R]) SinkInfo(token SessionToken) (*core.SinkSessionInfo[core.BatchState], error) {
+func (srv *Server[I, R]) SinkInfo(token SessionToken) (*core.SinkSessionInfo[batch.BatchState], error) {
 	if session, ok := srv.sinkSessions.Get(token); ok {
 		return session.Session.Info(), nil
 	} else {

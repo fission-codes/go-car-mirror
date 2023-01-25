@@ -69,13 +69,13 @@ func makeBloom(capacity uint) filter.Filter[mock.BlockId] {
 }
 
 type BlockChannel struct {
-	channel  chan *messages.BlocksMessage[mock.BlockId, *mock.BlockId, BatchState]
-	receiver BatchBlockReceiver[mock.BlockId]
+	channel  chan *messages.BlocksMessage[mock.BlockId, *mock.BlockId, batch.BatchState]
+	receiver batch.BatchBlockReceiver[mock.BlockId]
 	rate     int64 // number of bytes transmitted per millisecond
 	latency  int64 // latency in milliseconds
 }
 
-func (ch *BlockChannel) SendList(state BatchState, blocks []RawBlock[mock.BlockId]) error {
+func (ch *BlockChannel) SendList(state batch.BatchState, blocks []RawBlock[mock.BlockId]) error {
 	message := messages.NewBlocksMessage(state, blocks)
 	if ch.rate > 0 || ch.latency > 0 {
 		buf := bytes.Buffer{}
@@ -95,7 +95,7 @@ func (ch *BlockChannel) Close() error {
 	return nil
 }
 
-func (ch *BlockChannel) SetBlockListener(receiver BatchBlockReceiver[mock.BlockId]) {
+func (ch *BlockChannel) SetBlockListener(receiver batch.BatchBlockReceiver[mock.BlockId]) {
 	ch.receiver = receiver
 }
 
@@ -112,14 +112,14 @@ func (ch *BlockChannel) listen() error {
 }
 
 type StatusChannel struct {
-	channel  chan *messages.StatusMessage[mock.BlockId, *mock.BlockId, BatchState]
-	receiver *SimpleBatchStatusReceiver[mock.BlockId]
+	channel  chan *messages.StatusMessage[mock.BlockId, *mock.BlockId, batch.BatchState]
+	receiver *batch.SimpleBatchStatusReceiver[mock.BlockId]
 	rate     int64 // number of bytes transmitted per millisecond
 	latency  int64 // latency in milliseconds
 }
 
-func (ch *StatusChannel) SendStatus(state BatchState, have filter.Filter[mock.BlockId], want []mock.BlockId) error {
-	var message *messages.StatusMessage[mock.BlockId, *mock.BlockId, BatchState]
+func (ch *StatusChannel) SendStatus(state batch.BatchState, have filter.Filter[mock.BlockId], want []mock.BlockId) error {
+	var message *messages.StatusMessage[mock.BlockId, *mock.BlockId, batch.BatchState]
 	if ch.rate > 0 || ch.latency > 0 {
 		message = messages.NewStatusMessage(state, have, want)
 		buf := bytes.Buffer{}
@@ -141,7 +141,7 @@ func (ch *StatusChannel) Close() error {
 	return nil
 }
 
-func (ch *StatusChannel) SetStatusListener(receiver *SimpleBatchStatusReceiver[mock.BlockId]) {
+func (ch *StatusChannel) SetStatusListener(receiver *batch.SimpleBatchStatusReceiver[mock.BlockId]) {
 	ch.receiver = receiver
 }
 
@@ -160,10 +160,10 @@ func (ch *StatusChannel) listen() error {
 
 type MockStatusSender struct {
 	channel      *StatusChannel
-	orchestrator Orchestrator[BatchState]
+	orchestrator Orchestrator[batch.BatchState]
 }
 
-func NewMockStatusSender(channel *StatusChannel, orchestrator Orchestrator[BatchState]) *MockStatusSender {
+func NewMockStatusSender(channel *StatusChannel, orchestrator Orchestrator[batch.BatchState]) *MockStatusSender {
 	return &MockStatusSender{
 		channel,
 		orchestrator,
@@ -195,14 +195,14 @@ func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, roo
 	snapshotBefore := stats.GLOBAL_REPORTING.Snapshot()
 
 	blockChannel := BlockChannel{
-		make(chan *messages.BlocksMessage[mock.BlockId, *mock.BlockId, BatchState]),
+		make(chan *messages.BlocksMessage[mock.BlockId, *mock.BlockId, batch.BatchState]),
 		nil,
 		bytes_per_ms,
 		latency_ms,
 	}
 
 	statusChannel := StatusChannel{
-		make(chan *messages.StatusMessage[mock.BlockId, *mock.BlockId, BatchState]),
+		make(chan *messages.StatusMessage[mock.BlockId, *mock.BlockId, batch.BatchState]),
 		nil,
 		bytes_per_ms,
 		latency_ms,
@@ -405,14 +405,14 @@ func TestSessionQuiescence(t *testing.T) {
 	snapshotBefore := stats.GLOBAL_REPORTING.Snapshot()
 
 	blockChannel := BlockChannel{
-		make(chan *messages.BlocksMessage[mock.BlockId, *mock.BlockId, BatchState]),
+		make(chan *messages.BlocksMessage[mock.BlockId, *mock.BlockId, batch.BatchState]),
 		nil,
 		0,
 		0,
 	}
 
 	statusChannel := StatusChannel{
-		make(chan *messages.StatusMessage[mock.BlockId, *mock.BlockId, BatchState]),
+		make(chan *messages.StatusMessage[mock.BlockId, *mock.BlockId, batch.BatchState]),
 		nil,
 		0,
 		0,
