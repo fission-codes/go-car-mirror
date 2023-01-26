@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 
+	"github.com/fission-codes/go-car-mirror/batch"
 	"github.com/fission-codes/go-car-mirror/core"
 	"github.com/fission-codes/go-car-mirror/core/instrumented"
 	"github.com/fission-codes/go-car-mirror/filter"
@@ -17,8 +18,8 @@ func init() {
 
 type Client[I core.BlockId, R core.BlockIdRef[I]] struct {
 	store          core.BlockStore[I]
-	sourceSessions *util.SynchronizedMap[string, *core.SourceSession[I, core.BatchState]]
-	sinkSessions   *util.SynchronizedMap[string, *core.SinkSession[I, core.BatchState]]
+	sourceSessions *util.SynchronizedMap[string, *core.SourceSession[I, batch.BatchState]]
+	sinkSessions   *util.SynchronizedMap[string, *core.SinkSession[I, batch.BatchState]]
 	maxBatchSize   uint32
 	allocator      func() filter.Filter[I]
 	instrumented   instrumented.InstrumentationOptions
@@ -27,15 +28,15 @@ type Client[I core.BlockId, R core.BlockIdRef[I]] struct {
 func NewClient[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], config Config) *Client[I, R] {
 	return &Client[I, R]{
 		store,
-		util.NewSynchronizedMap[string, *core.SourceSession[I, core.BatchState]](),
-		util.NewSynchronizedMap[string, *core.SinkSession[I, core.BatchState]](),
+		util.NewSynchronizedMap[string, *core.SourceSession[I, batch.BatchState]](),
+		util.NewSynchronizedMap[string, *core.SinkSession[I, batch.BatchState]](),
 		config.MaxBatchSize,
 		NewBloomAllocator[I](&config),
 		config.Instrument,
 	}
 }
 
-func (c *Client[I, R]) startSourceSession(url string) *core.SourceSession[I, core.BatchState] {
+func (c *Client[I, R]) startSourceSession(url string) *core.SourceSession[I, batch.BatchState] {
 
 	jar, err := cookiejar.New(&cookiejar.Options{}) // TODO: set public suffix list
 	if err != nil {
@@ -71,13 +72,13 @@ func (c *Client[I, R]) startSourceSession(url string) *core.SourceSession[I, cor
 	return newSession
 }
 
-func (c *Client[I, R]) GetSourceSession(url string) (*core.SourceSession[I, core.BatchState], error) {
+func (c *Client[I, R]) GetSourceSession(url string) (*core.SourceSession[I, batch.BatchState], error) {
 	if session, ok := c.sourceSessions.Get(url); ok {
 		return session, nil
 	} else {
 		session = c.sourceSessions.GetOrInsert(
 			url,
-			func() *core.SourceSession[I, core.BatchState] {
+			func() *core.SourceSession[I, batch.BatchState] {
 				return c.startSourceSession(url)
 			},
 		)
@@ -85,7 +86,7 @@ func (c *Client[I, R]) GetSourceSession(url string) (*core.SourceSession[I, core
 	}
 }
 
-func (c *Client[I, R]) startSinkSession(url string) *core.SinkSession[I, core.BatchState] {
+func (c *Client[I, R]) startSinkSession(url string) *core.SinkSession[I, batch.BatchState] {
 
 	jar, err := cookiejar.New(&cookiejar.Options{}) // TODO: set public suffix list
 	if err != nil {
@@ -121,13 +122,13 @@ func (c *Client[I, R]) startSinkSession(url string) *core.SinkSession[I, core.Ba
 	return newSession
 }
 
-func (c *Client[I, R]) GetSinkSession(url string) (*core.SinkSession[I, core.BatchState], error) {
+func (c *Client[I, R]) GetSinkSession(url string) (*core.SinkSession[I, batch.BatchState], error) {
 	if session, ok := c.sinkSessions.Get(url); ok {
 		return session, nil
 	} else {
 		session = c.sinkSessions.GetOrInsert(
 			url,
-			func() *core.SinkSession[I, core.BatchState] {
+			func() *core.SinkSession[I, batch.BatchState] {
 				return c.startSinkSession(url)
 			},
 		)
@@ -139,7 +140,7 @@ func (c *Client[I, R]) SourceSessions() []string {
 	return c.sourceSessions.Keys()
 }
 
-func (c *Client[I, R]) SourceInfo(url string) (*core.SourceSessionInfo[core.BatchState], error) {
+func (c *Client[I, R]) SourceInfo(url string) (*core.SourceSessionInfo[batch.BatchState], error) {
 	if session, ok := c.sourceSessions.Get(url); ok {
 		return session.Info(), nil
 	} else {
@@ -151,7 +152,7 @@ func (c *Client[I, R]) SinkSessions() []string {
 	return c.sinkSessions.Keys()
 }
 
-func (c *Client[I, R]) SinkInfo(url string) (*core.SinkSessionInfo[core.BatchState], error) {
+func (c *Client[I, R]) SinkInfo(url string) (*core.SinkSessionInfo[batch.BatchState], error) {
 	if session, ok := c.sinkSessions.Get(url); ok {
 		return session.Info(), nil
 	} else {
