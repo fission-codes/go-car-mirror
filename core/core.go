@@ -156,35 +156,38 @@ type MutablePointerResolver[I BlockId] interface {
 	Resolve(ptr string) (I, error)
 }
 
-// BlockSender is responsible for sending blocks, immediately and asynchronously, or via a buffer.
+// BlockSender is responsible for sending blocks from the Source, immediately and asynchronously, or via a buffer.
 // The details are up to the implementor.
 type BlockSender[I BlockId] interface {
+	// Send a block
 	SendBlock(block RawBlock[I]) error
+	// Ensure any blocks queued for sending are actually sent; should block until all blocks are sent.
 	Flush() error
+	// Close the sender gracefully, ensuring any pending blocks are flushed
 	Close() error
 }
 
-// BlockReceiver is responsible for receiving blocks.
+// BlockReceiver is responsible for receiving blocks at the Sink.
 type BlockReceiver[I BlockId, F Flags] interface {
 	// HandleBlock is called on receipt of a new block.
 	HandleBlock(block RawBlock[I])
 }
 
-// StatusSender is responsible for sending status.
-// The key intuition of CAR Mirror is that status can be sent efficiently using a lossy filter.
-// TODO: this use of status implies it's just filter, not want list.  Be precise in language.
-// The StatusSender will therefore usually batch reported information and send it in bulk to the SourceSession.
+// StatusSender is responsible for sending status from the Sink.
+// The key intuition of CAR Mirror is information about blocks already present on a Sink can be sent efficiently
+// using a lossy filter. We also need to be able to request specific blocks from the source. 'Status' is therefore
+// formally a Filter of blocks the source already have and a list of blocks the source definitely wants.
 type StatusSender[I BlockId] interface {
 	// SendStatus sends the status to the SourceSession.
 	// The have filter is a lossy filter of the blocks that the SinkSession has.
 	// The want list is a list of blocks that the SinkSession wants.
 	SendStatus(have filter.Filter[I], want []I) error
 
-	// TODO: Close closes the ???.
+	// Close the Status Sender
 	Close() error
 }
 
-// StatusReceiver is responsible for receiving a status.
+// StatusReceiver is responsible for receiving status on the Source.
 type StatusReceiver[I BlockId] interface {
 	// HandleStatus is called on receipt of a new status.
 	// The have filter is a lossy filter of the blocks that the Sink has.
@@ -192,7 +195,7 @@ type StatusReceiver[I BlockId] interface {
 	HandleStatus(have filter.Filter[I], want []I)
 }
 
-// StatusAccumulator is responsible for collecting status.
+// StatusAccumulator is responsible for collecting status on the Sink so that it can be sent to the Source.
 type StatusAccumulator[I BlockId] interface {
 	// Have records that the Sink has a block.
 	Have(I) error
@@ -211,30 +214,32 @@ type StatusAccumulator[I BlockId] interface {
 }
 
 // SessionEvent is an event that can occur during a session.
-// When events occur, they trigger updates to session state.
+// When events occur, they trigger updates to session state. The Orchestrator, which is typically some object
+// outside the session which is aware of implementation specific information about the channel over which communication
+// is actually occuring, may also 'wait' on notification of an event.
 type SessionEvent uint16
 
 // Core session event constants.
 const (
-	BEGIN_SESSION SessionEvent = iota
-	END_SESSION
-	BEGIN_DRAINING
-	END_DRAINING
-	BEGIN_CLOSE
-	END_CLOSE
-	BEGIN_FLUSH
-	END_FLUSH
-	BEGIN_SEND
-	END_SEND
-	BEGIN_RECEIVE
-	END_RECEIVE
-	BEGIN_PROCESSING
-	END_PROCESSING
-	BEGIN_BATCH
-	END_BATCH
-	BEGIN_ENQUEUE
-	END_ENQUEUE
-	CANCEL
+	BEGIN_SESSION    SessionEvent = iota // A session has begun
+	END_SESSION                          // A session has ended
+	BEGIN_DRAINING                       // No more data is currently available for processing
+	END_DRAINING                         // Session has completed processing related to the draining event
+	BEGIN_CLOSE                          // The session has been notified it should close when current processing is complete
+	END_CLOSE                            // Immediate actions to start the session closing are complete
+	BEGIN_FLUSH                          // Flush has been called on a SimpleBatchBlockSender to send a batch of blocks from Source to Sink
+	END_FLUSH                            // Flush has completed
+	BEGIN_SEND                           // On Source, an individual block has been sent to the BlockSender. On Sink, we are 'sending' status to the StatusAccumulator
+	END_SEND                             // Send has completed
+	BEGIN_RECEIVE                        // An individual block or status update is received
+	END_RECEIVE                          // Receive operation is completed
+	BEGIN_PROCESSING                     // Begin main processing loop
+	END_PROCESSING                       // End main procesing loop
+	BEGIN_BATCH                          // SimpleBatchBlockReceiver has started processing a batch of blocks on the Sink
+	END_BATCH                            // Finished processing a batch of blocks
+	BEGIN_ENQUEUE                        // Request made to start transfer of a specific block and its children
+	END_ENQUEUE                          // Enqueue is complete
+	CANCEL                               // Request made to immediately end session and abandon any current transfer
 )
 
 // String returns a string representation of the session event.
@@ -287,6 +292,8 @@ func (se SessionEvent) String() string {
 type Flags constraints.Unsigned
 
 // Orchestrator is responsible for managing the flow of blocks and/or status.
+// Typically the Orchestrator is some external object such as a connection which is aware of details which are specific
+// to the implementation (such as whether the communication is synchronous or batch oriented).
 type Orchestrator[F Flags] interface {
 	// Notify is used to notify the orchestrator of an event.
 	Notify(SessionEvent) error
@@ -298,10 +305,10 @@ type Orchestrator[F Flags] interface {
 	IsClosed() bool
 }
 
-// SinkSession is a session that receives blocks.
+// SinkSession is a session that receives blocks and sends out status updates
 type SinkSession[
-	I BlockId,
-	F Flags,
+	I BlockId, // Concrete type for the Block Id used by this session
+	F Flags, // Concrete type for the state information managed by the Orchestrator
 ] struct {
 	statusAccumulator StatusAccumulator[I]
 	orchestrator      Orchestrator[F]
@@ -312,12 +319,13 @@ type SinkSession[
 
 // Struct for returning summary information about the session
 type SinkSessionInfo[F Flags] struct {
-	PendingBlocksCount uint
-	State              F
-	HavesEstimate      uint
-	Wants              uint
+	PendingBlocksCount uint // Number of received blocks currently pending processing
+	State              F    // State from Orchestrator
+	HavesEstimate      uint // Estimate of the number of 'haves' accumulated since status last sent
+	Wants              uint // Number of 'wants' accumulated since status last sent
 }
 
+// Default string representation of SinkSessionInfo
 func (inf *SinkSessionInfo[F]) String() string {
 	return fmt.Sprintf("pnd:%6v have:%6v want:%6v %v", inf.PendingBlocksCount, inf.HavesEstimate, inf.Wants, inf.State)
 }
