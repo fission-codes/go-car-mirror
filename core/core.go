@@ -297,15 +297,14 @@ type Flags constraints.Unsigned
 type Orchestrator[F Flags] interface {
 	// Notify is used to notify the orchestrator of an event.
 	Notify(SessionEvent) error
-
 	// Get the current state of the Orchestrator.
 	State() F
-
 	// IsClosed returns true if the orchestrator is closed.
 	IsClosed() bool
 }
 
-// SinkSession is a session that receives blocks and sends out status updates
+// SinkSession is a session that receives blocks and sends out status updates. Two type parameters
+// must be supplied, which are the concrete type of the BlockId and the session State
 type SinkSession[
 	I BlockId, // Concrete type for the Block Id used by this session
 	F Flags, // Concrete type for the state information managed by the Orchestrator
@@ -317,7 +316,8 @@ type SinkSession[
 	stats             stats.Stats
 }
 
-// Struct for returning summary information about the session
+// Struct for returning summary information about the session. This is intended to allow implementers to
+// provide users with information concerning transfers in progress.
 type SinkSessionInfo[F Flags] struct {
 	PendingBlocksCount uint // Number of received blocks currently pending processing
 	State              F    // State from Orchestrator
@@ -332,10 +332,10 @@ func (inf *SinkSessionInfo[F]) String() string {
 
 // NewSinkSession creates a new SinkSession.
 func NewSinkSession[I BlockId, F Flags](
-	store BlockStore[I],
-	statusAccumulator StatusAccumulator[I],
-	orchestrator Orchestrator[F],
-	stats stats.Stats,
+	store BlockStore[I], // Block store to which received blocks will be written
+	statusAccumulator StatusAccumulator[I], // Accumulator for status information
+	orchestrator Orchestrator[F], // Orchestrator used to synchronize this session with its communication channel
+	stats stats.Stats, // Collector for session-related statistics
 ) *SinkSession[I, F] {
 	return &SinkSession[I, F]{
 		statusAccumulator,
@@ -346,7 +346,7 @@ func NewSinkSession[I BlockId, F Flags](
 	}
 }
 
-// Get the current state from this session
+// Get the orchestrator for this session
 func (ss *SinkSession[I, F]) Orchestrator() Orchestrator[F] {
 	return ss.orchestrator
 }
@@ -361,7 +361,7 @@ func (ss *SinkSession[I, F]) Info() *SinkSessionInfo[F] {
 	}
 }
 
-// AccumulateStatus accumulates the status of the block with the given id and all of its children.
+// Accumulates the status of the block with the given id and all of its children.
 func (ss *SinkSession[I, F]) AccumulateStatus(id I) error {
 	// Get block and handle errors
 	block, err := ss.store.Get(context.Background(), id)
@@ -397,7 +397,8 @@ func (ss *SinkSession[I, F]) Enqueue(id I) error {
 	return ss.AccumulateStatus(id)            // This is recursive so it may take some time
 }
 
-// HandleBlock handles a block that is being received.
+// HandleBlock handles a block that is being received. Adds the block to the session's store, and
+// then queues the block for further processing.
 func (ss *SinkSession[I, F]) HandleBlock(rawBlock RawBlock[I]) {
 	ss.orchestrator.Notify(BEGIN_RECEIVE)
 	defer ss.orchestrator.Notify(END_RECEIVE)
@@ -414,10 +415,12 @@ func (ss *SinkSession[I, F]) HandleBlock(rawBlock RawBlock[I]) {
 	ss.pendingBlocks.PushBack(block)
 }
 
-// Run runs the receiver session.
-// TODO: Is start a better name?  Starting a session?
-// Or begin, to match the event names?
-func (ss *SinkSession[I, F]) Run(statusSender StatusSender[I]) error {
+// Runs the receiver session. Pulls blocks from the queue of received blocks, then checks the block descendents
+// to see if any are already present in the store, accumulating status accordingly. Terminates when the orchestrator's
+// IsClosed method returns true.
+func (ss *SinkSession[I, F]) Run(
+	statusSender StatusSender[I], // Sender used to transmit status to source
+) error {
 
 	ss.orchestrator.Notify(BEGIN_SESSION)
 	defer ss.orchestrator.Notify(END_SESSION)
@@ -454,7 +457,9 @@ func (ss *SinkSession[I, F]) Run(statusSender StatusSender[I]) error {
 	return nil
 }
 
-// Close closes the sender session.
+// Closes the sink session. Note that the session does not close immediately; this method will return before
+// the session is closed. Exactly *when* the session closes is determined by the orchestrator, but in general
+// this should be only after the session has completed all transfers which are currently in progresss.
 func (ss *SinkSession[I, F]) Close() error {
 	if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
 		return err
@@ -464,7 +469,8 @@ func (ss *SinkSession[I, F]) Close() error {
 	return nil
 }
 
-// Cancel cancels the session.
+// Cancel cancels the session. The session does not *immediately* terminate; the orchestrator plays a role
+// in deciding this. However, transfers in progress will not usually complete.
 func (ss *SinkSession[I, F]) Cancel() error {
 	return ss.orchestrator.Notify(CANCEL)
 }
@@ -474,18 +480,21 @@ func (ss *SinkSession[I, F]) IsClosed() bool {
 	return ss.orchestrator.IsClosed()
 }
 
-// Struct for returting summary information about the session
+// Struct for returting summary information about a Source Session. This is allows implementers to provide
+// user feedback on the state of in-progress transfers.
 type SourceSessionInfo[F Flags] struct {
-	PendingBlocksCount uint
-	State              F
-	HavesEstimate      uint
+	PendingBlocksCount uint // Number of blocks awaiting transmission
+	State              F    // Internal sessions state provided by the Orchestraotr
+	HavesEstimate      uint // Estimate of the number of specific block Ids we know are present on the Sink
 }
 
+// Default user-friendly representation of SourceSessionInfo
 func (inf *SourceSessionInfo[F]) String() string {
 	return fmt.Sprintf("pnd:%6v have:%6v %v", inf.PendingBlocksCount, inf.HavesEstimate, inf.State)
 }
 
-// SourceSession is a session for sending blocks.
+// SinkSession is a session that sends blocks and receives status updates. Two type parameters
+// must be supplied, which are the concrete type of the BlockId and the session State
 type SourceSession[
 	I BlockId,
 	F Flags,
@@ -499,7 +508,12 @@ type SourceSession[
 }
 
 // NewSourceSession creates a new SourceSession.
-func NewSourceSession[I BlockId, F Flags](store BlockStore[I], filter filter.Filter[I], orchestrator Orchestrator[F], stats stats.Stats) *SourceSession[I, F] {
+func NewSourceSession[I BlockId, F Flags](
+	store BlockStore[I], // Block store from which blocks are read
+	filter filter.Filter[I], // Filter to which 'Haves' from the sink will be added
+	orchestrator Orchestrator[F], // Orchestrator used to synchronize this session with its communication channel
+	stats stats.Stats, // Collector for session-related statistics
+) *SourceSession[I, F] {
 	return &SourceSession[I, F]{
 		store,
 		orchestrator,
@@ -524,9 +538,12 @@ func (ss *SourceSession[I, F]) Info() *SourceSessionInfo[F] {
 	}
 }
 
-// Run runs the sender session.
-// TODO: Consider renaming to Start or Begin or Open to match Close/IsClosed?
-func (ss *SourceSession[I, F]) Run(blockSender BlockSender[I]) error {
+// Runs the sender session. Polls the queue of pending blocks, and sends the next block and then queues
+// the children of that block to be sent. Only sends a block if it does not match the Filter, or if it
+// is specifically requested via Enqueue or included as a 'want' in received status.
+func (ss *SourceSession[I, F]) Run(
+	blockSender BlockSender[I], // Sender used to sent blocks to sink
+) error {
 	if err := ss.orchestrator.Notify(BEGIN_SESSION); err != nil {
 		return err
 	}
@@ -577,9 +594,10 @@ func (ss *SourceSession[I, F]) Run(blockSender BlockSender[I]) error {
 }
 
 // HandleStatus handles incoming status, updating the filter and pending blocks list.
-// TODO: Is pending blocks just want but from the sender side?  and filter is have from the sender side?  Could we name these similarly?
-// receiverHave, receiverWant?
-func (ss *SourceSession[I, F]) HandleStatus(have filter.Filter[I], want []I) {
+func (ss *SourceSession[I, F]) HandleStatus(
+	have filter.Filter[I], // A collection of blocks known to already exist on the sink
+	want []I, // A collection of blocks known not to exist on the sink
+) {
 	if err := ss.orchestrator.Notify(BEGIN_RECEIVE); err != nil {
 		ss.stats.Logger().Errorw("error notifying BEGIN_RECEIVE", "object", "SourceSession", "method", "HandleStatus", "error", err)
 	}
@@ -594,7 +612,9 @@ func (ss *SourceSession[I, F]) HandleStatus(have filter.Filter[I], want []I) {
 	ss.stats.Logger().Debugw("incoming want list merged", "obect", "SourceSession", "method", "HandleStatus", "pendingBlocks", ss.pendingBlocks.Len())
 }
 
-// Close closes the sender session.
+// Closes the source session. Note that the session does not close immediately; this method will return before
+// the session is closed. Exactly *when* the session closes is determined by the orchestrator, but in general
+// this should be only after the session has completed all transfers which are currently in progresss.
 func (ss *SourceSession[I, F]) Close() error {
 	if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
 		return err
@@ -606,7 +626,8 @@ func (ss *SourceSession[I, F]) Close() error {
 	return nil
 }
 
-// Cancel cancels the sender session.
+// Cancel cancels the session. The session does not *immediately* terminate; the orchestrator plays a role
+// in deciding this. However, transfers in progress will not usually complete.
 func (ss *SourceSession[I, F]) Cancel() error {
 	return ss.orchestrator.Notify(CANCEL)
 }
