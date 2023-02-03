@@ -282,6 +282,7 @@ func (srv *Server[I, R]) HandleBlocks(response http.ResponseWriter, request *htt
 	// Parse the request to get the blocks message
 	message := messages.BlocksMessage[I, R, batch.BatchState]{}
 	messageReader := bufio.NewReader(request.Body)
+	// TODO: i/o timeout here, leads to BadRequest being returned
 	if err := message.Read(messageReader); err != io.EOF {
 		log.Errorw("parsing blocks message", "object", "Server", "method", "HandleBlocks", "session", sessionToken, "error", err)
 		http.Error(response, "bad message format", http.StatusBadRequest)

@@ -55,6 +55,8 @@ func (bbs *RequestBatchBlockSender[I, R]) SendList(state batch.BatchState, block
 			log.Debugw("exit", "object", "RequestBatchBlockSender", "method", "SendList")
 			return nil
 		} else {
+			// There was no trouble posting.  The server just didn't like the request.
+			// Returns 400 bad request after the content has already been transferred successfully in a previous request.
 			log.Debugw("Unexpected response", "object", "RequestBatchBlockSender", "status", resp.Status)
 			return ErrInvalidResponse
 		}

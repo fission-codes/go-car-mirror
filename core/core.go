@@ -557,6 +557,7 @@ func (ss *SourceSession[I, F]) Run(
 		if ss.pendingBlocks.Len() > 0 {
 			id := ss.pendingBlocks.PollFront()
 			if _, ok := ss.sent.Load(id); !ok {
+				// Is this safe?  If we don't find it in the store, we already marked it as sent.
 				ss.sent.Store(id, true)
 
 				block, err := ss.store.Get(context.Background(), id)
