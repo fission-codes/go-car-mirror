@@ -157,11 +157,13 @@ func (c *Client[I, R]) SinkInfo(url string) (*core.SinkSessionInfo[batch.BatchSt
 	}
 }
 
+// TODO: This is only used in test now.  Remove?
 func (c *Client[I, R]) Send(url string, id I) error {
 	session := c.GetSourceSession(url)
 	return session.Enqueue(id)
 }
 
+// TODO: This is only used in test now.  Remove?
 func (c *Client[I, R]) Receive(url string, id I) error {
 	session := c.GetSinkSession(url)
 	return session.Enqueue(id)

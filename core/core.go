@@ -448,7 +448,11 @@ func (ss *SinkSession[I, F]) Run(
 		// Pending blocks are blocks that have been recieved and added to our block store,
 		// but have not had status accumulated on their children yet.
 		if ss.pendingBlocks.Len() > 0 {
-			ss.orchestrator.Notify(BEGIN_SEND)
+			if err := ss.orchestrator.Notify(BEGIN_SEND); err != nil {
+				ss.doneCh <- err
+				return
+			}
+
 			block := ss.pendingBlocks.PollFront()
 
 			for _, child := range block.Children() {
