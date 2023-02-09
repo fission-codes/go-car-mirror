@@ -110,9 +110,8 @@ func (srv *Server[I, R]) startSourceSession(token SessionToken) *ServerSourceSes
 
 	go func() {
 		log.Debugw("starting source session", "object", "Server", "method", "startSourceSession", "token", token)
-		if err := newSession.Run(newSender); err != nil {
-			log.Errorw("source session ended with error", "object", "Server", "method", "startSourceSession", "token", token, "error", err)
-		}
+		newSession.Run(newSender)
+
 		// TODO: potential race condition if Run() completes before the
 		// session is added to the list of sink sessions (which happens
 		// when startSourceSession returns)
@@ -124,9 +123,9 @@ func (srv *Server[I, R]) startSourceSession(token SessionToken) *ServerSourceSes
 	return &ServerSourceSessionData[I, R]{sourceConnection, newSession}
 }
 
-func (srv *Server[I, R]) GetSourceSession(token SessionToken) (*ServerSourceSessionData[I, R], error) {
+func (srv *Server[I, R]) GetSourceSession(token SessionToken) *ServerSourceSessionData[I, R] {
 	if session, ok := srv.sourceSessions.Get(token); ok {
-		return session, nil
+		return session
 	} else {
 		session = srv.sourceSessions.GetOrInsert(
 			token,
@@ -134,7 +133,7 @@ func (srv *Server[I, R]) GetSourceSession(token SessionToken) (*ServerSourceSess
 				return srv.startSourceSession(token)
 			},
 		)
-		return session, nil
+		return session
 	}
 }
 
@@ -166,12 +165,7 @@ func (srv *Server[I, R]) HandleStatus(response http.ResponseWriter, request *htt
 	log.Debugw("have session token", "object", "Server", "method", "HandleStatus", "token", sessionToken)
 
 	// Find the session from the session token, or create one
-	sourceSession, err := srv.GetSourceSession(sessionToken)
-	if err != nil {
-		log.Errorw("obtaining session", "object", "Server", "method", "HandleStatus", "session", sessionToken, "error", err)
-		http.Error(response, "could not obtain session", http.StatusInternalServerError)
-		return
-	}
+	sourceSession := srv.GetSourceSession(sessionToken)
 	log.Debugw("have session for token", "object", "Server", "method", "HandleStatus", "session", sessionToken)
 
 	// Parse the request to get the status message
@@ -214,10 +208,7 @@ func (srv *Server[I, R]) startSinkSession(token SessionToken) *ServerSinkSession
 	sender := sourceConnection.DeferredSender()
 
 	go func() {
-		err := newSession.Run(sender)
-		if err != nil {
-			log.Errorw("session returned error", "object", "Server", "method", "HandleBlocks", "session", token, "error", err)
-		}
+		newSession.Run(sender)
 		sender.Close()
 		srv.sinkSessions.Remove(token)
 	}()
@@ -228,9 +219,9 @@ func (srv *Server[I, R]) startSinkSession(token SessionToken) *ServerSinkSession
 	}
 }
 
-func (srv *Server[I, R]) GetSinkSession(token SessionToken) (*ServerSinkSessionData[I, R], error) {
+func (srv *Server[I, R]) GetSinkSession(token SessionToken) *ServerSinkSessionData[I, R] {
 	if session, ok := srv.sinkSessions.Get(token); ok {
-		return session, nil
+		return session
 	} else {
 		session = srv.sinkSessions.GetOrInsert(
 			token,
@@ -238,7 +229,7 @@ func (srv *Server[I, R]) GetSinkSession(token SessionToken) (*ServerSinkSessionD
 				return srv.startSinkSession(token)
 			},
 		)
-		return session, nil
+		return session
 	}
 }
 
@@ -271,12 +262,7 @@ func (srv *Server[I, R]) HandleBlocks(response http.ResponseWriter, request *htt
 
 	// Find the session from the session token, or create one
 	// TODO: Use GetOrInsert with a closure to avoid potentially spinning off sessions that are never closed
-	sinkSession, err := srv.GetSinkSession(sessionToken)
-	if err != nil {
-		log.Errorw("obtaining session", "object", "Server", "method", "HandleStatus", "session", sessionToken, "error", err)
-		http.Error(response, "could not obtain session", http.StatusInternalServerError)
-		return
-	}
+	sinkSession := srv.GetSinkSession(sessionToken)
 	log.Debugw("have session for token", "object", "Server", "method", "HandleBlocks", "session", sessionToken)
 
 	// Parse the request to get the blocks message

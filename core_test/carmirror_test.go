@@ -245,14 +245,18 @@ func MockBatchTransfer(senderStore *mock.Store, receiverStore *mock.Store, root 
 	errCh := make(chan error)
 	go func() {
 		log.Debugf("sender session started")
-		errCh <- senderSession.Run(blockSender)
+		senderSession.Run(blockSender)
+		err := <-senderSession.Done()
+		errCh <- err
 		blockSender.Close()
 		log.Debugf("sender session terminated")
 	}()
 
 	go func() {
 		log.Debugf("receiver session started")
-		errCh <- receiverSession.Run(statusSender)
+		receiverSession.Run(statusSender)
+		err := <-receiverSession.Done()
+		errCh <- err
 		statusSender.Close()
 		log.Debugf("receiver session terminated")
 	}()
@@ -456,14 +460,18 @@ func TestSessionQuiescence(t *testing.T) {
 	errCh := make(chan error)
 	go func() {
 		log.Debugf("sender session started")
-		errCh <- senderSession.Run(blockSender)
+		senderSession.Run(blockSender)
+		err := <-senderSession.Done()
+		errCh <- err
 		blockSender.Close()
 		log.Debugf("sender session terminated")
 	}()
 
 	go func() {
 		log.Debugf("receiver session started")
-		errCh <- receiverSession.Run(statusSender)
+		receiverSession.Run(statusSender)
+		err := <-receiverSession.Done()
+		errCh <- err
 		statusSender.Close()
 		log.Debugf("receiver session terminated")
 	}()
