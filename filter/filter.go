@@ -392,19 +392,19 @@ func (f *BloomFilter[K]) TryAddAll(other Filter[K]) error {
 	if ok {
 		log.Debugw("enter", "object", "BloomFilter", "method", "TryAddAll", "other.bitCount", obf.filter.BitCount(), "hashCount", obf.filter.HashCount())
 		if f.capacity < f.count+obf.count {
-			working_bloom := f.filter.Copy()
-			err := working_bloom.Union(obf.filter)
+			workingBloom := f.filter.Copy()
+			err := workingBloom.Union(obf.filter)
 			if err != nil {
 				log.Debugw("exit", "object", "BloomFilter", "method", "TryAddAll", "error", err)
 				return err
 			}
-			new_count := int(working_bloom.EstimateEntries())
-			if new_count >= f.capacity {
+			newCount := int(workingBloom.EstimateEntries())
+			if newCount >= f.capacity {
 				log.Debugw("exit", "object", "BloomFilter", "method", "TryAddAll", "error", ErrBloomOverflow)
 				return ErrBloomOverflow
 			}
-			f.filter = working_bloom
-			f.count = new_count
+			f.filter = workingBloom
+			f.count = newCount
 		} else {
 			err := f.filter.Union(obf.filter)
 			if err != nil {

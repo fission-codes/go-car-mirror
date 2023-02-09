@@ -557,7 +557,7 @@ func (ss *SourceSession[I, F]) Run(
 		if ss.pendingBlocks.Len() > 0 {
 			id := ss.pendingBlocks.PollFront()
 			if _, ok := ss.sent.Load(id); !ok {
-				// Is this safe?  If we don't find it in the store, we already marked it as sent.
+				// TODO: Is this safe?  If we don't find it in the store, we already marked it as sent.
 				ss.sent.Store(id, true)
 
 				block, err := ss.store.Get(context.Background(), id)
@@ -568,6 +568,7 @@ func (ss *SourceSession[I, F]) Run(
 				} else {
 					ss.orchestrator.Notify(BEGIN_SEND)
 					if err := blockSender.SendBlock(block); err != nil {
+						// TODO: If error here, maybe we should remove it from ss.sent.
 						return err
 					}
 					for _, child := range block.Children() {

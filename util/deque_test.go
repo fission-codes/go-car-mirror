@@ -69,13 +69,13 @@ func ModelTestAsForwardQueue(queue Deque[int], entries int, repeats int, t *test
 		if padding > 0 {
 			RandomInsert(queue, padding)
 		}
-		init_len := queue.Len()
+		initLen := queue.Len()
 		for i := 0; i < entries; i++ {
 			if err := queue.PushBack(i); err != nil {
 				t.Errorf("got error %v when pushing", err)
 			}
 		}
-		if queue.Len()-init_len != entries {
+		if queue.Len()-initLen != entries {
 			t.Errorf("On iteration %v, Bad length for queue, want %v, got %v", repeat, entries, queue.Len())
 		}
 		RandomRemove(queue)
@@ -170,11 +170,11 @@ func ModelTestAsForwardStack(queue Deque[int], entries int, repeats int, t *test
 		if padding > 0 {
 			RandomInsert(queue, padding)
 		}
-		init_len := queue.Len()
+		initLen := queue.Len()
 		for i := 0; i < entries; i++ {
 			queue.PushBack(i)
 		}
-		if queue.Len()-init_len != entries {
+		if queue.Len()-initLen != entries {
 			t.Errorf("On iteration %v, Bad length for queue, want %v, got %v", repeat, entries, queue.Len())
 		}
 		RandomRemove(queue)
@@ -199,11 +199,11 @@ func ModelTestAsReverseQueue(queue Deque[int], entries int, repeats int, t *test
 		if padding > 0 {
 			RandomInsert(queue, padding)
 		}
-		init_len := queue.Len()
+		initLen := queue.Len()
 		for i := 0; i < entries; i++ {
 			queue.PushFront(i)
 		}
-		if queue.Len()-init_len != entries {
+		if queue.Len()-initLen != entries {
 			t.Errorf("On iteration %v, Bad length for queue, want %v, got %v", repeat, entries, queue.Len())
 		}
 		RandomRemove(queue)
@@ -250,11 +250,11 @@ func ModelTestAsReverseStack(queue Deque[int], entries int, repeats int, t *test
 		if padding > 0 {
 			RandomInsert(queue, padding)
 		}
-		init_len := queue.Len()
+		initLen := queue.Len()
 		for i := 0; i < entries; i++ {
 			queue.PushFront(i)
 		}
-		if queue.Len()-init_len != entries {
+		if queue.Len()-initLen != entries {
 			t.Errorf("On iteration %v, Bad length for queue, want %v, got %v", repeat, entries, queue.Len())
 		}
 		RandomRemove(queue)

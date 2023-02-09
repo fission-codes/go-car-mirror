@@ -190,82 +190,82 @@ func (sn *MockStatusSender) Close() error {
 
 // Filter
 
-func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, root mock.BlockId, max_batch_size uint, bytes_per_ms int64, latency_ms int64) error {
+func MockBatchTransfer(senderStore *mock.Store, receiverStore *mock.Store, root mock.BlockId, maxBatchSize uint, bytesPerMs int64, latencyMs int64) error {
 
 	snapshotBefore := stats.GLOBAL_REPORTING.Snapshot()
 
 	blockChannel := BlockChannel{
 		make(chan *messages.BlocksMessage[mock.BlockId, *mock.BlockId, batch.BatchState]),
 		nil,
-		bytes_per_ms,
-		latency_ms,
+		bytesPerMs,
+		latencyMs,
 	}
 
 	statusChannel := StatusChannel{
 		make(chan *messages.StatusMessage[mock.BlockId, *mock.BlockId, batch.BatchState]),
 		nil,
-		bytes_per_ms,
-		latency_ms,
+		bytesPerMs,
+		latencyMs,
 	}
 
-	source_connection := batch.NewGenericBatchSourceConnection[mock.BlockId](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE)
+	sourceConnection := batch.NewGenericBatchSourceConnection[mock.BlockId](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE)
 
-	sender_session := source_connection.Session(
-		sender_store,
+	senderSession := sourceConnection.Session(
+		senderStore,
 		filter.NewSynchronizedFilter(makeBloom(1024)),
 	)
 
-	log.Debugf("created sender_session")
+	log.Debugf("created senderSession")
 
-	sink_connection := batch.NewGenericBatchSinkConnection[mock.BlockId](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE)
+	sinkConnection := batch.NewGenericBatchSinkConnection[mock.BlockId](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE)
 
-	receiver_session := sink_connection.Session(
-		NewSynchronizedBlockStore[mock.BlockId](NewSynchronizedBlockStore[mock.BlockId](receiver_store)),
+	receiverSession := sinkConnection.Session(
+		NewSynchronizedBlockStore[mock.BlockId](NewSynchronizedBlockStore[mock.BlockId](receiverStore)),
 		NewSimpleStatusAccumulator[mock.BlockId](filter.NewSynchronizedFilter(makeBloom(1024))),
 	)
 
-	log.Debugf("created receiver_session")
+	log.Debugf("created receiverSession")
 
-	blockSender := source_connection.Sender(&blockChannel, uint32(max_batch_size))
-	statusSender := sink_connection.Sender(&statusChannel)
+	blockSender := sourceConnection.Sender(&blockChannel, uint32(maxBatchSize))
+	statusSender := sinkConnection.Sender(&statusChannel)
 
-	statusChannel.SetStatusListener(source_connection.Receiver(sender_session))
-	blockChannel.SetBlockListener(sink_connection.Receiver(receiver_session))
+	statusChannel.SetStatusListener(sourceConnection.Receiver(senderSession))
+	blockChannel.SetBlockListener(sinkConnection.Receiver(receiverSession))
 
-	log.Debugf("created receiver_session")
+	log.Debugf("created receiverSession")
 
-	sender_session.Enqueue(root)
+	senderSession.Enqueue(root)
 
 	// Close both sessions when they become quiescent
-	sender_session.Close()
-	receiver_session.Close()
+	senderSession.Close()
+	receiverSession.Close()
 
 	log.Debugf("starting goroutines")
 
-	err_chan := make(chan error)
+	errCh := make(chan error)
 	go func() {
 		log.Debugf("sender session started")
-		err_chan <- sender_session.Run(blockSender)
+		errCh <- senderSession.Run(blockSender)
 		blockSender.Close()
 		log.Debugf("sender session terminated")
 	}()
 
 	go func() {
 		log.Debugf("receiver session started")
-		err_chan <- receiver_session.Run(statusSender)
+		errCh <- receiverSession.Run(statusSender)
 		statusSender.Close()
 		log.Debugf("receiver session terminated")
 	}()
 
 	go func() {
 		log.Debugf("block listener started")
-		err_chan <- blockChannel.listen()
+		errCh <- blockChannel.listen()
 		log.Debugf("block listener terminated")
 	}()
 
 	go func() {
 		log.Debugf("status listener started")
-		err_chan <- statusChannel.listen()
+		errCh <- statusChannel.listen()
 		log.Debugf("status listener terminated")
 	}()
 
@@ -273,18 +273,18 @@ func MockBatchTransfer(sender_store *mock.Store, receiver_store *mock.Store, roo
 		log.Debugf("timeout started")
 		time.Sleep(20 * time.Second)
 		log.Debugf("timeout elapsed")
-		if !sender_session.IsClosed() {
-			sender_session.Cancel()
+		if !senderSession.IsClosed() {
+			senderSession.Cancel()
 		}
-		if !receiver_session.IsClosed() {
-			receiver_session.Cancel()
+		if !receiverSession.IsClosed() {
+			receiverSession.Cancel()
 		}
 	}()
 
 	var err error
 
 	for i := 0; i < 4 && err == nil; i++ {
-		err = <-err_chan
+		err = <-errCh
 		log.Debugf("goroutine terminated with %v", err)
 	}
 
@@ -423,60 +423,60 @@ func TestSessionQuiescence(t *testing.T) {
 	root := mock.RandId()
 	senderStore.Add(context.Background(), mock.NewBlock(root, 100))
 
-	source_connection := batch.NewGenericBatchSourceConnection[mock.BlockId](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE|instrumented.INSTRUMENT_SENDER)
+	sourceConnection := batch.NewGenericBatchSourceConnection[mock.BlockId](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE|instrumented.INSTRUMENT_SENDER)
 
-	sender_session := source_connection.Session(
+	senderSession := sourceConnection.Session(
 		senderStore,
 		filter.NewSynchronizedFilter(makeBloom(1024)),
 	)
 
-	log.Debugf("created sender_session")
+	log.Debugf("created senderSession")
 
-	sink_connection := batch.NewGenericBatchSinkConnection[mock.BlockId](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE)
+	sinkConnection := batch.NewGenericBatchSinkConnection[mock.BlockId](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE)
 
-	receiver_session := sink_connection.Session(
+	receiverSession := sinkConnection.Session(
 		NewSynchronizedBlockStore[mock.BlockId](receiverStore),
 		NewSimpleStatusAccumulator[mock.BlockId](filter.NewSynchronizedFilter(makeBloom(1024))),
 	)
 
-	log.Debugf("created receiver_session")
+	log.Debugf("created receiverSession")
 
-	blockSender := source_connection.Sender(&blockChannel, 100)
-	statusSender := sink_connection.Sender(&statusChannel)
+	blockSender := sourceConnection.Sender(&blockChannel, 100)
+	statusSender := sinkConnection.Sender(&statusChannel)
 
-	statusChannel.SetStatusListener(source_connection.Receiver(sender_session))
-	blockChannel.SetBlockListener(sink_connection.Receiver(receiver_session))
+	statusChannel.SetStatusListener(sourceConnection.Receiver(senderSession))
+	blockChannel.SetBlockListener(sinkConnection.Receiver(receiverSession))
 
-	log.Debugf("created receiver_session")
+	log.Debugf("created receiverSession")
 
-	sender_session.Enqueue(root)
+	senderSession.Enqueue(root)
 
 	log.Debugf("starting goroutines")
 
-	err_chan := make(chan error)
+	errCh := make(chan error)
 	go func() {
 		log.Debugf("sender session started")
-		err_chan <- sender_session.Run(blockSender)
+		errCh <- senderSession.Run(blockSender)
 		blockSender.Close()
 		log.Debugf("sender session terminated")
 	}()
 
 	go func() {
 		log.Debugf("receiver session started")
-		err_chan <- receiver_session.Run(statusSender)
+		errCh <- receiverSession.Run(statusSender)
 		statusSender.Close()
 		log.Debugf("receiver session terminated")
 	}()
 
 	go func() {
 		log.Debugf("block listener started")
-		err_chan <- blockChannel.listen()
+		errCh <- blockChannel.listen()
 		log.Debugf("block listener terminated")
 	}()
 
 	go func() {
 		log.Debugf("status listener started")
-		err_chan <- statusChannel.listen()
+		errCh <- statusChannel.listen()
 		log.Debugf("status listener terminated")
 	}()
 
@@ -484,19 +484,19 @@ func TestSessionQuiescence(t *testing.T) {
 		log.Debugf("close timeout started")
 		time.Sleep(5 * time.Second)
 		log.Debugf("close timeout elapsed")
-		if err := sender_session.Close(); err != nil {
-			err_chan <- err
-		} else if err := receiver_session.Close(); err != nil {
-			err_chan <- err
+		if err := senderSession.Close(); err != nil {
+			errCh <- err
+		} else if err := receiverSession.Close(); err != nil {
+			errCh <- err
 		} else {
-			err_chan <- nil
+			errCh <- nil
 		}
 	}()
 
 	var err error
 
 	for i := 0; i < 5 && err == nil; i++ {
-		err = <-err_chan
+		err = <-errCh
 		if err != nil {
 			t.Errorf("goroutine terminated with %v", err)
 		} else {

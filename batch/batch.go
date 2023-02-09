@@ -26,7 +26,7 @@ const (
 	SINK_WAITING      // Sink is waiting for a batch of blocks
 	SINK_ENQUEUING    // Sink is processing a block id that has been explicitly requested
 	SINK_SENDING      // Sink may have status pending flush
-	SOURCE_PROCESSING // Source is processing a batch of blocks
+	SOURCE_PROCESSING // Source is processing a batch of blocks.  Technically it's also being used to signal that we're *ready* to process, such that BEGIN_PROCESSING will let processing happen.
 	SOURCE_FLUSHING   // Source is flushing blocks
 	SOURCE_WAITING    // Source is waiting for a status message
 	SOURCE_SENDING    // Source has unflushed blocks
@@ -157,6 +157,8 @@ func (sbbs *SimpleBatchBlockSender[I]) SendBlock(block core.RawBlock[I]) error {
 	sbbs.list = append(sbbs.list, block)
 	sbbs.listMutex.Unlock()
 
+	// TODO: Add logic around maxBatchSizeColdCall if needed.
+
 	if len(sbbs.list) >= int(sbbs.maxBatchSize) {
 		return sbbs.Flush()
 	}
@@ -203,7 +205,7 @@ func NewBatchSourceOrchestrator() *BatchSourceOrchestrator {
 
 // Notify notifies the orchestrator of a session event.
 // Events lead to state transitions in the orchestrator.
-//
+// TODO: Should context be passed, to allow for cancellation and timeouts?  In particular I'm thinking of ENQUEUE or any function that could impact user experience.
 func (bso *BatchSourceOrchestrator) Notify(event core.SessionEvent) error {
 	switch event {
 	case core.BEGIN_PROCESSING:
@@ -345,6 +347,7 @@ func NewSimpleBatchStatusReceiver[I core.BlockId](session core.StatusReceiver[I]
 
 // HandleList handles a list of raw blocks.
 func (sbbr *SimpleBatchStatusReceiver[I]) HandleStatus(state BatchState, have filter.Filter[I], want []I) error {
+	// TODO: handle errors
 	sbbr.session.HandleStatus(have, want)
 	// if remote session is closing, ask this side do close as well.
 	if state&CLOSING != 0 {
