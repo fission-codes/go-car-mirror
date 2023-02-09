@@ -23,11 +23,11 @@ func assertBytesEqual(a []byte, b []byte, t *testing.T) {
 	if len(a) != len(b) {
 		t.Errorf("Length ase different: %v, %v", len(a), len(b))
 	}
-	compare_length := util.Min(len(a), len(b))
+	compareLength := util.Min(len(a), len(b))
 	var j int
-	for j = 0; j < compare_length && a[j] == b[j]; j++ {
+	for j = 0; j < compareLength && a[j] == b[j]; j++ {
 	}
-	if j < compare_length {
+	if j < compareLength {
 		t.Errorf("First difference is at byte: %v", j)
 	}
 }

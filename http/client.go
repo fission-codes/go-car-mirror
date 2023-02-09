@@ -43,19 +43,19 @@ func (c *Client[I, R]) startSourceSession(url string) *core.SourceSession[I, bat
 		panic(err)
 	}
 
-	source_connection := NewHttpClientSourceConnection[I, R](
+	sourceConnection := NewHttpClientSourceConnection[I, R](
 		&http.Client{Jar: jar},
 		url+"/dag/cm/blocks",
 		stats.GLOBAL_STATS.WithContext(url),
 		c.instrumented,
 	)
 
-	newSession := source_connection.Session(
+	newSession := sourceConnection.Session(
 		c.store,
 		filter.NewSynchronizedFilter[I](filter.NewEmptyFilter(c.allocator)),
 	)
 
-	newSender := source_connection.ImmediateSender(newSession, c.maxBatchSize)
+	newSender := sourceConnection.ImmediateSender(newSession, c.maxBatchSize)
 
 	go func() {
 		log.Debugw("starting source session", "object", "Client", "method", "startSourceSession", "url", url)
@@ -93,19 +93,19 @@ func (c *Client[I, R]) startSinkSession(url string) *core.SinkSession[I, batch.B
 		panic(err)
 	}
 
-	sink_connection := NewHttpClientSinkConnection[I, R](
+	sinkConnection := NewHttpClientSinkConnection[I, R](
 		&http.Client{Jar: jar},
 		url+"/dag/cm/status",
 		stats.GLOBAL_STATS.WithContext(url),
 		c.instrumented,
 	)
 
-	newSession := sink_connection.Session(
+	newSession := sinkConnection.Session(
 		c.store,
 		core.NewSimpleStatusAccumulator(c.allocator()),
 	)
 
-	sender := sink_connection.ImmediateSender(newSession)
+	sender := sinkConnection.ImmediateSender(newSession)
 
 	go func() {
 		log.Debugw("starting sink session", "object", "Client", "method", "startSinkSession", "url", url)

@@ -36,7 +36,8 @@ func (bbs *RequestBatchBlockSender[I, R]) SendList(state batch.BatchState, block
 	}()
 	log.Debugw("post", "object", "RequestBatchBlockSender", "method", "SendList", "url", bbs.url)
 	if resp, err := bbs.client.Post(bbs.url, CONTENT_TYPE_CBOR, reader); err != nil {
-		log.Debugw("exit", "object", "RequestBatchBlockSender", "method", "SendList", "error", err)
+		log.Errorw("exit", "object", "RequestBatchBlockSender", "method", "SendList", "error", err)
+		// HERE: we're getting a TCP dial error here and returning it.
 		return err
 	} else {
 		if resp.StatusCode == http.StatusAccepted {
@@ -55,6 +56,8 @@ func (bbs *RequestBatchBlockSender[I, R]) SendList(state batch.BatchState, block
 			log.Debugw("exit", "object", "RequestBatchBlockSender", "method", "SendList")
 			return nil
 		} else {
+			// There was no trouble posting.  The server just didn't like the request.
+			// Returns 400 bad request after the content has already been transferred successfully in a previous request.
 			log.Debugw("Unexpected response", "object", "RequestBatchBlockSender", "status", resp.Status)
 			return ErrInvalidResponse
 		}

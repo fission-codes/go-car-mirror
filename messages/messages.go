@@ -202,6 +202,9 @@ func (car *Archive[T, R]) Read(reader core.ByteAndBlockReader) error {
 			}
 		}
 	}
+	if err != nil {
+		log.Debugw("failed to read archive", "error", err)
+	}
 	return err
 }
 
@@ -257,9 +260,11 @@ func (msg *BlocksMessage[T, B, F]) Write(writer io.Writer) error {
 // Read reads the blocks message from the reader.
 func (msg *BlocksMessage[T, B, F]) Read(reader core.ByteAndBlockReader) error {
 	if data, err := readBufferWithPrefix(reader); err != nil {
+		log.Debugw("failed to read blocks message", "error", err)
 		return err
 	} else {
 		if err = cbor.Unmarshal(data, &msg.State); err != nil {
+			log.Debugw("failed to unmarshal blocks message state", "error", err)
 			return err
 		}
 	}

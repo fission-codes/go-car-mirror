@@ -99,14 +99,14 @@ func (srv *Server[I, R]) generateToken(remoteAddr string) SessionToken {
 
 func (srv *Server[I, R]) startSourceSession(token SessionToken) *ServerSourceSessionData[I, R] {
 
-	source_connection := NewHttpServerSourceConnection[I, R](stats.GLOBAL_STATS.WithContext(string(token)), srv.instrumented)
+	sourceConnection := NewHttpServerSourceConnection[I, R](stats.GLOBAL_STATS.WithContext(string(token)), srv.instrumented)
 
-	newSession := source_connection.Session(
+	newSession := sourceConnection.Session(
 		srv.store,
 		filter.NewSynchronizedFilter[I](filter.NewEmptyFilter(srv.allocator)),
 	)
 
-	newSender := source_connection.DeferredSender(srv.maxBatchSize)
+	newSender := sourceConnection.DeferredSender(srv.maxBatchSize)
 
 	go func() {
 		log.Debugw("starting source session", "object", "Server", "method", "startSourceSession", "token", token)
@@ -121,7 +121,7 @@ func (srv *Server[I, R]) startSourceSession(token SessionToken) *ServerSourceSes
 		log.Debugw("source session ended", "object", "Server", "method", "startSourceSession", "token", token)
 	}()
 
-	return &ServerSourceSessionData[I, R]{source_connection, newSession}
+	return &ServerSourceSessionData[I, R]{sourceConnection, newSession}
 }
 
 func (srv *Server[I, R]) GetSourceSession(token SessionToken) (*ServerSourceSessionData[I, R], error) {
@@ -204,14 +204,14 @@ func (srv *Server[I, R]) HandleStatus(response http.ResponseWriter, request *htt
 
 func (srv *Server[I, R]) startSinkSession(token SessionToken) *ServerSinkSessionData[I, R] {
 
-	source_connection := NewHttpServerSinkConnection[I, R](stats.GLOBAL_STATS.WithContext(string(token)), srv.instrumented)
+	sourceConnection := NewHttpServerSinkConnection[I, R](stats.GLOBAL_STATS.WithContext(string(token)), srv.instrumented)
 
-	newSession := source_connection.Session(
+	newSession := sourceConnection.Session(
 		srv.store,
 		core.NewSimpleStatusAccumulator(srv.allocator()),
 	)
 
-	sender := source_connection.DeferredSender()
+	sender := sourceConnection.DeferredSender()
 
 	go func() {
 		err := newSession.Run(sender)
@@ -223,7 +223,7 @@ func (srv *Server[I, R]) startSinkSession(token SessionToken) *ServerSinkSession
 	}()
 
 	return &ServerSinkSessionData[I, R]{
-		source_connection,
+		sourceConnection,
 		newSession,
 	}
 }
@@ -282,6 +282,7 @@ func (srv *Server[I, R]) HandleBlocks(response http.ResponseWriter, request *htt
 	// Parse the request to get the blocks message
 	message := messages.BlocksMessage[I, R, batch.BatchState]{}
 	messageReader := bufio.NewReader(request.Body)
+	// TODO: i/o timeout here, leads to BadRequest being returned
 	if err := message.Read(messageReader); err != io.EOF {
 		log.Errorw("parsing blocks message", "object", "Server", "method", "HandleBlocks", "session", sessionToken, "error", err)
 		http.Error(response, "bad message format", http.StatusBadRequest)

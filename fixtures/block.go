@@ -132,13 +132,13 @@ func (b *Block) RawData() []byte {
 	if err := binary.Write(&buf, binary.BigEndian, b.links); err != nil {
 		panic(err)
 	}
-	remaining_bytes := b.Size() - 2 - int64(len(b.links))*BLOCK_ID_SIZE
+	remainingBytes := b.Size() - 2 - int64(len(b.links))*BLOCK_ID_SIZE
 	source := rand.New(rand.NewSource(int64(binary.BigEndian.Uint64(b.id[0:8]) >> 1)))
-	count, err := io.CopyN(&buf, source, remaining_bytes)
+	count, err := io.CopyN(&buf, source, remainingBytes)
 	if err != nil {
 		panic(err)
 	}
-	if count != remaining_bytes {
+	if count != remainingBytes {
 		panic("couldn't write enough bytes")
 	}
 	return buf.Bytes()
@@ -258,9 +258,9 @@ func (bs *Store) Dump(id BlockId, log *zap.SugaredLogger, spacer string) (core.B
 	block, ok := bs.blocks[id]
 	if ok {
 		log.Info(fmt.Sprintf("%s%s", spacer, id.String()))
-		child_spacer := spacer + "  "
+		childSpacer := spacer + "  "
 		for _, child := range block.Children() {
-			bs.Dump(child, log, child_spacer)
+			bs.Dump(child, log, childSpacer)
 		}
 	} else {
 		log.Info(fmt.Sprintf("%s<not present>", spacer))

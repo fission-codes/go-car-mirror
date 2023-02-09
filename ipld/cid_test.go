@@ -18,8 +18,8 @@ func RandId() Cid {
 	if hashBuf, err := mh.Encode(hash[:], mh.SHA3_256); err != nil {
 		panic(err)
 	} else {
-		ipfs_cid := cid.NewCidV1(uint64(mc.Identity), hashBuf)
-		return Cid{ipfs_cid}
+		ipfsCid := cid.NewCidV1(uint64(mc.Identity), hashBuf)
+		return Cid{ipfsCid}
 	}
 }
 
