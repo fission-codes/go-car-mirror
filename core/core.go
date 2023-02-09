@@ -430,6 +430,7 @@ func (ss *SinkSession[I, F]) Run(
 ) {
 	defer func() {
 		ss.doneCh <- nil
+		close(ss.doneCh)
 	}()
 
 	if err := ss.orchestrator.Notify(BEGIN_SESSION); err != nil {
@@ -583,6 +584,7 @@ func (ss *SourceSession[I, F]) Run(
 ) {
 	defer func() {
 		ss.doneCh <- nil
+		close(ss.doneCh)
 	}()
 
 	if err := ss.orchestrator.Notify(BEGIN_SESSION); err != nil {
