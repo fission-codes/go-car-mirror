@@ -314,6 +314,7 @@ type SinkSession[
 	store             BlockStore[I]
 	pendingBlocks     *util.SynchronizedDeque[Block[I]]
 	stats             stats.Stats
+	doneCh            chan error
 }
 
 // Struct for returning summary information about the session. This is intended to allow implementers to
@@ -343,7 +344,13 @@ func NewSinkSession[I BlockId, F Flags](
 		store,
 		util.NewSynchronizedDeque[Block[I]](util.NewBlocksDeque[Block[I]](2048)),
 		stats,
+		make(chan error, 1),
 	}
+}
+
+// Done returns an error channel which will be closed when the session is complete.
+func (ss *SinkSession[I, F]) Done() <-chan error {
+	return ss.doneCh
 }
 
 // Get the orchestrator for this session
@@ -421,6 +428,9 @@ func (ss *SinkSession[I, F]) HandleBlock(rawBlock RawBlock[I]) {
 func (ss *SinkSession[I, F]) Run(
 	statusSender StatusSender[I], // Sender used to transmit status to source
 ) error {
+	defer func() {
+		ss.doneCh <- nil
+	}()
 
 	ss.orchestrator.Notify(BEGIN_SESSION)
 	defer ss.orchestrator.Notify(END_SESSION)
@@ -505,6 +515,7 @@ type SourceSession[
 	sent          sync.Map
 	pendingBlocks *util.SynchronizedDeque[I]
 	stats         stats.Stats
+	doneCh        chan error
 }
 
 // NewSourceSession creates a new SourceSession.
@@ -521,7 +532,14 @@ func NewSourceSession[I BlockId, F Flags](
 		sync.Map{},
 		util.NewSynchronizedDeque[I](util.NewBlocksDeque[I](1024)),
 		stats,
+		make(chan error, 1),
 	}
+}
+
+// Done returns an error channel that will be closed when the session is closed.
+// If the session is closed due to an error, the error will be sent on the channel.
+func (ss *SourceSession[I, F]) Done() <-chan error {
+	return ss.doneCh
 }
 
 // Retrieve the current session state
@@ -544,6 +562,10 @@ func (ss *SourceSession[I, F]) Info() *SourceSessionInfo[F] {
 func (ss *SourceSession[I, F]) Run(
 	blockSender BlockSender[I], // Sender used to sent blocks to sink
 ) error {
+	defer func() {
+		ss.doneCh <- nil
+	}()
+
 	if err := ss.orchestrator.Notify(BEGIN_SESSION); err != nil {
 		return err
 	}

@@ -72,9 +72,9 @@ func (c *Client[I, R]) startSourceSession(url string) *core.SourceSession[I, bat
 	return newSession
 }
 
-func (c *Client[I, R]) GetSourceSession(url string) (*core.SourceSession[I, batch.BatchState], error) {
+func (c *Client[I, R]) GetSourceSession(url string) *core.SourceSession[I, batch.BatchState] {
 	if session, ok := c.sourceSessions.Get(url); ok {
-		return session, nil
+		return session
 	} else {
 		session = c.sourceSessions.GetOrInsert(
 			url,
@@ -82,7 +82,7 @@ func (c *Client[I, R]) GetSourceSession(url string) (*core.SourceSession[I, batc
 				return c.startSourceSession(url)
 			},
 		)
-		return session, nil
+		return session
 	}
 }
 
@@ -122,9 +122,9 @@ func (c *Client[I, R]) startSinkSession(url string) *core.SinkSession[I, batch.B
 	return newSession
 }
 
-func (c *Client[I, R]) GetSinkSession(url string) (*core.SinkSession[I, batch.BatchState], error) {
+func (c *Client[I, R]) GetSinkSession(url string) *core.SinkSession[I, batch.BatchState] {
 	if session, ok := c.sinkSessions.Get(url); ok {
-		return session, nil
+		return session
 	} else {
 		session = c.sinkSessions.GetOrInsert(
 			url,
@@ -132,7 +132,7 @@ func (c *Client[I, R]) GetSinkSession(url string) (*core.SinkSession[I, batch.Ba
 				return c.startSinkSession(url)
 			},
 		)
-		return session, nil
+		return session
 	}
 }
 
@@ -161,42 +161,27 @@ func (c *Client[I, R]) SinkInfo(url string) (*core.SinkSessionInfo[batch.BatchSt
 }
 
 func (c *Client[I, R]) Send(url string, id I) error {
-	session, err := c.GetSourceSession(url)
-	if err != nil {
-		return err
-	}
-	session.Enqueue(id)
-	return nil
+	session := c.GetSourceSession(url)
+	return session.Enqueue(id)
 }
 
 func (c *Client[I, R]) Receive(url string, id I) error {
-	session, err := c.GetSinkSession(url)
-	if err != nil {
-		return err
-	}
+	session := c.GetSinkSession(url)
 	return session.Enqueue(id)
 }
 
 func (c *Client[I, R]) CloseSource(url string) error {
 	log.Debugw("enter", "object", "Client", "method", "CloseSource", "url", url)
-	session, err := c.GetSourceSession(url)
-	if err != nil {
-		log.Debugw("exit", "object", "Client", "method", "CloseSource", "err", err)
-		return err
-	}
-	err = session.Close()
+	session := c.GetSourceSession(url)
+	err := session.Close()
 	log.Debugw("exit", "object", "Client", "method", "CloseSource", "err", err)
 	return err
 }
 
 func (c *Client[I, R]) CloseSink(url string) error {
 	log.Debugw("enter", "object", "Client", "method", "CloseSink", "url", url)
-	session, err := c.GetSinkSession(url)
-	if err != nil {
-		log.Debugw("exit", "object", "Client", "method", "CloseSink", "err", err)
-		return err
-	}
-	err = session.Close()
+	session := c.GetSinkSession(url)
+	err := session.Close()
 	log.Debugw("exit", "object", "Client", "method", "CloseSink", "err", err)
 	return err
 }
@@ -204,12 +189,8 @@ func (c *Client[I, R]) CloseSink(url string) error {
 // CancelSource cancels the source session with the given URL.
 func (c *Client[I, R]) CancelSource(url string) error {
 	log.Debugw("enter", "object", "Client", "method", "CancelSource", "url", url)
-	session, err := c.GetSourceSession(url)
-	if err != nil {
-		log.Debugw("exit", "object", "Client", "method", "CancelSource", "err", err)
-		return err
-	}
-	err = session.Cancel()
+	session := c.GetSourceSession(url)
+	err := session.Cancel()
 	log.Debugw("exit", "object", "Client", "method", "CancelSource", "err", err)
 	return err
 }
@@ -217,12 +198,8 @@ func (c *Client[I, R]) CancelSource(url string) error {
 // CancelSink cancels the sink session with the given URL.
 func (c *Client[I, R]) CancelSink(url string) error {
 	log.Debugw("enter", "object", "Client", "method", "CancelSink", "url", url)
-	session, err := c.GetSinkSession(url)
-	if err != nil {
-		log.Debugw("exit", "object", "Client", "method", "CancelSink", "err", err)
-		return err
-	}
-	err = session.Cancel()
+	session := c.GetSinkSession(url)
+	err := session.Cancel()
 	log.Debugw("exit", "object", "Client", "method", "CancelSink", "err", err)
 	return err
 }
