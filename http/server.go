@@ -110,9 +110,8 @@ func (srv *Server[I, R]) startSourceSession(token SessionToken) *ServerSourceSes
 
 	go func() {
 		log.Debugw("starting source session", "object", "Server", "method", "startSourceSession", "token", token)
-		if err := newSession.Run(newSender); err != nil {
-			log.Errorw("source session ended with error", "object", "Server", "method", "startSourceSession", "token", token, "error", err)
-		}
+		newSession.Run(newSender)
+
 		// TODO: potential race condition if Run() completes before the
 		// session is added to the list of sink sessions (which happens
 		// when startSourceSession returns)
@@ -209,10 +208,7 @@ func (srv *Server[I, R]) startSinkSession(token SessionToken) *ServerSinkSession
 	sender := sourceConnection.DeferredSender()
 
 	go func() {
-		err := newSession.Run(sender)
-		if err != nil {
-			log.Errorw("session returned error", "object", "Server", "method", "HandleBlocks", "session", token, "error", err)
-		}
+		newSession.Run(sender)
 		sender.Close()
 		srv.sinkSessions.Remove(token)
 	}()

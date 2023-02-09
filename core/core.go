@@ -427,16 +427,22 @@ func (ss *SinkSession[I, F]) HandleBlock(rawBlock RawBlock[I]) {
 // IsClosed method returns true.
 func (ss *SinkSession[I, F]) Run(
 	statusSender StatusSender[I], // Sender used to transmit status to source
-) error {
+) {
 	defer func() {
 		ss.doneCh <- nil
 	}()
 
-	ss.orchestrator.Notify(BEGIN_SESSION)
+	if err := ss.orchestrator.Notify(BEGIN_SESSION); err != nil {
+		ss.doneCh <- err
+		return
+	}
 	defer ss.orchestrator.Notify(END_SESSION)
 
 	for !ss.orchestrator.IsClosed() {
-		ss.orchestrator.Notify(BEGIN_PROCESSING)
+		if err := ss.orchestrator.Notify(BEGIN_PROCESSING); err != nil {
+			ss.doneCh <- err
+			return
+		}
 
 		// Pending blocks are blocks that have been recieved and added to our block store,
 		// but have not had status accumulated on their children yet.
@@ -446,25 +452,38 @@ func (ss *SinkSession[I, F]) Run(
 
 			for _, child := range block.Children() {
 				if err := ss.AccumulateStatus(child); err != nil {
-					return err
+					ss.doneCh <- err
+					return
 				}
 			}
-			ss.orchestrator.Notify(END_SEND)
+			if err := ss.orchestrator.Notify(END_SEND); err != nil {
+				ss.doneCh <- err
+				return
+			}
 		} else {
 			// If we get here it means we have no more blocks to process. In a batch based process that's
 			// the only time we'd want to send. But for streaming maybe this should be in a separate loop
 			// so it can be triggered by the orchestrator - otherwise we wind up sending a status update every
 			// time the pending blocks list becomes empty.
 
-			ss.orchestrator.Notify(BEGIN_DRAINING)
-			ss.statusAccumulator.Send(statusSender)
-			ss.orchestrator.Notify(END_DRAINING)
-
+			if err := ss.orchestrator.Notify(BEGIN_DRAINING); err != nil {
+				ss.doneCh <- err
+				return
+			}
+			if err := ss.statusAccumulator.Send(statusSender); err != nil {
+				ss.doneCh <- err
+				return
+			}
+			if err := ss.orchestrator.Notify(END_DRAINING); err != nil {
+				ss.doneCh <- err
+				return
+			}
 		}
-		ss.orchestrator.Notify(END_PROCESSING)
+		if err := ss.orchestrator.Notify(END_PROCESSING); err != nil {
+			ss.doneCh <- err
+			return
+		}
 	}
-
-	return nil
 }
 
 // Closes the sink session. Note that the session does not close immediately; this method will return before
@@ -561,19 +580,21 @@ func (ss *SourceSession[I, F]) Info() *SourceSessionInfo[F] {
 // is specifically requested via Enqueue or included as a 'want' in received status.
 func (ss *SourceSession[I, F]) Run(
 	blockSender BlockSender[I], // Sender used to sent blocks to sink
-) error {
+) {
 	defer func() {
 		ss.doneCh <- nil
 	}()
 
 	if err := ss.orchestrator.Notify(BEGIN_SESSION); err != nil {
-		return err
+		ss.doneCh <- err
+		return
 	}
 
 	for !ss.orchestrator.IsClosed() {
 
 		if err := ss.orchestrator.Notify(BEGIN_PROCESSING); err != nil {
-			return err
+			ss.doneCh <- err
+			return
 		}
 
 		if ss.pendingBlocks.Len() > 0 {
@@ -585,36 +606,57 @@ func (ss *SourceSession[I, F]) Run(
 				block, err := ss.store.Get(context.Background(), id)
 				if err != nil {
 					if err != errors.ErrBlockNotFound {
-						return err
+						ss.doneCh <- err
+						return
 					}
+					// TODO: How do we notify that the request block was not found?
 				} else {
-					ss.orchestrator.Notify(BEGIN_SEND)
+					if err := ss.orchestrator.Notify(BEGIN_SEND); err != nil {
+						ss.doneCh <- err
+						return
+					}
 					if err := blockSender.SendBlock(block); err != nil {
 						// TODO: If error here, maybe we should remove it from ss.sent.
-						return err
+						ss.doneCh <- err
+						return
 					}
 					for _, child := range block.Children() {
 						if ss.filter.DoesNotContain(child) {
 							if err := ss.pendingBlocks.PushBack(child); err != nil {
-								return err
+								ss.doneCh <- err
+								return
 							}
 						}
 					}
-					ss.orchestrator.Notify(END_SEND)
+					if err := ss.orchestrator.Notify(END_SEND); err != nil {
+						ss.doneCh <- err
+						return
+					}
 				}
 			}
 		} else {
 			if err := ss.orchestrator.Notify(BEGIN_DRAINING); err != nil {
-				return err
+				ss.doneCh <- err
+				return
 			}
 			if err := blockSender.Flush(); err != nil {
-				return err
+				ss.doneCh <- err
+				return
 			}
-			ss.orchestrator.Notify(END_DRAINING)
+			if err := ss.orchestrator.Notify(END_DRAINING); err != nil {
+				ss.doneCh <- err
+				return
+			}
 		}
-		ss.orchestrator.Notify(END_PROCESSING)
+		if err := ss.orchestrator.Notify(END_PROCESSING); err != nil {
+			ss.doneCh <- err
+			return
+		}
 	}
-	return ss.orchestrator.Notify(END_SESSION)
+	if err := ss.orchestrator.Notify(END_SESSION); err != nil {
+		ss.doneCh <- err
+		return
+	}
 }
 
 // HandleStatus handles incoming status, updating the filter and pending blocks list.
