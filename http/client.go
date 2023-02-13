@@ -67,6 +67,9 @@ func (c *Client[I, R]) startSourceSession(url string) *core.SourceSession[I, bat
 		log.Debugw("source session ended", "object", "Client", "method", "startSourceSession", "url", url)
 	}()
 
+	// Wait for the session to start
+	<-newSession.Started()
+
 	return newSession
 }
 
@@ -115,6 +118,9 @@ func (c *Client[I, R]) startSinkSession(url string) *core.SinkSession[I, batch.B
 		c.sinkSessions.Remove(url)
 		log.Debugw("ended sink session", "object", "Client", "method", "startSinkSession", "url", url)
 	}()
+
+	// Wait for the session to start
+	<-newSession.Started()
 
 	return newSession
 }

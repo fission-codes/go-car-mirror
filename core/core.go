@@ -314,6 +314,7 @@ type SinkSession[
 	store             BlockStore[I]
 	pendingBlocks     *util.SynchronizedDeque[Block[I]]
 	stats             stats.Stats
+	startedCh         chan bool
 	doneCh            chan error
 }
 
@@ -344,6 +345,7 @@ func NewSinkSession[I BlockId, F Flags](
 		store,
 		util.NewSynchronizedDeque[Block[I]](util.NewBlocksDeque[Block[I]](2048)),
 		stats,
+		make(chan bool, 1),
 		make(chan error, 1),
 	}
 }
@@ -351,6 +353,11 @@ func NewSinkSession[I BlockId, F Flags](
 // Done returns an error channel which will be closed when the session is complete.
 func (ss *SinkSession[I, F]) Done() <-chan error {
 	return ss.doneCh
+}
+
+// Started returns a bool channel which will receive a value when the session has started.
+func (ss *SinkSession[I, F]) Started() <-chan bool {
+	return ss.startedCh
 }
 
 // Get the orchestrator for this session
@@ -399,9 +406,13 @@ func (ss *SinkSession[I, F]) Enqueue(id I) error {
 	// When is it safe to do this?
 	// if we are currently checking (e.g. the polling loop is running)
 	// if we are not currently checking *and* we are not currently sending?
-	ss.orchestrator.Notify(BEGIN_ENQUEUE)     // This should block if state is RECEIVER_SENDING
+	if err := ss.orchestrator.Notify(BEGIN_ENQUEUE); err != nil { // This should block if state is RECEIVER_SENDING
+		return err
+	}
+
 	defer ss.orchestrator.Notify(END_ENQUEUE) // This should set RECEIVER_CHECKING
-	return ss.AccumulateStatus(id)            // This is recursive so it may take some time
+
+	return ss.AccumulateStatus(id) // This is recursive so it may take some time
 }
 
 // HandleBlock handles a block that is being received. Adds the block to the session's store, and
@@ -432,6 +443,8 @@ func (ss *SinkSession[I, F]) Run(
 		ss.doneCh <- nil
 		close(ss.doneCh)
 	}()
+	ss.startedCh <- true
+	close(ss.startedCh)
 
 	if err := ss.orchestrator.Notify(BEGIN_SESSION); err != nil {
 		ss.doneCh <- err
@@ -539,6 +552,7 @@ type SourceSession[
 	sent          sync.Map
 	pendingBlocks *util.SynchronizedDeque[I]
 	stats         stats.Stats
+	startedCh     chan bool
 	doneCh        chan error
 }
 
@@ -556,6 +570,7 @@ func NewSourceSession[I BlockId, F Flags](
 		sync.Map{},
 		util.NewSynchronizedDeque[I](util.NewBlocksDeque[I](1024)),
 		stats,
+		make(chan bool, 1),
 		make(chan error, 1),
 	}
 }
@@ -564,6 +579,11 @@ func NewSourceSession[I BlockId, F Flags](
 // If the session is closed due to an error, the error will be sent on the channel.
 func (ss *SourceSession[I, F]) Done() <-chan error {
 	return ss.doneCh
+}
+
+// Started returns a channel that will be closed when the session is started.
+func (ss *SourceSession[I, F]) Started() <-chan bool {
+	return ss.startedCh
 }
 
 // Retrieve the current session state
@@ -590,6 +610,8 @@ func (ss *SourceSession[I, F]) Run(
 		ss.doneCh <- nil
 		close(ss.doneCh)
 	}()
+	ss.startedCh <- true
+	close(ss.startedCh)
 
 	if err := ss.orchestrator.Notify(BEGIN_SESSION); err != nil {
 		ss.doneCh <- err

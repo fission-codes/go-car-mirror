@@ -120,6 +120,9 @@ func (srv *Server[I, R]) startSourceSession(token SessionToken) *ServerSourceSes
 		log.Debugw("source session ended", "object", "Server", "method", "startSourceSession", "token", token)
 	}()
 
+	// Wait for the session to start
+	<-newSession.Started()
+
 	return &ServerSourceSessionData[I, R]{sourceConnection, newSession}
 }
 
@@ -166,6 +169,7 @@ func (srv *Server[I, R]) HandleStatus(response http.ResponseWriter, request *htt
 
 	// Find the session from the session token, or create one
 	sourceSession := srv.GetSourceSession(sessionToken)
+	// TODO: If the session can't be looked up, this will be a new session.  Is this desired?
 	log.Debugw("have session for token", "object", "Server", "method", "HandleStatus", "session", sessionToken)
 
 	// Parse the request to get the status message
@@ -212,6 +216,9 @@ func (srv *Server[I, R]) startSinkSession(token SessionToken) *ServerSinkSession
 		sender.Close()
 		srv.sinkSessions.Remove(token)
 	}()
+
+	// Wait for the session to start
+	<-newSession.Started()
 
 	return &ServerSinkSessionData[I, R]{
 		sourceConnection,
