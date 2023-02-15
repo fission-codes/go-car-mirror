@@ -232,13 +232,7 @@ func MockBatchTransfer(senderStore *mock.Store, receiverStore *mock.Store, root 
 	statusChannel.SetStatusListener(sourceConnection.Receiver(senderSession))
 	blockChannel.SetBlockListener(sinkConnection.Receiver(receiverSession))
 
-	log.Debugf("created receiverSession")
-
-	senderSession.Enqueue(root)
-
-	// Close both sessions when they become quiescent
-	senderSession.Close()
-	receiverSession.Close()
+	log.Debugf("created senders and channels")
 
 	log.Debugf("starting goroutines")
 
@@ -284,6 +278,29 @@ func MockBatchTransfer(senderStore *mock.Store, receiverStore *mock.Store, root 
 			receiverSession.Cancel()
 		}
 	}()
+
+	// Wait for session to start
+	<-senderSession.Started()
+	// Wait for session to start
+	<-receiverSession.Started()
+
+	log.Debugf("sessions started")
+
+	// Close both sessions when they become quiescent
+	go func() {
+		senderSession.Enqueue(root)
+		senderSession.Close()
+	}()
+
+	go func() {
+		// TODO: is this even needed?
+		receiverSession.Close()
+	}()
+
+	<-receiverSession.Done()
+	log.Debugf("receiver session done")
+	<-senderSession.Done()
+	log.Debugf("sender session done")
 
 	var err error
 
