@@ -202,9 +202,7 @@ func (car *Archive[T, R]) Read(reader core.ByteAndBlockReader) error {
 			}
 		}
 	}
-	if err != nil {
-		log.Debugw("failed to read archive", "error", err)
-	}
+
 	return err
 }
 

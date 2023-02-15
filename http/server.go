@@ -181,12 +181,22 @@ func (srv *Server[I, R]) HandleStatus(response http.ResponseWriter, request *htt
 		return
 	}
 
+	if len(message.Want) == 0 {
+		log.Debugw("received status message with no wants", "object", "Server", "method", "HandleStatus", "session", sessionToken, "message", message)
+		http.Error(response, "bad message format", http.StatusBadRequest)
+		return
+	}
+
+	// TODO: Even if the want list is greater than 0, we might get 0 blocks back.
+
 	// Send the status message to the session
+	// TODO: Handle errors
 	sourceSession.conn.Receiver(sourceSession.Session).HandleStatus(message.State, message.Have.Any(), message.Want)
 	request.Body.Close()
 
 	// Wait for a response from the session
 	log.Debugw("waiting on session", "object", "Server", "method", "HandleStatus", "session", sessionToken)
+	// TODO: In the past this call hung due to reading from a channel with no sender.
 	blocks := sourceSession.conn.PendingResponse()
 	log.Debugw("session returned blocks", "object", "Server", "method", "HandleStatus", "len", len(blocks.Car.Blocks))
 
@@ -227,7 +237,9 @@ func (srv *Server[I, R]) startSinkSession(token SessionToken) *ServerSinkSession
 }
 
 func (srv *Server[I, R]) GetSinkSession(token SessionToken) *ServerSinkSessionData[I, R] {
+	// Note as currently coded, if we get the session by token, we know it is still running.
 	if session, ok := srv.sinkSessions.Get(token); ok {
+		log.Debugw("found session", "object", "Server", "method", "GetSinkSession", "token", token)
 		return session
 	} else {
 		session = srv.sinkSessions.GetOrInsert(

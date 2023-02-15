@@ -60,6 +60,7 @@ func (c *Client[I, R]) startSourceSession(url string) *core.SourceSession[I, bat
 	go func() {
 		log.Debugw("starting source session", "object", "Client", "method", "startSourceSession", "url", url)
 		newSession.Run(newSender)
+		newSender.Close()
 		// TODO: potential race condition if Run() completes before the
 		// session is added to the list of sink sessions (which happens
 		// when startSourceSession returns)

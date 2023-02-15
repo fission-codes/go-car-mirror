@@ -23,6 +23,12 @@ type RequestBatchBlockSender[I core.BlockId, R core.BlockIdRef[I]] struct {
 
 func (bbs *RequestBatchBlockSender[I, R]) SendList(state batch.BatchState, blocks []core.RawBlock[I]) error {
 	log.Debugw("enter", "object", "RequestBatchBlockSender", "method", "SendList", "state", state, "blocks", len(blocks))
+	// We never send block requests for empty batches.
+	if len(blocks) == 0 {
+		log.Debugw("exit", "object", "RequestBatchBlockSender", "method", "SendList", "state", state, "blocks", len(blocks))
+		return nil
+	}
+
 	message := messages.NewBlocksMessage[I, R](state, blocks)
 	reader, writer := io.Pipe()
 
@@ -80,7 +86,7 @@ func (bbs *ResponseBatchBlockSender[I, R]) SendList(state batch.BatchState, bloc
 }
 
 func (bbs *ResponseBatchBlockSender[I, R]) Close() error {
-	//close(bbs.messages)
+	close(bbs.messages)
 	return nil
 }
 
@@ -92,6 +98,12 @@ type RequestStatusSender[I core.BlockId, R core.BlockIdRef[I]] struct {
 
 func (ss *RequestStatusSender[I, R]) SendStatus(state batch.BatchState, have filter.Filter[I], want []I) error {
 	log.Debugw("enter", "object", "RequestStatusSender", "method", "SendStatus", "have", have.Count(), "want", len(want))
+	// For requests, we never send status messages if we already have all the blocks we want.
+	if len(want) == 0 {
+		log.Debugw("exit", "object", "RequestStatusSender", "method", "SendStatus", "have", have.Count(), "want", len(want))
+		return nil
+	}
+
 	message := messages.NewStatusMessage[I, R](state, have, want)
 	reader, writer := io.Pipe()
 
@@ -120,10 +132,15 @@ func (ss *RequestStatusSender[I, R]) SendStatus(state batch.BatchState, have fil
 				log.Debugw("exit", "object", "RequestStatusSender", "method", "SendStatus", "error", err)
 				return err
 			}
+			// TODO: We requested the blocks in want.  We got back blocks.
+			// Where are we checking if any requested roots were not returned, so we don't ask for them again?
+			// Recall that per spec, the requested roots (i.e. want) must always be returned.
 			err := ss.responseHandler.HandleList(responseMessage.State, responseMessage.Car.Blocks)
 			log.Debugw("exit", "object", "RequestStatusSender", "method", "SendStatus", "error", err)
 			return err
 		} else {
+			// TODO: Per spec, if the server returns 404, it could find no more new root CIDs.  Handle this case.
+
 			log.Debugw("Unexpected response", "object", "RequestBatchBlockSender", "status", resp.Status)
 			return ErrInvalidResponse
 		}
@@ -146,7 +163,7 @@ func (ss *ResponseStatusSender[I, R]) SendStatus(state batch.BatchState, have fi
 }
 
 func (ss *ResponseStatusSender[I, R]) Close() error {
-	//close(ss.messages)
+	close(ss.messages)
 	return nil
 }
 

@@ -440,6 +440,7 @@ func (ss *SinkSession[I, F]) Run(
 	statusSender StatusSender[I], // Sender used to transmit status to source
 ) {
 	defer func() {
+		log.Debugw("SinkSession.Run() exiting")
 		ss.doneCh <- nil
 		close(ss.doneCh)
 	}()
@@ -607,6 +608,7 @@ func (ss *SourceSession[I, F]) Run(
 	blockSender BlockSender[I], // Sender used to sent blocks to sink
 ) {
 	defer func() {
+		log.Debugw("SourceSession.Run() exiting")
 		ss.doneCh <- nil
 		close(ss.doneCh)
 	}()

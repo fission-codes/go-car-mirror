@@ -19,7 +19,7 @@ type BatchState uint32
 
 // Named constants for BatchState flags.
 const (
-	CLOSING BatchState = 1 << iota
+	SINK_CLOSING BatchState = 1 << iota
 	SINK_CLOSED
 	SINK_PROCESSING   // Sink is processing a batch of blocks
 	SINK_FLUSHING     // Sink is in the process of sending a status message
@@ -33,14 +33,14 @@ const (
 	SOURCE_CLOSING
 	SOURCE_CLOSED
 	CANCELLED
-	SINK   = CLOSING | CANCELLED | SINK_PROCESSING | SINK_FLUSHING | SINK_WAITING | SINK_CLOSED | SINK_SENDING | SINK_ENQUEUING
-	SOURCE = CLOSING | CANCELLED | SOURCE_PROCESSING | SOURCE_FLUSHING | SOURCE_WAITING | SOURCE_CLOSING | SOURCE_CLOSED | SOURCE_SENDING
+	SINK   = SINK_CLOSING | CANCELLED | SINK_PROCESSING | SINK_FLUSHING | SINK_WAITING | SINK_CLOSED | SINK_SENDING | SINK_ENQUEUING
+	SOURCE = SOURCE_CLOSING | CANCELLED | SOURCE_PROCESSING | SOURCE_FLUSHING | SOURCE_WAITING | SOURCE_CLOSED | SOURCE_SENDING
 )
 
 // Strings returns a slice of strings describing the given BatchState.
 func (bs BatchState) Strings() []string {
 	var strings []string
-	if bs&CLOSING != 0 {
+	if bs&SINK_CLOSING != 0 {
 		strings = append(strings, "SINK_CLOSING")
 	}
 	if bs&SINK_CLOSED != 0 {
@@ -126,7 +126,7 @@ func (sbbr *SimpleBatchBlockReceiver[I]) HandleList(state BatchState, list []cor
 	for _, block := range list {
 		sbbr.session.HandleBlock(block)
 	}
-	if state&CLOSING != 0 {
+	if state&SOURCE_CLOSING != 0 {
 		sbbr.orchestrator.Notify(core.BEGIN_CLOSE)
 	}
 	return nil
@@ -231,6 +231,10 @@ func (bso *BatchSourceOrchestrator) Notify(event core.SessionEvent) error {
 		if bso.state.ContainsExact(SOURCE_CLOSING|SOURCE_SENDING, SOURCE_CLOSING) {
 			bso.state.Set(SOURCE_CLOSED)
 		}
+	case core.END_DRAINING:
+		if bso.state.ContainsExact(SOURCE_CLOSING|SOURCE_SENDING, SOURCE_CLOSING) {
+			bso.state.Set(SOURCE_CLOSED)
+		}
 	case core.END_ENQUEUE:
 		// This is necessary because if the session is quiescent (e.g. has no in-flight exchange)
 		// the session Run loop will be waiting on SOURCE_PROCESSING, and we need to set it to wake
@@ -280,7 +284,7 @@ func (bro *BatchSinkOrchestrator) Notify(event core.SessionEvent) error {
 	case core.END_SESSION:
 		bro.state.Set(SINK_CLOSED)
 	case core.BEGIN_CLOSE:
-		bro.state.Set(CLOSING)
+		bro.state.Set(SINK_CLOSING)
 	case core.BEGIN_PROCESSING:
 		state := bro.state.WaitAny(SINK_PROCESSING|CANCELLED, 0) // waits for either flag to be set
 		if state&CANCELLED != 0 {
@@ -291,14 +295,15 @@ func (bro *BatchSinkOrchestrator) Notify(event core.SessionEvent) error {
 		bro.state.WaitExact(SINK_ENQUEUING, 0) // Can't flush while enqueuing
 		bro.state.Update(SINK_PROCESSING, SINK_FLUSHING)
 		// If we are draining (the queue is empty) and we have no pending status to send, we can close
-		if bro.state.ContainsExact(CLOSING|SINK_SENDING, CLOSING) {
+		if bro.state.ContainsExact(SINK_CLOSING|SINK_SENDING, SINK_CLOSING) {
 			bro.state.Set(SINK_CLOSED)
 		}
-		//if bro.state.Contains(SOURCE_CLOSED) {
-		//	bro.state.Set(SINK_CLOSED)
-		//}
 	case core.END_DRAINING:
 		bro.state.Update(SINK_FLUSHING|SINK_SENDING, SINK_WAITING)
+
+		if bro.state.ContainsExact(SINK_CLOSING|SINK_SENDING, SINK_CLOSING) {
+			bro.state.Set(SINK_CLOSED)
+		}
 	case core.END_BATCH:
 		bro.state.Update(SINK_WAITING, SINK_PROCESSING)
 	case core.CANCEL:
@@ -329,7 +334,7 @@ func (bro *BatchSinkOrchestrator) State() BatchState {
 
 // IsClosed returns true if the receiver is closed.
 func (bro *BatchSinkOrchestrator) IsClosed() bool {
-	return bro.state.Contains(SINK_CLOSED) || bro.state.Contains(CANCELLED)
+	return bro.state.ContainsAny(SINK_CLOSED | CANCELLED)
 }
 
 type SimpleBatchStatusReceiver[I core.BlockId] struct {
@@ -350,7 +355,8 @@ func (sbbr *SimpleBatchStatusReceiver[I]) HandleStatus(state BatchState, have fi
 	// TODO: handle errors
 	sbbr.session.HandleStatus(have, want)
 	// if remote session is closing, ask this side do close as well.
-	if state&CLOSING != 0 {
+	if state&SINK_CLOSING != 0 {
+		log.Debugw("SimpleBatchStatusReceiver: remote session is closing, closing this session as well", "state", state)
 		return sbbr.orchestrator.Notify(core.BEGIN_CLOSE)
 	} else {
 		return nil
