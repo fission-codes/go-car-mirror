@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"runtime/pprof"
 	"testing"
 	"time"
 
@@ -91,7 +93,9 @@ func (ch *BlockChannel) SendList(state batch.BatchState, blocks []RawBlock[mock.
 }
 
 func (ch *BlockChannel) Close() error {
+	log.Debugw("closing", "object", "BlockChannel")
 	close(ch.channel)
+	log.Debugw("closed", "object", "BlockChannel")
 	return nil
 }
 
@@ -119,6 +123,7 @@ type StatusChannel struct {
 }
 
 func (ch *StatusChannel) SendStatus(state batch.BatchState, have filter.Filter[mock.BlockId], want []mock.BlockId) error {
+	log.Debugw("sending", "object", "StatusChannel", "method", "SendStatus", "state", state, "have", have, "want", want)
 	var message *messages.StatusMessage[mock.BlockId, *mock.BlockId, batch.BatchState]
 	if ch.rate > 0 || ch.latency > 0 {
 		message = messages.NewStatusMessage(state, have, want)
@@ -137,7 +142,9 @@ func (ch *StatusChannel) SendStatus(state batch.BatchState, have filter.Filter[m
 }
 
 func (ch *StatusChannel) Close() error {
+	log.Debugw("closing", "object", "StatusChannel")
 	close(ch.channel)
+	log.Debugw("closed", "object", "StatusChannel")
 	return nil
 }
 
@@ -153,6 +160,7 @@ func (ch *StatusChannel) listen() error {
 		}
 		have := result.Have.Any()
 		log.Debugw("received", "object", "StatusChannel", "method", "listen", "state", result.State, "have", have.Count(), "want", len(result.Want))
+		// Hung here?  per stack trace pprof?
 		ch.receiver.HandleStatus(result.State, have, result.Want)
 	}
 	return err
@@ -226,6 +234,9 @@ func MockBatchTransfer(senderStore *mock.Store, receiverStore *mock.Store, root 
 
 	log.Debugf("created receiverSession")
 
+	// TODO: Wrap blockChannel in a GenericRequestBatchBlockSender
+	// requestBlockChannel := batch.NewGenericRequestBatchBlockSender[mock.BlockId](&blockChannel)
+	// blockSender := sourceConnection.Sender(requestBlockChannel, uint32(maxBatchSize))
 	blockSender := sourceConnection.Sender(&blockChannel, uint32(maxBatchSize))
 	statusSender := sinkConnection.Sender(&statusChannel)
 
@@ -236,78 +247,79 @@ func MockBatchTransfer(senderStore *mock.Store, receiverStore *mock.Store, root 
 
 	log.Debugf("starting goroutines")
 
-	errCh := make(chan error)
-	go func() {
-		log.Debugf("sender session started")
-		senderSession.Run(blockSender)
-		err := <-senderSession.Done()
-		errCh <- err
-		blockSender.Close()
-		log.Debugf("sender session terminated")
-	}()
-
-	go func() {
-		log.Debugf("receiver session started")
-		receiverSession.Run(statusSender)
-		err := <-receiverSession.Done()
-		errCh <- err
-		statusSender.Close()
-		log.Debugf("receiver session terminated")
-	}()
-
 	go func() {
 		log.Debugf("block listener started")
-		errCh <- blockChannel.listen()
+		// Will get a value when the channel is closed
+		blockChannel.listen()
 		log.Debugf("block listener terminated")
 	}()
 
 	go func() {
 		log.Debugf("status listener started")
-		errCh <- statusChannel.listen()
+		// Will get a value when the channel is closed
+		// TODO: hanging here...
+		statusChannel.listen()
 		log.Debugf("status listener terminated")
 	}()
 
 	go func() {
-		log.Debugf("timeout started")
-		time.Sleep(20 * time.Second)
-		log.Debugf("timeout elapsed")
-		if !senderSession.IsClosed() {
-			senderSession.Cancel()
-		}
-		if !receiverSession.IsClosed() {
-			receiverSession.Cancel()
-		}
+		log.Debugf("sender session started")
+		senderSession.Run(blockSender)
+		blockSender.Close()
 	}()
 
 	// Wait for session to start
 	<-senderSession.Started()
+
+	go func() {
+		log.Debugf("receiver session started")
+		receiverSession.Run(statusSender)
+		statusSender.Close()
+	}()
+
 	// Wait for session to start
 	<-receiverSession.Started()
 
 	log.Debugf("sessions started")
 
+	go func() {
+		log.Debugf("timeout started")
+		time.Sleep(20 * time.Second)
+		log.Debugf("timeout elapsed")
+		if err := senderSession.Cancel(); err != nil {
+			log.Errorf("error cancelling sender session: %v", err)
+		}
+		if err := receiverSession.Cancel(); err != nil {
+			log.Errorf("error cancelling receiver session: %v", err)
+		}
+	}()
+
 	// Close both sessions when they become quiescent
 	go func() {
+		log.Debugf("before enqueue")
 		senderSession.Enqueue(root)
+		log.Debugf("after enqueue")
+		log.Debugf("before close")
 		senderSession.Close()
+		// receiverSession.Close()
+		log.Debugf("after close")
 	}()
 
-	go func() {
-		// TODO: is this even needed?
-		receiverSession.Close()
-	}()
-
-	<-receiverSession.Done()
-	log.Debugf("receiver session done")
-	<-senderSession.Done()
-	log.Debugf("sender session done")
-
-	var err error
-
-	for i := 0; i < 4 && err == nil; i++ {
-		err = <-errCh
-		log.Debugf("goroutine terminated with %v", err)
+	// Wait for the sessions to close
+	if err := <-receiverSession.Done(); err != nil {
+		log.Debugf("receiver session failed: %v", err)
 	}
+	log.Debugf("receiver session terminated")
+
+	// See what goroutine is hung
+	pprof.Lookup("goroutine").WriteTo(os.Stdout, 1)
+
+	if err := <-senderSession.Done(); err != nil {
+		log.Debugf("sender session failed: %v", err)
+	}
+	log.Debugf("sender session terminated")
+
+	// TODO: Maybe close receiver session here?
 
 	snapshotAfter := stats.GLOBAL_REPORTING.Snapshot()
 	diff := snapshotBefore.Diff(snapshotAfter)
@@ -338,6 +350,7 @@ func TestMockTransferToEmptyStoreSingleBatchDelayed(t *testing.T) {
 	}
 }
 
+// TODO: Hanging
 func TestMockTransferToEmptyStoreMultiBatchNoDelay(t *testing.T) {
 	senderStore := mock.NewStore(mock.DefaultConfig())
 	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
@@ -348,6 +361,7 @@ func TestMockTransferToEmptyStoreMultiBatchNoDelay(t *testing.T) {
 	}
 }
 
+// TODO: Hanging
 func TestMockTransferToEmptyStoreMultiBatchDelayed(t *testing.T) {
 	senderStore := mock.NewStore(mock.DefaultConfig())
 	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
@@ -360,6 +374,7 @@ func TestMockTransferToEmptyStoreMultiBatchDelayed(t *testing.T) {
 	}
 }
 
+// TODO: Hanging
 func TestMockTransferSingleMissingBlockNoDelay(t *testing.T) {
 	senderStore := mock.NewStore(mock.DefaultConfig())
 	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
@@ -376,6 +391,7 @@ func TestMockTransferSingleMissingBlockNoDelay(t *testing.T) {
 	}
 }
 
+// TODO: Hanging
 func TestMockTransferSingleMissingBlockDelayed(t *testing.T) {
 	senderStore := mock.NewStore(mock.DefaultConfig())
 	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
@@ -394,6 +410,7 @@ func TestMockTransferSingleMissingBlockDelayed(t *testing.T) {
 	}
 }
 
+// TODO: Hanging
 func TestMockTransferSingleMissingTreeNoDelay(t *testing.T) {
 	senderStore := mock.NewStore(mock.DefaultConfig())
 	mock.AddRandomForest(context.Background(), senderStore, 10)
@@ -407,6 +424,7 @@ func TestMockTransferSingleMissingTreeNoDelay(t *testing.T) {
 	}
 }
 
+// TODO: Hanging
 func TestMockTransferSingleMissingTreeDelayed(t *testing.T) {
 	senderStore := mock.NewStore(mock.DefaultConfig())
 	mock.AddRandomForest(context.Background(), senderStore, 10)
