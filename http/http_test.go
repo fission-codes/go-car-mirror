@@ -33,8 +33,6 @@ func assertBytesEqual(a []byte, b []byte, t *testing.T) {
 }
 
 func TestClientSend(t *testing.T) {
-	t.Skip("TODO")
-
 	config := Config{
 		MaxBatchSize:  100,
 		Address:       ":8021",
