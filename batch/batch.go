@@ -127,7 +127,10 @@ func (sbbr *SimpleBatchBlockReceiver[I]) HandleList(state BatchState, list []cor
 		sbbr.session.HandleBlock(block)
 	}
 	if state&SOURCE_CLOSING != 0 {
-		sbbr.orchestrator.Notify(core.BEGIN_CLOSE)
+		if err := sbbr.orchestrator.Notify(core.BEGIN_CLOSE); err != nil {
+			return err
+		}
+		return sbbr.orchestrator.Notify(core.END_CLOSE)
 	}
 	return nil
 }
@@ -357,7 +360,10 @@ func (sbbr *SimpleBatchStatusReceiver[I]) HandleStatus(state BatchState, have fi
 	// if remote session is closing, ask this side do close as well.
 	if state&SINK_CLOSING != 0 {
 		log.Debugw("SimpleBatchStatusReceiver: remote session is closing, closing this session as well", "state", state)
-		return sbbr.orchestrator.Notify(core.BEGIN_CLOSE)
+		if err := sbbr.orchestrator.Notify(core.BEGIN_CLOSE); err != nil {
+			return err
+		}
+		return sbbr.orchestrator.Notify(core.END_CLOSE)
 	} else {
 		return nil
 	}

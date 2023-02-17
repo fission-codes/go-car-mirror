@@ -443,6 +443,7 @@ func (ss *SinkSession[I, F]) Run(
 		log.Debugw("SinkSession.Run() exiting")
 		ss.doneCh <- nil
 		close(ss.doneCh)
+		log.Debugw("SinkSession.Run() exited")
 	}()
 	ss.startedCh <- true
 	close(ss.startedCh)
@@ -512,9 +513,7 @@ func (ss *SinkSession[I, F]) Close() error {
 	if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
 		return err
 	}
-	defer ss.orchestrator.Notify(END_CLOSE)
-
-	return nil
+	return ss.orchestrator.Notify(END_CLOSE)
 }
 
 // Cancel cancels the session. The session does not *immediately* terminate; the orchestrator plays a role
@@ -611,6 +610,7 @@ func (ss *SourceSession[I, F]) Run(
 		log.Debugw("SourceSession.Run() exiting")
 		ss.doneCh <- nil
 		close(ss.doneCh)
+		log.Debugw("SourceSession.Run() exited")
 	}()
 	ss.startedCh <- true
 	close(ss.startedCh)

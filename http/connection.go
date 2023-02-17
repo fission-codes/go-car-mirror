@@ -58,6 +58,7 @@ func (bbs *RequestBatchBlockSender[I, R]) SendList(state batch.BatchState, block
 				log.Debugw("exit", "object", "RequestBatchBlockSender", "method", "SendList", "error", err)
 				return err
 			}
+			// TODO: Handle error
 			bbs.responseHandler.HandleStatus(responseMessage.State, responseMessage.Have.Any(), responseMessage.Want)
 			log.Debugw("exit", "object", "RequestBatchBlockSender", "method", "SendList")
 			return nil

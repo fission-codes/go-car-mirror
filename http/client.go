@@ -112,6 +112,7 @@ func (c *Client[I, R]) startSinkSession(url string) *core.SinkSession[I, batch.B
 	go func() {
 		log.Debugw("starting sink session", "object", "Client", "method", "startSinkSession", "url", url)
 		newSession.Run(sender)
+		// TODO: Should close sender here.
 
 		// TODO: potential race condition if Run() completes before the
 		// session is added to the list of sink sessions (which happens
