@@ -254,6 +254,9 @@ func (bso *BatchSourceOrchestrator) Notify(event core.SessionEvent) error {
 		if !bso.state.ContainsAny(SOURCE_FLUSHING | SOURCE_WAITING | SOURCE_PROCESSING) {
 			bso.state.Set(SOURCE_PROCESSING)
 		}
+	case core.BEGIN_SESSION:
+		// This wait allows us to start a session before enqueueing any blocks.
+		bso.state.WaitAny(SOURCE_PROCESSING|CANCELLED|SOURCE_CLOSED|SOURCE_CLOSING, 0)
 	case core.END_SESSION:
 		bso.state.Update(SOURCE, SOURCE_CLOSED)
 	case core.CANCEL:
@@ -293,6 +296,9 @@ func NewBatchSinkOrchestrator() *BatchSinkOrchestrator {
 func (bro *BatchSinkOrchestrator) Notify(event core.SessionEvent) error {
 	// TODO: at this point we probably need to enclose all this in a mutex.
 	switch event {
+	case core.BEGIN_SESSION:
+		// This wait allows us to start a session before handling any status messages.
+		bro.state.WaitAny(SINK_PROCESSING|SINK_CLOSED|CANCELLED, 0)
 	case core.END_SESSION:
 		bro.state.Set(SINK_CLOSED)
 	case core.BEGIN_CLOSE:

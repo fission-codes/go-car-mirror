@@ -190,6 +190,8 @@ func (srv *Server[I, R]) HandleStatus(response http.ResponseWriter, request *htt
 
 	// Send the status message to the session
 	// TODO: Handle errors
+
+	// I confirmed that HandleStatus can safely be called before session is running.
 	sourceSession.conn.Receiver(sourceSession.Session).HandleStatus(message.State, message.Have.Any(), message.Want)
 	request.Body.Close()
 

@@ -645,6 +645,8 @@ func (ss *SourceSession[I, F]) Run(
 				ss.doneCh <- err
 				return
 			}
+
+			continue
 		}
 
 		if err := ss.orchestrator.Notify(BEGIN_PROCESSING); err != nil {
