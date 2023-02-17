@@ -116,7 +116,6 @@ func (srv *Server[I, R]) startSourceSession(token SessionToken) *ServerSourceSes
 		// session is added to the list of sink sessions (which happens
 		// when startSourceSession returns)
 		srv.sourceSessions.Remove(token)
-		newSender.Close()
 		log.Debugw("source session ended", "object", "Server", "method", "startSourceSession", "token", token)
 	}()
 
@@ -223,7 +222,6 @@ func (srv *Server[I, R]) startSinkSession(token SessionToken) *ServerSinkSession
 
 	go func() {
 		newSession.Run(sender)
-		sender.Close()
 		srv.sinkSessions.Remove(token)
 	}()
 

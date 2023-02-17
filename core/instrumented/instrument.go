@@ -186,6 +186,12 @@ func (ibs *BlockSender[I]) Close() error {
 	return err
 }
 
+// Len calls the underlying block sender's Len method and records stats.
+func (ibs *BlockSender[I]) Len() int {
+	ibs.stats.Logger().Debugw("BlockSender", "method", "Len")
+	return ibs.blockSender.Len()
+}
+
 // StatusSender is a StatusSender that records stats for events.
 type StatusSender[I core.BlockId] struct {
 	statusSender core.StatusSender[I]

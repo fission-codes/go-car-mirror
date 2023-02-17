@@ -165,6 +165,8 @@ type BlockSender[I BlockId] interface {
 	Flush() error
 	// Close the sender gracefully, ensuring any pending blocks are flushed
 	Close() error
+
+	Len() int
 }
 
 // BlockReceiver is responsible for receiving blocks at the Sink.
@@ -441,9 +443,12 @@ func (ss *SinkSession[I, F]) Run(
 ) {
 	defer func() {
 		log.Debugw("SinkSession.Run() exiting")
-		ss.doneCh <- nil
 		close(ss.doneCh)
 		log.Debugw("SinkSession.Run() exited")
+
+		log.Debugw("SinkSession.Run() closing statusSender")
+		statusSender.Close()
+		log.Debugw("SinkSession.Run() closed statusSender")
 	}()
 	ss.startedCh <- true
 	close(ss.startedCh)
@@ -608,9 +613,12 @@ func (ss *SourceSession[I, F]) Run(
 ) {
 	defer func() {
 		log.Debugw("SourceSession.Run() exiting")
-		ss.doneCh <- nil
 		close(ss.doneCh)
 		log.Debugw("SourceSession.Run() exited")
+
+		log.Debugw("SourceSession.Run() closing blockSender")
+		blockSender.Close()
+		log.Debugw("SourceSession.Run() closed blockSender")
 	}()
 	ss.startedCh <- true
 	close(ss.startedCh)
@@ -620,7 +628,24 @@ func (ss *SourceSession[I, F]) Run(
 		return
 	}
 
+	// TODO: Change the criteria for exiting the loop
+	// If we have no pending blocks, and our blockSender has no blocks, and we aren't flushing, and we aren't receiving, we're done.
+	// If we're done flushing, that means we aren't receiving.
+	// Flushing will happen if this test is false, so we only have to account for length of blocksender blocks.
 	for !ss.orchestrator.IsClosed() {
+
+		// Note that this check means you must enqueue before running a session.
+		// TODO: Is there any need to mutex this so we get it for both variables simultaneously?
+		if ss.pendingBlocks.Len() == 0 && blockSender.Len() == 0 {
+			if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
+				ss.doneCh <- err
+				return
+			}
+			if err := ss.orchestrator.Notify(END_CLOSE); err != nil {
+				ss.doneCh <- err
+				return
+			}
+		}
 
 		if err := ss.orchestrator.Notify(BEGIN_PROCESSING); err != nil {
 			ss.doneCh <- err

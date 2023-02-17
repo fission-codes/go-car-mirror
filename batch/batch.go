@@ -126,12 +126,14 @@ func (sbbr *SimpleBatchBlockReceiver[I]) HandleList(state BatchState, list []cor
 	for _, block := range list {
 		sbbr.session.HandleBlock(block)
 	}
-	if state&SOURCE_CLOSING != 0 {
-		if err := sbbr.orchestrator.Notify(core.BEGIN_CLOSE); err != nil {
-			return err
-		}
-		return sbbr.orchestrator.Notify(core.END_CLOSE)
-	}
+	// TODO: If this works, come back and also remove state parameter from HandleList.
+	// Commenting out for now to test my theory
+	// if state&SOURCE_CLOSING != 0 {
+	// 	if err := sbbr.orchestrator.Notify(core.BEGIN_CLOSE); err != nil {
+	// 		return err
+	// 	}
+	// 	return sbbr.orchestrator.Notify(core.END_CLOSE)
+	// }
 	return nil
 }
 
@@ -192,6 +194,13 @@ func (sbbs *SimpleBatchBlockSender[I]) Flush() error {
 	return nil
 }
 
+// Len returns the number of blocks waiting to be sent.
+func (sbbs *SimpleBatchBlockSender[I]) Len() int {
+	sbbs.listMutex.Lock()
+	defer sbbs.listMutex.Unlock()
+	return len(sbbs.list)
+}
+
 // BatchSourceOrchestrator is an orchestrator for sending batches of blocks.
 type BatchSourceOrchestrator struct {
 	state util.SharedFlagSet[BatchState]
@@ -212,7 +221,7 @@ func NewBatchSourceOrchestrator() *BatchSourceOrchestrator {
 func (bso *BatchSourceOrchestrator) Notify(event core.SessionEvent) error {
 	switch event {
 	case core.BEGIN_PROCESSING:
-		state := bso.state.WaitAny(SOURCE_PROCESSING|CANCELLED|SOURCE_CLOSED, 0)
+		state := bso.state.WaitAny(SOURCE_PROCESSING|CANCELLED|SOURCE_CLOSED|SOURCE_CLOSING, 0)
 		if state&CANCELLED != 0 {
 			bso.log.Errorf("core.Orchestrator waiting for SOURCE_PROCESSING when CANCELLED seen")
 			return errors.ErrStateError
@@ -357,14 +366,15 @@ func NewSimpleBatchStatusReceiver[I core.BlockId](session core.StatusReceiver[I]
 func (sbbr *SimpleBatchStatusReceiver[I]) HandleStatus(state BatchState, have filter.Filter[I], want []I) error {
 	// TODO: handle errors
 	sbbr.session.HandleStatus(have, want)
+	// TODO: if this works, come back and remove state from HandleStatus.
+	// Possibly even removes the need for this at all?
 	// if remote session is closing, ask this side do close as well.
-	if state&SINK_CLOSING != 0 {
-		log.Debugw("SimpleBatchStatusReceiver: remote session is closing, closing this session as well", "state", state)
-		if err := sbbr.orchestrator.Notify(core.BEGIN_CLOSE); err != nil {
-			return err
-		}
-		return sbbr.orchestrator.Notify(core.END_CLOSE)
-	} else {
-		return nil
-	}
+	// if state&SINK_CLOSING != 0 {
+	// 	log.Debugw("SimpleBatchStatusReceiver: remote session is closing, closing this session as well", "state", state)
+	// 	if err := sbbr.orchestrator.Notify(core.BEGIN_CLOSE); err != nil {
+	// 		return err
+	// 	}
+	// 	return sbbr.orchestrator.Notify(core.END_CLOSE)
+	// }
+	return nil
 }
