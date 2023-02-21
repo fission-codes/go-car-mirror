@@ -110,7 +110,7 @@ func (ch *BlockChannel) listen() error {
 			return ErrReceiverNotSet
 		}
 		log.Debugw("received", "object", "BlockChannel", "method", "listen", "state", result.State, "blocks", len(result.Car.Blocks))
-		ch.receiver.HandleList(result.State, result.Car.Blocks)
+		ch.receiver.HandleList(result.Car.Blocks)
 	}
 	return err
 }

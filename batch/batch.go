@@ -94,7 +94,7 @@ func (bs BatchState) String() string {
 // BatchBlockReceiver is an interface for receiving batches of blocks.
 type BatchBlockReceiver[I core.BlockId] interface {
 	// HandleList handles a list of blocks.
-	HandleList(BatchState, []core.RawBlock[I]) error
+	HandleList([]core.RawBlock[I]) error
 }
 
 // BatchBlockSender is an interface for sending batches of blocks.
@@ -120,20 +120,14 @@ func NewSimpleBatchBlockReceiver[I core.BlockId](session core.BlockReceiver[I, B
 }
 
 // HandleList handles a list of raw blocks.
-func (sbbr *SimpleBatchBlockReceiver[I]) HandleList(state BatchState, list []core.RawBlock[I]) error {
+func (sbbr *SimpleBatchBlockReceiver[I]) HandleList(list []core.RawBlock[I]) error {
 	sbbr.orchestrator.Notify(core.BEGIN_BATCH)
 	defer sbbr.orchestrator.Notify(core.END_BATCH)
+
 	for _, block := range list {
 		sbbr.session.HandleBlock(block)
 	}
-	// TODO: If this works, come back and also remove state parameter from HandleList.
-	// Commenting out for now to test my theory
-	// if state&SOURCE_CLOSING != 0 {
-	// 	if err := sbbr.orchestrator.Notify(core.BEGIN_CLOSE); err != nil {
-	// 		return err
-	// 	}
-	// 	return sbbr.orchestrator.Notify(core.END_CLOSE)
-	// }
+
 	return nil
 }
 
@@ -370,17 +364,8 @@ func NewSimpleBatchStatusReceiver[I core.BlockId](session core.StatusReceiver[I]
 
 // HandleList handles a list of raw blocks.
 func (sbbr *SimpleBatchStatusReceiver[I]) HandleStatus(state BatchState, have filter.Filter[I], want []I) error {
-	// TODO: handle errors
+	// TODO: handle errors.  Can't yet because HandleStatus doesn't return an error.
 	sbbr.session.HandleStatus(have, want)
-	// TODO: if this works, come back and remove state from HandleStatus.
-	// Possibly even removes the need for this at all?
-	// if remote session is closing, ask this side do close as well.
-	// if state&SINK_CLOSING != 0 {
-	// 	log.Debugw("SimpleBatchStatusReceiver: remote session is closing, closing this session as well", "state", state)
-	// 	if err := sbbr.orchestrator.Notify(core.BEGIN_CLOSE); err != nil {
-	// 		return err
-	// 	}
-	// 	return sbbr.orchestrator.Notify(core.END_CLOSE)
-	// }
+
 	return nil
 }

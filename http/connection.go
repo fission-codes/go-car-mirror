@@ -136,7 +136,7 @@ func (ss *RequestStatusSender[I, R]) SendStatus(state batch.BatchState, have fil
 			// TODO: We requested the blocks in want.  We got back blocks.
 			// Where are we checking if any requested roots were not returned, so we don't ask for them again?
 			// Recall that per spec, the requested roots (i.e. want) must always be returned.
-			err := ss.responseHandler.HandleList(responseMessage.State, responseMessage.Car.Blocks)
+			err := ss.responseHandler.HandleList(responseMessage.Car.Blocks)
 			log.Debugw("exit", "object", "RequestStatusSender", "method", "SendStatus", "error", err)
 			return err
 		} else {

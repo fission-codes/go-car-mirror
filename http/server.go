@@ -298,7 +298,7 @@ func (srv *Server[I, R]) HandleBlocks(response http.ResponseWriter, request *htt
 	log.Debugw("processed blocks", "object", "Server", "method", "HandleBlocks", "session", sessionToken, "count", len(message.Car.Blocks))
 
 	// Send the blocks to the sessions
-	err = sinkSession.conn.Receiver(sinkSession.Session).HandleList(message.State, message.Car.Blocks)
+	err = sinkSession.conn.Receiver(sinkSession.Session).HandleList(message.Car.Blocks)
 	if err != nil {
 		log.Errorw("could not handle block list", "object", "server", "method", "HandleBlocks", "session", sessionToken, "error", err)
 	}
