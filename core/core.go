@@ -237,11 +237,12 @@ const (
 	END_RECEIVE                          // Receive operation is completed
 	BEGIN_PROCESSING                     // Begin main processing loop
 	END_PROCESSING                       // End main procesing loop
-	BEGIN_BATCH                          // SimpleBatchBlockReceiver has started processing a batch of blocks on the Sink
-	END_BATCH                            // Finished processing a batch of blocks
-	BEGIN_ENQUEUE                        // Request made to start transfer of a specific block and its children
-	END_ENQUEUE                          // Enqueue is complete
-	CANCEL                               // Request made to immediately end session and abandon any current transfer
+	// TODO: Change comments to allow BATCH to be about blocks and status too.
+	BEGIN_BATCH   // SimpleBatchBlockReceiver has started processing a batch of blocks on the Sink
+	END_BATCH     // Finished processing a batch of blocks
+	BEGIN_ENQUEUE // Request made to start transfer of a specific block and its children
+	END_ENQUEUE   // Enqueue is complete
+	CANCEL        // Request made to immediately end session and abandon any current transfer
 )
 
 // String returns a string representation of the session event.
@@ -303,6 +304,8 @@ type Orchestrator[F Flags] interface {
 	State() F
 	// IsClosed returns true if the orchestrator is closed.
 	IsClosed() bool
+
+	ShouldClose() bool
 }
 
 // SinkSession is a session that receives blocks and sends out status updates. Two type parameters
@@ -460,6 +463,22 @@ func (ss *SinkSession[I, F]) Run(
 	defer ss.orchestrator.Notify(END_SESSION)
 
 	for !ss.orchestrator.IsClosed() {
+		// If we're not enqueueing, sending, receiving, or draining, and we don't have any blocks to process or status to send, then close.
+		// SINK_ENQUEUEING, SINK_SENDING, SINK_FLUSHING,
+		// TODO: Is it safe to check each of these in a single if statement?  Need some kind of synchronization?
+		// if ss.pendingBlocks.Len() == 0 && ss.statusAccumulator.WantCount() == 0 && ss.orchestrator.ShouldClose() {
+		// 	if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
+		// 		ss.doneCh <- err
+		// 		return
+		// 	}
+		// 	if err := ss.orchestrator.Notify(END_CLOSE); err != nil {
+		// 		ss.doneCh <- err
+		// 		return
+		// 	}
+
+		// 	break
+		// }
+
 		if err := ss.orchestrator.Notify(BEGIN_PROCESSING); err != nil {
 			ss.doneCh <- err
 			return
@@ -468,6 +487,10 @@ func (ss *SinkSession[I, F]) Run(
 		// Pending blocks are blocks that have been recieved and added to our block store,
 		// but have not had status accumulated on their children yet.
 		if ss.pendingBlocks.Len() > 0 {
+			// TODO: Why is this sending?  We're only accumulating status here.
+			// Per docs, SINK_SENDING means we might have status pending flush.
+			// That could be true regardless of if there are pending blocks though, right?
+			// Feels like confusing naming.
 			if err := ss.orchestrator.Notify(BEGIN_SEND); err != nil {
 				ss.doneCh <- err
 				return

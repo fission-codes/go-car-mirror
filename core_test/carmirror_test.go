@@ -305,7 +305,7 @@ func MockBatchTransfer(senderStore *mock.Store, receiverStore *mock.Store, root 
 	}
 	log.Debugf("sender session terminated")
 
-	// TODO: Maybe close receiver session here?
+	// TODO: Fix sink session termination and remove the explicit close.
 	receiverSession.Close()
 
 	// Wait for the sessions to close

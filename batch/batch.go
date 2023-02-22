@@ -177,6 +177,7 @@ func (sbbs *SimpleBatchBlockSender[I]) Flush() error {
 
 	batchState := sbbs.orchestrator.State()
 	// Only actually send a list if we have data OR we are closed, so we would like to communicate this state to the sink
+	// TODO: If we're closed we shouldn't be sending anything, right?
 	if batchState&(SOURCE_SENDING|SOURCE_CLOSED) != 0 {
 		sbbs.listMutex.Lock()
 		defer sbbs.listMutex.Unlock()
@@ -215,6 +216,7 @@ func NewBatchSourceOrchestrator() *BatchSourceOrchestrator {
 func (bso *BatchSourceOrchestrator) Notify(event core.SessionEvent) error {
 	switch event {
 	case core.BEGIN_PROCESSING:
+		// TODO: I think it's possible SOURCE_CLOSED and SOURCE_CLOSING should be removed.  Check.
 		state := bso.state.WaitAny(SOURCE_PROCESSING|CANCELLED|SOURCE_CLOSED|SOURCE_CLOSING, 0)
 		if state&CANCELLED != 0 {
 			bso.log.Errorf("core.Orchestrator waiting for SOURCE_PROCESSING when CANCELLED seen")
@@ -245,6 +247,9 @@ func (bso *BatchSourceOrchestrator) Notify(event core.SessionEvent) error {
 		// This is necessary because if the session is quiescent (e.g. has no in-flight exchange)
 		// the session Run loop will be waiting on SOURCE_PROCESSING, and we need to set it to wake
 		// up the session.  If the receiver is not flushing, waiting, or ready, it is quiescent.
+		// TODO: This shouldn't be needed any more, since there's no longer such thing as a quiescent session,
+		// and we terminate the loop based on session termination criteria before notifying BEGIN_PROCESSING.
+		// Didn't turn out to be true.  Hung.  But I should try again and see why and what I'm missing.
 		if !bso.state.ContainsAny(SOURCE_FLUSHING | SOURCE_WAITING | SOURCE_PROCESSING) {
 			bso.state.Set(SOURCE_PROCESSING)
 		}
@@ -272,6 +277,11 @@ func (bso *BatchSourceOrchestrator) IsClosed() bool {
 	return bso.state.ContainsAny(SOURCE_CLOSED | CANCELLED)
 }
 
+func (bso *BatchSourceOrchestrator) ShouldClose() bool {
+	// TODO: Not needed for source orchestrator?
+	return false
+}
+
 // BatchSinkOrchestrator is an orchestrator for receiving batches of blocks.
 type BatchSinkOrchestrator struct {
 	state util.SharedFlagSet[BatchState]
@@ -295,14 +305,41 @@ func (bro *BatchSinkOrchestrator) Notify(event core.SessionEvent) error {
 		bro.state.WaitAny(SINK_PROCESSING|SINK_CLOSED|CANCELLED, 0)
 	case core.END_SESSION:
 		bro.state.Set(SINK_CLOSED)
+	case core.BEGIN_ENQUEUE:
+		bro.state.WaitExact(SINK_FLUSHING, 0) // Can't enqueue while sending
+		bro.state.Set(SINK_ENQUEUING)
+	case core.END_ENQUEUE:
+		bro.state.Update(SINK_ENQUEUING, SINK_SENDING)
+		// // This is necessary because if the session is quiescent (e.g. has no in-flight exchange)
+		// // the session Run loop will be waiting on SINK_PROCESSING, and we need to set it to send
+		// // an initial 'want' message to the block source. If the receiver is not sending, waiting,
+		// // or checking, it is quiescent.
+		// if !bro.state.ContainsAny(SINK_FLUSHING | SINK_WAITING | SINK_PROCESSING) {
+		// 	bro.state.Set(SINK_PROCESSING)
+		// }
 	case core.BEGIN_CLOSE:
 		bro.state.Set(SINK_CLOSING)
+	case core.END_CLOSE:
+		// TODO: Anything?
 	case core.BEGIN_PROCESSING:
+		// This lets us either proceed or eject at the beginning of every loop iteration.
+		// If we add complete session termination check at the top, does this buy us anything?
 		state := bro.state.WaitAny(SINK_PROCESSING|CANCELLED, 0) // waits for either flag to be set
 		if state&CANCELLED != 0 {
 			bro.log.Errorf("core.Orchestrator waiting for SINK_PROCESSING when CANCELLED seen")
 			return errors.ErrStateError
 		}
+	case core.END_PROCESSING:
+		// TODO: Anything?
+	case core.BEGIN_RECEIVE:
+		// TODO: Anything?
+	case core.END_RECEIVE:
+		// TODO: Anything?  Source does the following with SOURCE.
+		// bro.state.Update(SINK_WAITING, SINK_PROCESSING)
+	case core.BEGIN_SEND:
+		// bro.state.Set(SINK_SENDING)
+	case core.END_SEND:
+		// TODO: Anything?
 	case core.BEGIN_DRAINING:
 		bro.state.WaitExact(SINK_ENQUEUING, 0) // Can't flush while enqueuing
 		bro.state.Update(SINK_PROCESSING, SINK_FLUSHING)
@@ -313,27 +350,16 @@ func (bro *BatchSinkOrchestrator) Notify(event core.SessionEvent) error {
 	case core.END_DRAINING:
 		bro.state.Update(SINK_FLUSHING|SINK_SENDING, SINK_WAITING)
 
+		// TODO: Is this needed here and BEGIN_DRAINING?
 		if bro.state.ContainsExact(SINK_CLOSING|SINK_SENDING, SINK_CLOSING) {
 			bro.state.Set(SINK_CLOSED)
 		}
+	case core.BEGIN_BATCH:
+		// TODO: Anything?
 	case core.END_BATCH:
 		bro.state.Update(SINK_WAITING, SINK_PROCESSING)
 	case core.CANCEL:
 		bro.state.Update(SINK, CANCELLED)
-	case core.BEGIN_ENQUEUE:
-		bro.state.WaitExact(SINK_FLUSHING, 0) // Can't enqueue while sending
-		bro.state.Set(SINK_ENQUEUING)
-	case core.END_ENQUEUE:
-		bro.state.Update(SINK_ENQUEUING, SINK_SENDING)
-		// This is necessary because if the session is quiescent (e.g. has no in-flight exchange)
-		// the session Run loop will be waiting on SINK_PROCESSING, and we need to set it to send
-		// an initial 'want' message to the block source. If the receiver is not sending, waiting,
-		// or checking, it is quiescent.
-		if !bro.state.ContainsAny(SINK_FLUSHING | SINK_WAITING | SINK_PROCESSING) {
-			bro.state.Set(SINK_PROCESSING)
-		}
-	case core.BEGIN_SEND:
-		bro.state.Set(SINK_SENDING)
 	}
 
 	return nil
@@ -347,6 +373,10 @@ func (bro *BatchSinkOrchestrator) State() BatchState {
 // IsClosed returns true if the receiver is closed.
 func (bro *BatchSinkOrchestrator) IsClosed() bool {
 	return bro.state.ContainsAny(SINK_CLOSED | CANCELLED)
+}
+
+func (bro *BatchSinkOrchestrator) ShouldClose() bool {
+	return !bro.state.ContainsAny(SINK_ENQUEUING | SINK_SENDING | SINK_FLUSHING)
 }
 
 type SimpleBatchStatusReceiver[I core.BlockId] struct {
@@ -364,6 +394,8 @@ func NewSimpleBatchStatusReceiver[I core.BlockId](session core.StatusReceiver[I]
 
 // HandleList handles a list of raw blocks.
 func (sbbr *SimpleBatchStatusReceiver[I]) HandleStatus(state BatchState, have filter.Filter[I], want []I) error {
+	sbbr.orchestrator.Notify(core.BEGIN_BATCH)
+	defer sbbr.orchestrator.Notify(core.END_BATCH)
 	// TODO: handle errors.  Can't yet because HandleStatus doesn't return an error.
 	sbbr.session.HandleStatus(have, want)
 
