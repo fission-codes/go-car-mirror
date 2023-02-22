@@ -305,6 +305,10 @@ type Orchestrator[F Flags] interface {
 	// IsClosed returns true if the orchestrator is closed.
 	IsClosed() bool
 
+	// ShouldClose returns true if the state of the Orchestrator indicates that the session should close.
+	// Other factors may need to be taken into account as well to determine if close should happen, but this
+	// tells us if the states indicate a close is safe.
+	// TODO: Maybe rename to IsSafeToClose or IsSafeCloseState?
 	ShouldClose() bool
 }
 
@@ -449,9 +453,9 @@ func (ss *SinkSession[I, F]) Run(
 		close(ss.doneCh)
 		log.Debugw("SinkSession.Run() exited")
 
-		log.Debugw("SinkSession.Run() closing statusSender")
-		statusSender.Close()
-		log.Debugw("SinkSession.Run() closed statusSender")
+		// log.Debugw("SinkSession.Run() closing statusSender")
+		// statusSender.Close()
+		// log.Debugw("SinkSession.Run() closed statusSender")
 	}()
 	ss.startedCh <- true
 	close(ss.startedCh)
@@ -639,9 +643,9 @@ func (ss *SourceSession[I, F]) Run(
 		close(ss.doneCh)
 		log.Debugw("SourceSession.Run() exited")
 
-		log.Debugw("SourceSession.Run() closing blockSender")
-		blockSender.Close()
-		log.Debugw("SourceSession.Run() closed blockSender")
+		// log.Debugw("SourceSession.Run() closing blockSender")
+		// blockSender.Close()
+		// log.Debugw("SourceSession.Run() closed blockSender")
 	}()
 	ss.startedCh <- true
 	close(ss.startedCh)

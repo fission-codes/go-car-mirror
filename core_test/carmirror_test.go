@@ -305,14 +305,26 @@ func MockBatchTransfer(senderStore *mock.Store, receiverStore *mock.Store, root 
 	}
 	log.Debugf("sender session terminated")
 
+	if err := blockSender.Close(); err != nil {
+		log.Errorf("error closing block sender: %v", err)
+	}
+
 	// TODO: Fix sink session termination and remove the explicit close.
 	// receiverSession.Close()
+
+	// TODO: Technically, in the future this will be multiple sessions, or multiple runs and returns.
+	// So that will mean multiple Done() calls.
+	// Really we just need to make sure that each session is done before we close the channel.
 
 	// Wait for the sessions to close
 	if err := <-receiverSession.Done(); err != nil {
 		log.Debugf("receiver session failed: %v", err)
 	}
 	log.Debugf("receiver session terminated")
+
+	if err := statusSender.Close(); err != nil {
+		log.Errorf("error closing status sender: %v", err)
+	}
 
 	snapshotAfter := stats.GLOBAL_REPORTING.Snapshot()
 	diff := snapshotBefore.Diff(snapshotAfter)
