@@ -306,7 +306,7 @@ func MockBatchTransfer(senderStore *mock.Store, receiverStore *mock.Store, root 
 	log.Debugf("sender session terminated")
 
 	// TODO: Fix sink session termination and remove the explicit close.
-	receiverSession.Close()
+	// receiverSession.Close()
 
 	// Wait for the sessions to close
 	if err := <-receiverSession.Done(); err != nil {
@@ -367,7 +367,6 @@ func TestMockTransferToEmptyStoreMultiBatchDelayed(t *testing.T) {
 	}
 }
 
-// TODO: Hanging
 func TestMockTransferSingleMissingBlockNoDelay(t *testing.T) {
 	senderStore := mock.NewStore(mock.DefaultConfig())
 	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
@@ -403,7 +402,6 @@ func TestMockTransferSingleMissingBlockDelayed(t *testing.T) {
 	}
 }
 
-// TODO: Hanging
 func TestMockTransferSingleMissingTreeNoDelay(t *testing.T) {
 	senderStore := mock.NewStore(mock.DefaultConfig())
 	mock.AddRandomForest(context.Background(), senderStore, 10)

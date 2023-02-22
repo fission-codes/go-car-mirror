@@ -466,18 +466,18 @@ func (ss *SinkSession[I, F]) Run(
 		// If we're not enqueueing, sending, receiving, or draining, and we don't have any blocks to process or status to send, then close.
 		// SINK_ENQUEUEING, SINK_SENDING, SINK_FLUSHING,
 		// TODO: Is it safe to check each of these in a single if statement?  Need some kind of synchronization?
-		// if ss.pendingBlocks.Len() == 0 && ss.statusAccumulator.WantCount() == 0 && ss.orchestrator.ShouldClose() {
-		// 	if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
-		// 		ss.doneCh <- err
-		// 		return
-		// 	}
-		// 	if err := ss.orchestrator.Notify(END_CLOSE); err != nil {
-		// 		ss.doneCh <- err
-		// 		return
-		// 	}
+		if ss.pendingBlocks.Len() == 0 && ss.statusAccumulator.WantCount() == 0 && ss.orchestrator.ShouldClose() {
+			if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
+				ss.doneCh <- err
+				return
+			}
+			if err := ss.orchestrator.Notify(END_CLOSE); err != nil {
+				ss.doneCh <- err
+				return
+			}
 
-		// 	break
-		// }
+			break
+		}
 
 		if err := ss.orchestrator.Notify(BEGIN_PROCESSING); err != nil {
 			ss.doneCh <- err
