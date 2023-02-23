@@ -5,10 +5,8 @@ import (
 	"sync"
 
 	"github.com/fission-codes/go-car-mirror/core"
-	"github.com/fission-codes/go-car-mirror/core/instrumented"
 	"github.com/fission-codes/go-car-mirror/errors"
 	"github.com/fission-codes/go-car-mirror/filter"
-	"github.com/fission-codes/go-car-mirror/stats"
 	"github.com/fission-codes/go-car-mirror/util"
 	golog "github.com/ipfs/go-log/v2"
 	"go.uber.org/zap"
@@ -109,12 +107,12 @@ type BatchBlockSender[I core.BlockId] interface {
 
 // SimpleBatchBlockReceiver is a simple implementation of BatchBlockReceiver.
 type SimpleBatchBlockReceiver[I core.BlockId] struct {
-	session      core.BlockReceiver[I, BatchState]
+	session      core.BlockReceiver[I]
 	orchestrator core.Orchestrator[BatchState]
 }
 
 // NewSimpleBatchBlockReceiver creates a new SimpleBatchBlockReceiver.
-func NewSimpleBatchBlockReceiver[I core.BlockId](session core.BlockReceiver[I, BatchState], orchestrator core.Orchestrator[BatchState]) *SimpleBatchBlockReceiver[I] {
+func NewSimpleBatchBlockReceiver[I core.BlockId](session core.BlockReceiver[I], orchestrator core.Orchestrator[BatchState]) *SimpleBatchBlockReceiver[I] {
 	return &SimpleBatchBlockReceiver[I]{
 		session:      session,
 		orchestrator: orchestrator,
