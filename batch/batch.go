@@ -5,8 +5,10 @@ import (
 	"sync"
 
 	"github.com/fission-codes/go-car-mirror/core"
+	"github.com/fission-codes/go-car-mirror/core/instrumented"
 	"github.com/fission-codes/go-car-mirror/errors"
 	"github.com/fission-codes/go-car-mirror/filter"
+	"github.com/fission-codes/go-car-mirror/stats"
 	"github.com/fission-codes/go-car-mirror/util"
 	golog "github.com/ipfs/go-log/v2"
 	"go.uber.org/zap"

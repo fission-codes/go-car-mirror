@@ -170,7 +170,7 @@ type BlockSender[I BlockId] interface {
 }
 
 // BlockReceiver is responsible for receiving blocks at the Sink.
-type BlockReceiver[I BlockId, F Flags] interface {
+type BlockReceiver[I BlockId] interface {
 	// HandleBlock is called on receipt of a new block.
 	HandleBlock(block RawBlock[I])
 }
