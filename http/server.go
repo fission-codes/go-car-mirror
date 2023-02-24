@@ -213,6 +213,7 @@ func (srv *Server[I, R]) HandleStatus(response http.ResponseWriter, request *htt
 
 func (srv *Server[I, R]) startSinkSession(token SessionToken) *ServerSinkSessionData[I, R] {
 
+	// This variable is named wrong.  It's sink, not source
 	sourceConnection := NewHttpServerSinkConnection[I, R](stats.GLOBAL_STATS.WithContext(string(token)), srv.instrumented)
 
 	newSession := sourceConnection.Session(
