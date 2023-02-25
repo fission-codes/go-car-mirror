@@ -34,9 +34,13 @@ var blockStoreConfig mock.Config = mock.Config{
 	WriteStorageBandwith: time.Second / (250 * (1 << 20)), // 250 megabits per second
 }
 
+const MOCK_ID_HASH = 2
+const SESSION_ID = "hardcoded-session-id"
+
 func init() {
 	rand.Seed(time.Now().UnixNano())
 
+	filter.RegisterHash(MOCK_ID_HASH, mock.XX3HashBlockId)
 	stats.InitDefault()
 }
 
@@ -71,10 +75,11 @@ func makeBloom(capacity uint) filter.Filter[mock.BlockId] {
 }
 
 type BlockChannel struct {
-	channel  chan *messages.BlocksMessage[mock.BlockId, *mock.BlockId, batch.BatchState]
-	receiver batch.BatchBlockReceiver[mock.BlockId]
-	rate     int64 // number of bytes transmitted per millisecond
-	latency  int64 // latency in milliseconds
+	channel      chan *messages.BlocksMessage[mock.BlockId, *mock.BlockId, batch.BatchState]
+	receiverFunc func() batch.BatchBlockReceiver[mock.BlockId] // replacing with responder below
+	rate         int64                                         // number of bytes transmitted per millisecond
+	latency      int64                                         // latency in milliseconds
+	// mutex        sync.Mutex
 }
 
 func (ch *BlockChannel) SendList(state batch.BatchState, blocks []RawBlock[mock.BlockId]) error {
@@ -99,31 +104,36 @@ func (ch *BlockChannel) Close() error {
 	return nil
 }
 
-func (ch *BlockChannel) SetBlockListener(receiver batch.BatchBlockReceiver[mock.BlockId]) {
-	ch.receiver = receiver
+func (ch *BlockChannel) Receiver() batch.BatchBlockReceiver[mock.BlockId] {
+	return ch.receiverFunc()
+}
+
+func (ch *BlockChannel) SetReceiverFunc(receiverFunc func() batch.BatchBlockReceiver[mock.BlockId]) {
+	ch.receiverFunc = receiverFunc
 }
 
 func (ch *BlockChannel) listen() error {
 	var err error = nil
 	for result := range ch.channel {
-		if ch.receiver == nil {
+		// Look up receiver dynamically
+		if ch.Receiver() == nil {
 			return ErrReceiverNotSet
 		}
 		log.Debugw("received", "object", "BlockChannel", "method", "listen", "state", result.State, "blocks", len(result.Car.Blocks))
-		ch.receiver.HandleList(result.Car.Blocks)
+		ch.Receiver().HandleList(result.Car.Blocks)
 	}
 	return err
 }
 
 type StatusChannel struct {
-	channel  chan *messages.StatusMessage[mock.BlockId, *mock.BlockId, batch.BatchState]
-	receiver *batch.SimpleBatchStatusReceiver[mock.BlockId]
-	rate     int64 // number of bytes transmitted per millisecond
-	latency  int64 // latency in milliseconds
+	channel      chan *messages.StatusMessage[mock.BlockId, *mock.BlockId, batch.BatchState]
+	receiverFunc func() *batch.SimpleBatchStatusReceiver[mock.BlockId]
+	rate         int64 // number of bytes transmitted per millisecond
+	latency      int64 // latency in milliseconds
 }
 
 func (ch *StatusChannel) SendStatus(state batch.BatchState, have filter.Filter[mock.BlockId], want []mock.BlockId) error {
-	log.Debugw("sending", "object", "StatusChannel", "method", "SendStatus", "state", state, "have", have, "want", want)
+	log.Debugw("entering", "object", "StatusChannel", "method", "SendStatus", "state", state, "have", have, "want", want)
 	var message *messages.StatusMessage[mock.BlockId, *mock.BlockId, batch.BatchState]
 	if ch.rate > 0 || ch.latency > 0 {
 		message = messages.NewStatusMessage(state, have, want)
@@ -137,7 +147,9 @@ func (ch *StatusChannel) SendStatus(state batch.BatchState, have filter.Filter[m
 	} else {
 		message = messages.NewStatusMessage(state, have.Copy(), want)
 	}
+	log.Debugw("sending", "object", "StatusChannel", "method", "SendStatus", "message", message)
 	ch.channel <- message
+	log.Debugw("sent", "object", "StatusChannel", "method", "SendStatus", "message", message)
 	return nil
 }
 
@@ -148,20 +160,24 @@ func (ch *StatusChannel) Close() error {
 	return nil
 }
 
-func (ch *StatusChannel) SetStatusListener(receiver *batch.SimpleBatchStatusReceiver[mock.BlockId]) {
-	ch.receiver = receiver
+func (ch *StatusChannel) Receiver() *batch.SimpleBatchStatusReceiver[mock.BlockId] {
+	return ch.receiverFunc()
+}
+
+func (ch *StatusChannel) SetReceiverFunc(receiverFunc func() *batch.SimpleBatchStatusReceiver[mock.BlockId]) {
+	ch.receiverFunc = receiverFunc
 }
 
 func (ch *StatusChannel) listen() error {
 	var err error = nil
 	for result := range ch.channel {
-		if ch.receiver == nil {
+		if ch.Receiver() == nil {
 			return ErrReceiverNotSet
 		}
 		have := result.Have.Any()
 		log.Debugw("received", "object", "StatusChannel", "method", "listen", "state", result.State, "have", have.Count(), "want", len(result.Want))
 		// Hung here?  per stack trace pprof?
-		ch.receiver.HandleStatus(result.State, have, result.Want)
+		ch.Receiver().HandleStatus(result.State, have, result.Want)
 	}
 	return err
 }
@@ -198,9 +214,21 @@ func (sn *MockStatusSender) Close() error {
 
 // Filter
 
-func MockBatchTransfer(senderStore *mock.Store, receiverStore *mock.Store, root mock.BlockId, maxBatchSize uint, bytesPerMs int64, latencyMs int64) error {
+// http tests did this, but it is right?
+
+func MockBatchTransfer(senderStore *mock.Store, receiverStore *mock.Store, root mock.BlockId, maxBatchSize uint32, bytesPerMs int64, latencyMs int64) error {
 
 	snapshotBefore := stats.GLOBAL_REPORTING.Snapshot()
+
+	config := batch.Config{
+		MaxBatchSize:  maxBatchSize,
+		BloomCapacity: 1024, // matches value used below before my changes
+		BloomFunction: MOCK_ID_HASH,
+		Instrument:    instrumented.INSTRUMENT_STORE | instrumented.INSTRUMENT_ORCHESTRATOR,
+	}
+
+	// No batch status sender to start with
+	sinkResponder := batch.NewSinkResponder[mock.BlockId](receiverStore, config, nil)
 
 	blockChannel := BlockChannel{
 		make(chan *messages.BlocksMessage[mock.BlockId, *mock.BlockId, batch.BatchState]),
@@ -220,28 +248,43 @@ func MockBatchTransfer(senderStore *mock.Store, receiverStore *mock.Store, root 
 
 	senderSession := sourceConnection.Session(
 		senderStore,
-		filter.NewSynchronizedFilter(makeBloom(1024)),
+		filter.NewSynchronizedFilter(batch.NewBloomAllocator[mock.BlockId](&config)()),
 	)
 
 	log.Debugf("created senderSession")
 
-	sinkConnection := batch.NewGenericBatchSinkConnection[mock.BlockId](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE)
+	// sinkResponder.SinkConnection(SESSION_ID)
 
-	receiverSession := sinkConnection.Session(
-		NewSynchronizedBlockStore[mock.BlockId](NewSynchronizedBlockStore[mock.BlockId](receiverStore)),
-		NewSimpleStatusAccumulator[mock.BlockId](filter.NewSynchronizedFilter(makeBloom(1024))),
-	)
+	// sinkConnection := batch.NewGenericBatchSinkConnection[mock.BlockId](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE)
 
-	log.Debugf("created receiverSession")
+	// TODO: connect the receiver session of the sink responder to the block channel
+	// block channel should be writing blocks to a channel that then results in calls to HandleList(blocks) on the sinkReponder's blockReceiver
+
+	// receiverSession := sinkConnection.Session(
+	// 	NewSynchronizedBlockStore[mock.BlockId](NewSynchronizedBlockStore[mock.BlockId](receiverStore)),
+	// 	NewSimpleStatusAccumulator[mock.BlockId](filter.NewSynchronizedFilter(makeBloom(1024))),
+	// )
+
+	// log.Debugf("created receiverSession")
 
 	// TODO: Wrap blockChannel in a GenericRequestBatchBlockSender
 	// requestBlockChannel := batch.NewGenericRequestBatchBlockSender[mock.BlockId](&blockChannel)
 	// blockSender := sourceConnection.Sender(requestBlockChannel, uint32(maxBatchSize))
 	blockSender := sourceConnection.Sender(&blockChannel, uint32(maxBatchSize))
-	statusSender := sinkConnection.Sender(&statusChannel)
 
-	statusChannel.SetStatusListener(sourceConnection.Receiver(senderSession))
-	blockChannel.SetBlockListener(sinkConnection.Receiver(receiverSession))
+	sinkResponder.SetBatchStatusSender(&statusChannel)
+
+	statusChannel.SetReceiverFunc(func() *batch.SimpleBatchStatusReceiver[mock.BlockId] {
+		return sourceConnection.Receiver(senderSession)
+	})
+
+	// will need to be able to get connection, receiver, session all based on sessionId (hardcoded for test),
+	// all within SinkResponder, such that this call is never needed.
+	// blockChannel.SetBlockListener(sinkConnection.Receiver(receiverSession))
+
+	blockChannel.SetReceiverFunc(func() batch.BatchBlockReceiver[mock.BlockId] {
+		return sinkResponder.Receiver(SESSION_ID)
+	})
 
 	log.Debugf("created senders and channels")
 
@@ -250,16 +293,25 @@ func MockBatchTransfer(senderStore *mock.Store, receiverStore *mock.Store, root 
 	go func() {
 		log.Debugf("block listener started")
 		// Will get a value when the channel is closed
-		blockChannel.listen()
-		log.Debugf("block listener terminated")
+
+		err := blockChannel.listen()
+		if err != nil {
+			log.Debugf("block listener error: %s", err)
+		} else {
+			log.Debugf("block listener terminated")
+		}
 	}()
 
 	go func() {
 		log.Debugf("status listener started")
 		// Will get a value when the channel is closed
 		// TODO: hanging here...
-		statusChannel.listen()
-		log.Debugf("status listener terminated")
+		err := statusChannel.listen()
+		if err != nil {
+			log.Debugf("status listener error: %s", err)
+		} else {
+			log.Debugf("status listener terminated")
+		}
 	}()
 
 	go func() {
@@ -269,20 +321,11 @@ func MockBatchTransfer(senderStore *mock.Store, receiverStore *mock.Store, root 
 
 		log.Debugf("sender session started")
 		senderSession.Run(blockSender)
+
 	}()
 
 	// Wait for session to start
 	<-senderSession.Started()
-
-	go func() {
-		log.Debugf("receiver session started")
-		receiverSession.Run(statusSender)
-	}()
-
-	// Wait for session to start
-	<-receiverSession.Started()
-
-	log.Debugf("sessions started")
 
 	go func() {
 		log.Debugf("timeout started")
@@ -295,11 +338,12 @@ func MockBatchTransfer(senderStore *mock.Store, receiverStore *mock.Store, root 
 		if err := senderSession.Cancel(); err != nil {
 			log.Errorf("error cancelling sender session: %v", err)
 		}
-		if err := receiverSession.Cancel(); err != nil {
+		if err := sinkResponder.SinkSession(SESSION_ID).Cancel(); err != nil {
 			log.Errorf("error cancelling receiver session: %v", err)
 		}
 	}()
 
+	// Hanging here.  What marks sender as done?
 	if err := <-senderSession.Done(); err != nil {
 		log.Debugf("sender session failed: %v", err)
 	}
@@ -317,14 +361,20 @@ func MockBatchTransfer(senderStore *mock.Store, receiverStore *mock.Store, root 
 	// Really we just need to make sure that each session is done before we close the channel.
 
 	// Wait for the sessions to close
-	if err := <-receiverSession.Done(); err != nil {
+	// TODO: Replace with waiting for all channels on the sinkResponder's sessions to be done
+	// If we get here, the sender session is done, so this will get the last living sink session's status
+
+	// I think this is having trouble.
+
+	if err := <-sinkResponder.SinkSession(SESSION_ID).Done(); err != nil {
 		log.Debugf("receiver session failed: %v", err)
 	}
 	log.Debugf("receiver session terminated")
 
-	if err := statusSender.Close(); err != nil {
-		log.Errorf("error closing status sender: %v", err)
-	}
+	// TODO: Close status senders for each responder?
+	// if err := statusSender.Close(); err != nil {
+	// 	log.Errorf("error closing status sender: %v", err)
+	// }
 
 	snapshotAfter := stats.GLOBAL_REPORTING.Snapshot()
 	diff := snapshotBefore.Diff(snapshotAfter)

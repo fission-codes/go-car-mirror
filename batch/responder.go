@@ -59,6 +59,11 @@ func (sr *SinkResponder[I]) SinkConnection(sessionId SessionId) *GenericBatchSin
 	return sessionData.conn
 }
 
+func (sr *SinkResponder[I]) Receiver(sessionId SessionId) *SimpleBatchBlockReceiver[I] {
+	sessionData := sr.SinkSessionData(sessionId)
+	return sessionData.conn.Receiver(sessionData.Session)
+}
+
 func (sr *SinkResponder[I]) startSinkSession(sessionId SessionId) *SinkSessionData[I] {
 
 	sinkConnection := sr.newSinkConnection()
@@ -74,6 +79,7 @@ func (sr *SinkResponder[I]) startSinkSession(sessionId SessionId) *SinkSessionDa
 
 	go func() {
 		newSession.Run(statusSender)
+		// statusSender.Close()
 		sr.sinkSessions.Remove(sessionId)
 	}()
 
