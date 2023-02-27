@@ -534,6 +534,7 @@ func (bf *BloomFilter[K]) MarshalJSON() ([]byte, error) {
 	if bf.hashFunction != 0 {
 		return json.Marshal(&BloomWireFormat[K]{bf.filter.Bytes(), bf.hashFunction, bf.filter.HashCount(), bf.filter.BitCount()})
 	} else {
+		log.Debugw("exit", "object", "BloomFilter", "method", "MarshalJSON", "error", "ErrCantMarshalBloomWithoutHashId", "bytes", bf.filter.Bytes(), "hashFunction", bf.hashFunction, "hashCount", bf.filter.HashCount(), "bitCount", bf.filter.BitCount())
 		return nil, ErrCantMarshalBloomWithoutHashId
 	}
 }
@@ -543,6 +544,7 @@ func (bf *BloomFilter[K]) MarshalCBOR() ([]byte, error) {
 	if bf.hashFunction != 0 {
 		return cbor.Marshal(&BloomWireFormat[K]{bf.filter.Bytes(), bf.hashFunction, bf.filter.HashCount(), bf.filter.BitCount()})
 	} else {
+		log.Debugw("exit", "object", "BloomFilter", "method", "MarshalCBOR", "error", "ErrCantMarshalBloomWithoutHashId", "bytes", bf.filter.Bytes(), "hashFunction", bf.hashFunction, "hashCount", bf.filter.HashCount(), "bitCount", bf.filter.BitCount())
 		return nil, ErrCantMarshalBloomWithoutHashId
 	}
 }

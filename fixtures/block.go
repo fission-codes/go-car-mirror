@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"sync"
 	"time"
 
 	"github.com/fission-codes/go-car-mirror/core"
@@ -231,12 +232,14 @@ func DefaultConfig() Config {
 type Store struct {
 	blocks map[BlockId]core.Block[BlockId]
 	config *Config
+	mutex  sync.Mutex
 }
 
 func NewStore(config Config) *Store {
 	return &Store{
 		blocks: make(map[BlockId]core.Block[BlockId]),
 		config: &config,
+		mutex:  sync.Mutex{},
 	}
 }
 
@@ -246,7 +249,9 @@ func (bs *Store) Reconfigure(config Config) {
 
 func (bs *Store) Get(_ context.Context, id BlockId) (core.Block[BlockId], error) {
 	time.Sleep(bs.config.ReadStorageLatency)
+	bs.mutex.Lock()
 	block, ok := bs.blocks[id]
+	bs.mutex.Unlock()
 	if !ok || block == nil {
 		return nil, cmerrors.ErrBlockNotFound
 	}
@@ -255,7 +260,9 @@ func (bs *Store) Get(_ context.Context, id BlockId) (core.Block[BlockId], error)
 }
 
 func (bs *Store) Dump(id BlockId, log *zap.SugaredLogger, spacer string) (core.Block[BlockId], error) {
+	bs.mutex.Lock()
 	block, ok := bs.blocks[id]
+	bs.mutex.Unlock()
 	if ok {
 		log.Info(fmt.Sprintf("%s%s", spacer, id.String()))
 		childSpacer := spacer + "  "
@@ -271,18 +278,25 @@ func (bs *Store) Dump(id BlockId, log *zap.SugaredLogger, spacer string) (core.B
 
 func (bs *Store) Has(_ context.Context, id BlockId) (bool, error) {
 	time.Sleep(bs.config.ReadStorageLatency)
+	bs.mutex.Lock()
 	_, ok := bs.blocks[id]
+	bs.mutex.Unlock()
 	return ok, nil
 }
 
 func (bs *Store) Remove(id BlockId) {
 	time.Sleep(bs.config.WriteStorageLatency)
+	bs.mutex.Lock()
 	delete(bs.blocks, id)
+	bs.mutex.Unlock()
 }
 
 func (bs *Store) HasAll(root BlockId) bool {
 	var hasAllInternal = func(root BlockId) error {
-		if b, ok := bs.blocks[root]; ok {
+		bs.mutex.Lock()
+		b, ok := bs.blocks[root]
+		bs.mutex.Unlock()
+		if ok {
 			for _, child := range b.Children() {
 				if err := bs.doHasAll(child); err != nil {
 					return err
@@ -297,7 +311,10 @@ func (bs *Store) HasAll(root BlockId) bool {
 }
 
 func (bs *Store) doHasAll(root BlockId) error {
-	if b, ok := bs.blocks[root]; ok {
+	bs.mutex.Lock()
+	b, ok := bs.blocks[root]
+	bs.mutex.Unlock()
+	if ok {
 		for _, child := range b.Children() {
 			if err := bs.doHasAll(child); err != nil {
 				return err
@@ -310,6 +327,8 @@ func (bs *Store) doHasAll(root BlockId) error {
 }
 
 func (bs *Store) All(_ context.Context) (<-chan BlockId, error) {
+	bs.mutex.Lock()
+	defer bs.mutex.Unlock()
 	values := make(chan BlockId, len(bs.blocks))
 	for _, v := range bs.blocks {
 		time.Sleep(bs.config.ReadStorageLatency)
@@ -327,7 +346,9 @@ func (bs *Store) Add(_ context.Context, rawBlock core.RawBlock[BlockId]) (core.B
 		block.setBytes(rawBlock.RawData())
 	}
 	id := block.Id()
+	bs.mutex.Lock()
 	bs.blocks[id] = block
+	bs.mutex.Unlock()
 	return block, nil
 }
 
@@ -350,6 +371,8 @@ func (bs *Store) AddAll(ctx context.Context, store core.BlockStore[BlockId]) err
 }
 
 func (bs *Store) RandomBlock() (core.Block[BlockId], error) {
+	bs.mutex.Lock()
+	defer bs.mutex.Unlock()
 	if len(bs.blocks) == 0 {
 		return nil, fmt.Errorf("no blocks in store")
 	}

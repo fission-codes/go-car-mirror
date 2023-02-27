@@ -165,10 +165,12 @@ type BlockSender[I BlockId] interface {
 	Flush() error
 	// Close the sender gracefully, ensuring any pending blocks are flushed
 	Close() error
+
+	Len() int
 }
 
 // BlockReceiver is responsible for receiving blocks at the Sink.
-type BlockReceiver[I BlockId, F Flags] interface {
+type BlockReceiver[I BlockId] interface {
 	// HandleBlock is called on receipt of a new block.
 	HandleBlock(block RawBlock[I])
 }
@@ -235,11 +237,12 @@ const (
 	END_RECEIVE                          // Receive operation is completed
 	BEGIN_PROCESSING                     // Begin main processing loop
 	END_PROCESSING                       // End main procesing loop
-	BEGIN_BATCH                          // SimpleBatchBlockReceiver has started processing a batch of blocks on the Sink
-	END_BATCH                            // Finished processing a batch of blocks
-	BEGIN_ENQUEUE                        // Request made to start transfer of a specific block and its children
-	END_ENQUEUE                          // Enqueue is complete
-	CANCEL                               // Request made to immediately end session and abandon any current transfer
+	// TODO: Change comments to allow BATCH to be about blocks and status too.
+	BEGIN_BATCH   // SimpleBatchBlockReceiver has started processing a batch of blocks on the Sink
+	END_BATCH     // Finished processing a batch of blocks
+	BEGIN_ENQUEUE // Request made to start transfer of a specific block and its children
+	END_ENQUEUE   // Enqueue is complete
+	CANCEL        // Request made to immediately end session and abandon any current transfer
 )
 
 // String returns a string representation of the session event.
@@ -301,6 +304,12 @@ type Orchestrator[F Flags] interface {
 	State() F
 	// IsClosed returns true if the orchestrator is closed.
 	IsClosed() bool
+
+	// ShouldClose returns true if the state of the Orchestrator indicates that the session should close.
+	// Other factors may need to be taken into account as well to determine if close should happen, but this
+	// tells us if the states indicate a close is safe.
+	// TODO: Maybe rename to IsSafeToClose or IsSafeCloseState?
+	ShouldClose() bool
 }
 
 // SinkSession is a session that receives blocks and sends out status updates. Two type parameters
@@ -314,6 +323,7 @@ type SinkSession[
 	store             BlockStore[I]
 	pendingBlocks     *util.SynchronizedDeque[Block[I]]
 	stats             stats.Stats
+	startedCh         chan bool
 	doneCh            chan error
 }
 
@@ -344,6 +354,7 @@ func NewSinkSession[I BlockId, F Flags](
 		store,
 		util.NewSynchronizedDeque[Block[I]](util.NewBlocksDeque[Block[I]](2048)),
 		stats,
+		make(chan bool, 1),
 		make(chan error, 1),
 	}
 }
@@ -351,6 +362,11 @@ func NewSinkSession[I BlockId, F Flags](
 // Done returns an error channel which will be closed when the session is complete.
 func (ss *SinkSession[I, F]) Done() <-chan error {
 	return ss.doneCh
+}
+
+// Started returns a bool channel which will receive a value when the session has started.
+func (ss *SinkSession[I, F]) Started() <-chan bool {
+	return ss.startedCh
 }
 
 // Get the orchestrator for this session
@@ -399,9 +415,13 @@ func (ss *SinkSession[I, F]) Enqueue(id I) error {
 	// When is it safe to do this?
 	// if we are currently checking (e.g. the polling loop is running)
 	// if we are not currently checking *and* we are not currently sending?
-	ss.orchestrator.Notify(BEGIN_ENQUEUE)     // This should block if state is RECEIVER_SENDING
+	if err := ss.orchestrator.Notify(BEGIN_ENQUEUE); err != nil { // This should block if state is RECEIVER_SENDING
+		return err
+	}
+
 	defer ss.orchestrator.Notify(END_ENQUEUE) // This should set RECEIVER_CHECKING
-	return ss.AccumulateStatus(id)            // This is recursive so it may take some time
+
+	return ss.AccumulateStatus(id) // This is recursive so it may take some time
 }
 
 // HandleBlock handles a block that is being received. Adds the block to the session's store, and
@@ -429,9 +449,16 @@ func (ss *SinkSession[I, F]) Run(
 	statusSender StatusSender[I], // Sender used to transmit status to source
 ) {
 	defer func() {
-		ss.doneCh <- nil
+		log.Debugw("SinkSession.Run() exiting")
 		close(ss.doneCh)
+		log.Debugw("SinkSession.Run() exited")
+
+		// log.Debugw("SinkSession.Run() closing statusSender")
+		// statusSender.Close()
+		// log.Debugw("SinkSession.Run() closed statusSender")
 	}()
+	ss.startedCh <- true
+	close(ss.startedCh)
 
 	if err := ss.orchestrator.Notify(BEGIN_SESSION); err != nil {
 		ss.doneCh <- err
@@ -440,6 +467,17 @@ func (ss *SinkSession[I, F]) Run(
 	defer ss.orchestrator.Notify(END_SESSION)
 
 	for !ss.orchestrator.IsClosed() {
+		if ss.pendingBlocks.Len() == 0 && ss.statusAccumulator.WantCount() == 0 && ss.orchestrator.ShouldClose() {
+			if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
+				ss.doneCh <- err
+				return
+			}
+			if err := ss.orchestrator.Notify(END_CLOSE); err != nil {
+				ss.doneCh <- err
+				return
+			}
+		}
+
 		if err := ss.orchestrator.Notify(BEGIN_PROCESSING); err != nil {
 			ss.doneCh <- err
 			return
@@ -448,6 +486,10 @@ func (ss *SinkSession[I, F]) Run(
 		// Pending blocks are blocks that have been recieved and added to our block store,
 		// but have not had status accumulated on their children yet.
 		if ss.pendingBlocks.Len() > 0 {
+			// TODO: Why is this sending?  We're only accumulating status here.
+			// Per docs, SINK_SENDING means we might have status pending flush.
+			// That could be true regardless of if there are pending blocks though, right?
+			// Feels like confusing naming.
 			if err := ss.orchestrator.Notify(BEGIN_SEND); err != nil {
 				ss.doneCh <- err
 				return
@@ -498,9 +540,7 @@ func (ss *SinkSession[I, F]) Close() error {
 	if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
 		return err
 	}
-	defer ss.orchestrator.Notify(END_CLOSE)
-
-	return nil
+	return ss.orchestrator.Notify(END_CLOSE)
 }
 
 // Cancel cancels the session. The session does not *immediately* terminate; the orchestrator plays a role
@@ -539,6 +579,7 @@ type SourceSession[
 	sent          sync.Map
 	pendingBlocks *util.SynchronizedDeque[I]
 	stats         stats.Stats
+	startedCh     chan bool
 	doneCh        chan error
 }
 
@@ -556,6 +597,7 @@ func NewSourceSession[I BlockId, F Flags](
 		sync.Map{},
 		util.NewSynchronizedDeque[I](util.NewBlocksDeque[I](1024)),
 		stats,
+		make(chan bool, 1),
 		make(chan error, 1),
 	}
 }
@@ -564,6 +606,11 @@ func NewSourceSession[I BlockId, F Flags](
 // If the session is closed due to an error, the error will be sent on the channel.
 func (ss *SourceSession[I, F]) Done() <-chan error {
 	return ss.doneCh
+}
+
+// Started returns a channel that will be closed when the session is started.
+func (ss *SourceSession[I, F]) Started() <-chan bool {
+	return ss.startedCh
 }
 
 // Retrieve the current session state
@@ -587,16 +634,43 @@ func (ss *SourceSession[I, F]) Run(
 	blockSender BlockSender[I], // Sender used to sent blocks to sink
 ) {
 	defer func() {
-		ss.doneCh <- nil
+		log.Debugw("SourceSession.Run() exiting")
 		close(ss.doneCh)
+		log.Debugw("SourceSession.Run() exited")
+
+		// log.Debugw("SourceSession.Run() closing blockSender")
+		// blockSender.Close()
+		// log.Debugw("SourceSession.Run() closed blockSender")
 	}()
+	ss.startedCh <- true
+	close(ss.startedCh)
 
 	if err := ss.orchestrator.Notify(BEGIN_SESSION); err != nil {
 		ss.doneCh <- err
 		return
 	}
 
+	// TODO: Change the criteria for exiting the loop
+	// If we have no pending blocks, and our blockSender has no blocks, and we aren't flushing, and we aren't receiving, we're done.
+	// If we're done flushing, that means we aren't receiving.
+	// Flushing will happen if this test is false, so we only have to account for length of blocksender blocks.
 	for !ss.orchestrator.IsClosed() {
+
+		// Note that this check means you must enqueue before running a session.
+		// TODO: Is there any need to mutex this so we get it for both variables simultaneously?
+		log.Debugw("SourceSession.Run() checking for pending blocks", "pendingBlocks", ss.pendingBlocks.Len(), "blockSender", blockSender.Len())
+		if ss.pendingBlocks.Len() == 0 && blockSender.Len() == 0 {
+			if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
+				ss.doneCh <- err
+				return
+			}
+			if err := ss.orchestrator.Notify(END_CLOSE); err != nil {
+				ss.doneCh <- err
+				return
+			}
+
+			continue
+		}
 
 		if err := ss.orchestrator.Notify(BEGIN_PROCESSING); err != nil {
 			ss.doneCh <- err
@@ -675,7 +749,10 @@ func (ss *SourceSession[I, F]) HandleStatus(
 	}
 	defer ss.orchestrator.Notify(END_RECEIVE)
 	ss.stats.Logger().Debugw("begin processing", "object", "SourceSession", "method", "HandleStatus", "pendingBlocks", ss.pendingBlocks.Len(), "filter", ss.filter.Count())
-	ss.filter = ss.filter.AddAll(have)
+	// TODO: Had a race condition.  Write on line below, but read on 704.
+	// ss.filter = ss.filter.AddAll(have)
+	// This looks like what we want though.
+	ss.filter.AddAll(have)
 	ss.stats.Logger().Debugw("incoming have filter merged", "object", "SourceSession", "method", "HandleStatus", "filter", ss.filter.Count())
 	//ss.filter.Dump(ss.log, "SourceSession filter - ")
 	for _, id := range want {

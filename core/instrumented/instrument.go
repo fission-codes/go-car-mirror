@@ -48,6 +48,12 @@ func (io *Orchestrator[F]) IsClosed() bool {
 	return result
 }
 
+func (io *Orchestrator[F]) ShouldClose() bool {
+	result := io.orchestrator.ShouldClose()
+	io.stats.Logger().Debugw("exit", "method", "ShouldClose", "state", io.orchestrator.State(), "result", result)
+	return result
+}
+
 // BlockStore is a BlockStore that records stats for events.
 type BlockStore[I core.BlockId] struct {
 	store core.BlockStore[I]
@@ -184,6 +190,12 @@ func (ibs *BlockSender[I]) Close() error {
 		ibs.stats.Logger().Debugw("BlockSender", "method", "Close", "error", err)
 	}
 	return err
+}
+
+// Len calls the underlying block sender's Len method and records stats.
+func (ibs *BlockSender[I]) Len() int {
+	ibs.stats.Logger().Debugw("BlockSender", "method", "Len")
+	return ibs.blockSender.Len()
 }
 
 // StatusSender is a StatusSender that records stats for events.

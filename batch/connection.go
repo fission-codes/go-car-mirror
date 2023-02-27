@@ -30,6 +30,53 @@ func (snd *SimpleBatchStatusSender[I]) Close() error {
 	return snd.sender.Close()
 }
 
+// The requestor for sending blocks or status needs to only send when the session should continue running.
+// TODO: Add docs.
+
+type GenericRequestBatchBlockSender[I core.BlockId, S BatchBlockSender[I]] struct {
+	sender S
+}
+
+func NewGenericRequestBatchBlockSender[I core.BlockId, S BatchBlockSender[I]](sender S) *GenericRequestBatchBlockSender[I, S] {
+	return &GenericRequestBatchBlockSender[I, S]{sender}
+}
+
+func (bbs *GenericRequestBatchBlockSender[I, S]) SendList(state BatchState, blocks []core.RawBlock[I]) error {
+	// We never send block requests for empty batches.
+	if len(blocks) == 0 {
+		log.Debugw("exit", "object", "GenericRequestBatchBlockSender", "method", "SendList", "state", state, "blocks", len(blocks))
+		return nil
+	}
+
+	return bbs.sender.SendList(state, blocks)
+}
+
+func (bbs *GenericRequestBatchBlockSender[I, S]) Close() error {
+	return bbs.sender.Close()
+}
+
+type GenericRequestBatchStatusSender[I core.BlockId] struct {
+	sender BatchStatusSender[I]
+}
+
+func NewGenericRequestBatchStatusSender[I core.BlockId](sender BatchStatusSender[I]) *GenericRequestBatchStatusSender[I] {
+	return &GenericRequestBatchStatusSender[I]{sender}
+}
+
+func (bss *GenericRequestBatchStatusSender[I]) SendStatus(state BatchState, have filter.Filter[I], want []I) error {
+	// For requests, we never send status messages if we already have all the blocks we want.
+	if len(want) == 0 {
+		log.Debugw("exit", "object", "GenericRequestBatchStatusSender", "method", "SendStatus", "have", have.Count(), "want", len(want))
+		return nil
+	}
+
+	return bss.sender.SendStatus(state, have, want)
+}
+
+func (bss *GenericRequestBatchStatusSender[I]) Close() error {
+	return bss.sender.Close()
+}
+
 type GenericBatchSourceConnection[I core.BlockId] struct {
 	core.Orchestrator[BatchState]
 	instrument instrumented.InstrumentationOptions

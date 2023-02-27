@@ -60,12 +60,21 @@ func (c *Client[I, R]) startSourceSession(url string) *core.SourceSession[I, bat
 	go func() {
 		log.Debugw("starting source session", "object", "Client", "method", "startSourceSession", "url", url)
 		newSession.Run(newSender)
+
+		// Close the sender
+		// if err := newSender.Close(); err != nil {
+		// 	log.Errorw("error closing sender", "object", "Client", "method", "startSourceSession", "url", url, "error", err)
+		// }
+
 		// TODO: potential race condition if Run() completes before the
 		// session is added to the list of sink sessions (which happens
 		// when startSourceSession returns)
 		c.sourceSessions.Remove(url)
 		log.Debugw("source session ended", "object", "Client", "method", "startSourceSession", "url", url)
 	}()
+
+	// Wait for the session to start
+	<-newSession.Started()
 
 	return newSession
 }
@@ -109,12 +118,20 @@ func (c *Client[I, R]) startSinkSession(url string) *core.SinkSession[I, batch.B
 		log.Debugw("starting sink session", "object", "Client", "method", "startSinkSession", "url", url)
 		newSession.Run(sender)
 
+		// TODO: close sender?
+		// if err := sender.Close(); err != nil {
+		// 	log.Errorw("error closing sender", "object", "Client", "method", "startSinkSession", "url", url, "error", err)
+		// }
+
 		// TODO: potential race condition if Run() completes before the
 		// session is added to the list of sink sessions (which happens
 		// when startSinkSession returns)
 		c.sinkSessions.Remove(url)
 		log.Debugw("ended sink session", "object", "Client", "method", "startSinkSession", "url", url)
 	}()
+
+	// Wait for the session to start
+	<-newSession.Started()
 
 	return newSession
 }
@@ -167,22 +184,6 @@ func (c *Client[I, R]) Send(url string, id I) error {
 func (c *Client[I, R]) Receive(url string, id I) error {
 	session := c.GetSinkSession(url)
 	return session.Enqueue(id)
-}
-
-func (c *Client[I, R]) CloseSource(url string) error {
-	log.Debugw("enter", "object", "Client", "method", "CloseSource", "url", url)
-	session := c.GetSourceSession(url)
-	err := session.Close()
-	log.Debugw("exit", "object", "Client", "method", "CloseSource", "err", err)
-	return err
-}
-
-func (c *Client[I, R]) CloseSink(url string) error {
-	log.Debugw("enter", "object", "Client", "method", "CloseSink", "url", url)
-	session := c.GetSinkSession(url)
-	err := session.Close()
-	log.Debugw("exit", "object", "Client", "method", "CloseSink", "err", err)
-	return err
 }
 
 // CancelSource cancels the source session with the given URL.

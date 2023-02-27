@@ -116,9 +116,11 @@ func (srv *Server[I, R]) startSourceSession(token SessionToken) *ServerSourceSes
 		// session is added to the list of sink sessions (which happens
 		// when startSourceSession returns)
 		srv.sourceSessions.Remove(token)
-		newSender.Close()
 		log.Debugw("source session ended", "object", "Server", "method", "startSourceSession", "token", token)
 	}()
+
+	// Wait for the session to start
+	<-newSession.Started()
 
 	return &ServerSourceSessionData[I, R]{sourceConnection, newSession}
 }
@@ -166,6 +168,7 @@ func (srv *Server[I, R]) HandleStatus(response http.ResponseWriter, request *htt
 
 	// Find the session from the session token, or create one
 	sourceSession := srv.GetSourceSession(sessionToken)
+	// TODO: If the session can't be looked up, this will be a new session.  Is this desired?
 	log.Debugw("have session for token", "object", "Server", "method", "HandleStatus", "session", sessionToken)
 
 	// Parse the request to get the status message
@@ -177,12 +180,24 @@ func (srv *Server[I, R]) HandleStatus(response http.ResponseWriter, request *htt
 		return
 	}
 
+	if len(message.Want) == 0 {
+		log.Debugw("received status message with no wants", "object", "Server", "method", "HandleStatus", "session", sessionToken, "message", message)
+		http.Error(response, "bad message format", http.StatusBadRequest)
+		return
+	}
+
+	// TODO: Even if the want list is greater than 0, we might get 0 blocks back.
+
 	// Send the status message to the session
+	// TODO: Handle errors
+
+	// I confirmed that HandleStatus can safely be called before session is running.
 	sourceSession.conn.Receiver(sourceSession.Session).HandleStatus(message.State, message.Have.Any(), message.Want)
 	request.Body.Close()
 
 	// Wait for a response from the session
 	log.Debugw("waiting on session", "object", "Server", "method", "HandleStatus", "session", sessionToken)
+	// TODO: In the past this call hung due to reading from a channel with no sender.
 	blocks := sourceSession.conn.PendingResponse()
 	log.Debugw("session returned blocks", "object", "Server", "method", "HandleStatus", "len", len(blocks.Car.Blocks))
 
@@ -198,6 +213,7 @@ func (srv *Server[I, R]) HandleStatus(response http.ResponseWriter, request *htt
 
 func (srv *Server[I, R]) startSinkSession(token SessionToken) *ServerSinkSessionData[I, R] {
 
+	// This variable is named wrong.  It's sink, not source
 	sourceConnection := NewHttpServerSinkConnection[I, R](stats.GLOBAL_STATS.WithContext(string(token)), srv.instrumented)
 
 	newSession := sourceConnection.Session(
@@ -209,9 +225,11 @@ func (srv *Server[I, R]) startSinkSession(token SessionToken) *ServerSinkSession
 
 	go func() {
 		newSession.Run(sender)
-		sender.Close()
 		srv.sinkSessions.Remove(token)
 	}()
+
+	// Wait for the session to start
+	<-newSession.Started()
 
 	return &ServerSinkSessionData[I, R]{
 		sourceConnection,
@@ -220,7 +238,9 @@ func (srv *Server[I, R]) startSinkSession(token SessionToken) *ServerSinkSession
 }
 
 func (srv *Server[I, R]) GetSinkSession(token SessionToken) *ServerSinkSessionData[I, R] {
+	// Note as currently coded, if we get the session by token, we know it is still running.
 	if session, ok := srv.sinkSessions.Get(token); ok {
+		log.Debugw("found session", "object", "Server", "method", "GetSinkSession", "token", token)
 		return session
 	} else {
 		session = srv.sinkSessions.GetOrInsert(
@@ -279,7 +299,7 @@ func (srv *Server[I, R]) HandleBlocks(response http.ResponseWriter, request *htt
 	log.Debugw("processed blocks", "object", "Server", "method", "HandleBlocks", "session", sessionToken, "count", len(message.Car.Blocks))
 
 	// Send the blocks to the sessions
-	err = sinkSession.conn.Receiver(sinkSession.Session).HandleList(message.State, message.Car.Blocks)
+	err = sinkSession.conn.Receiver(sinkSession.Session).HandleList(message.Car.Blocks)
 	if err != nil {
 		log.Errorw("could not handle block list", "object", "server", "method", "HandleBlocks", "session", sessionToken, "error", err)
 	}

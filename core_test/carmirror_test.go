@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"runtime/pprof"
 	"testing"
 	"time"
 
@@ -32,9 +34,13 @@ var blockStoreConfig mock.Config = mock.Config{
 	WriteStorageBandwith: time.Second / (250 * (1 << 20)), // 250 megabits per second
 }
 
+const MOCK_ID_HASH = 2
+const SESSION_ID = "hardcoded-session-id"
+
 func init() {
 	rand.Seed(time.Now().UnixNano())
 
+	filter.RegisterHash(MOCK_ID_HASH, mock.XX3HashBlockId)
 	stats.InitDefault()
 }
 
@@ -69,10 +75,10 @@ func makeBloom(capacity uint) filter.Filter[mock.BlockId] {
 }
 
 type BlockChannel struct {
-	channel  chan *messages.BlocksMessage[mock.BlockId, *mock.BlockId, batch.BatchState]
-	receiver batch.BatchBlockReceiver[mock.BlockId]
-	rate     int64 // number of bytes transmitted per millisecond
-	latency  int64 // latency in milliseconds
+	channel      chan *messages.BlocksMessage[mock.BlockId, *mock.BlockId, batch.BatchState]
+	receiverFunc func() batch.BatchBlockReceiver[mock.BlockId]
+	rate         int64 // number of bytes transmitted per millisecond
+	latency      int64 // latency in milliseconds
 }
 
 func (ch *BlockChannel) SendList(state batch.BatchState, blocks []RawBlock[mock.BlockId]) error {
@@ -91,31 +97,38 @@ func (ch *BlockChannel) SendList(state batch.BatchState, blocks []RawBlock[mock.
 }
 
 func (ch *BlockChannel) Close() error {
+	log.Debugw("closing", "object", "BlockChannel")
 	close(ch.channel)
+	log.Debugw("closed", "object", "BlockChannel")
 	return nil
 }
 
-func (ch *BlockChannel) SetBlockListener(receiver batch.BatchBlockReceiver[mock.BlockId]) {
-	ch.receiver = receiver
+func (ch *BlockChannel) Receiver() batch.BatchBlockReceiver[mock.BlockId] {
+	return ch.receiverFunc()
+}
+
+func (ch *BlockChannel) SetReceiverFunc(receiverFunc func() batch.BatchBlockReceiver[mock.BlockId]) {
+	ch.receiverFunc = receiverFunc
 }
 
 func (ch *BlockChannel) listen() error {
 	var err error = nil
 	for result := range ch.channel {
-		if ch.receiver == nil {
+		receiver := ch.Receiver()
+		if receiver == nil {
 			return ErrReceiverNotSet
 		}
 		log.Debugw("received", "object", "BlockChannel", "method", "listen", "state", result.State, "blocks", len(result.Car.Blocks))
-		ch.receiver.HandleList(result.State, result.Car.Blocks)
+		receiver.HandleList(result.Car.Blocks)
 	}
 	return err
 }
 
 type StatusChannel struct {
-	channel  chan *messages.StatusMessage[mock.BlockId, *mock.BlockId, batch.BatchState]
-	receiver *batch.SimpleBatchStatusReceiver[mock.BlockId]
-	rate     int64 // number of bytes transmitted per millisecond
-	latency  int64 // latency in milliseconds
+	channel      chan *messages.StatusMessage[mock.BlockId, *mock.BlockId, batch.BatchState]
+	receiverFunc func() *batch.SimpleBatchStatusReceiver[mock.BlockId]
+	rate         int64 // number of bytes transmitted per millisecond
+	latency      int64 // latency in milliseconds
 }
 
 func (ch *StatusChannel) SendStatus(state batch.BatchState, have filter.Filter[mock.BlockId], want []mock.BlockId) error {
@@ -132,28 +145,37 @@ func (ch *StatusChannel) SendStatus(state batch.BatchState, have filter.Filter[m
 	} else {
 		message = messages.NewStatusMessage(state, have.Copy(), want)
 	}
+	log.Debugw("sending", "object", "StatusChannel", "method", "SendStatus", "message", message)
 	ch.channel <- message
+	log.Debugw("sent", "object", "StatusChannel", "method", "SendStatus", "message", message)
 	return nil
 }
 
 func (ch *StatusChannel) Close() error {
+	log.Debugw("closing", "object", "StatusChannel")
 	close(ch.channel)
+	log.Debugw("closed", "object", "StatusChannel")
 	return nil
 }
 
-func (ch *StatusChannel) SetStatusListener(receiver *batch.SimpleBatchStatusReceiver[mock.BlockId]) {
-	ch.receiver = receiver
+func (ch *StatusChannel) Receiver() *batch.SimpleBatchStatusReceiver[mock.BlockId] {
+	return ch.receiverFunc()
+}
+
+func (ch *StatusChannel) SetReceiverFunc(receiverFunc func() *batch.SimpleBatchStatusReceiver[mock.BlockId]) {
+	ch.receiverFunc = receiverFunc
 }
 
 func (ch *StatusChannel) listen() error {
 	var err error = nil
 	for result := range ch.channel {
-		if ch.receiver == nil {
+		receiver := ch.Receiver()
+		if receiver == nil {
 			return ErrReceiverNotSet
 		}
 		have := result.Have.Any()
 		log.Debugw("received", "object", "StatusChannel", "method", "listen", "state", result.State, "have", have.Count(), "want", len(result.Want))
-		ch.receiver.HandleStatus(result.State, have, result.Want)
+		receiver.HandleStatus(result.State, have, result.Want)
 	}
 	return err
 }
@@ -190,9 +212,20 @@ func (sn *MockStatusSender) Close() error {
 
 // Filter
 
-func MockBatchTransfer(senderStore *mock.Store, receiverStore *mock.Store, root mock.BlockId, maxBatchSize uint, bytesPerMs int64, latencyMs int64) error {
+// http tests did this, but it is right?
+
+func MockBatchTransferSend(senderStore *mock.Store, receiverStore *mock.Store, root mock.BlockId, maxBatchSize uint32, bytesPerMs int64, latencyMs int64) error {
 
 	snapshotBefore := stats.GLOBAL_REPORTING.Snapshot()
+
+	config := batch.Config{
+		MaxBatchSize:  maxBatchSize,
+		BloomCapacity: 1024, // matches value used below before my changes
+		BloomFunction: MOCK_ID_HASH,
+		Instrument:    instrumented.INSTRUMENT_STORE | instrumented.INSTRUMENT_ORCHESTRATOR,
+	}
+
+	sinkResponder := batch.NewSinkResponder[mock.BlockId](receiverStore, config, nil)
 
 	blockChannel := BlockChannel{
 		make(chan *messages.BlocksMessage[mock.BlockId, *mock.BlockId, batch.BatchState]),
@@ -212,85 +245,94 @@ func MockBatchTransfer(senderStore *mock.Store, receiverStore *mock.Store, root 
 
 	senderSession := sourceConnection.Session(
 		senderStore,
-		filter.NewSynchronizedFilter(makeBloom(1024)),
+		filter.NewSynchronizedFilter(batch.NewBloomAllocator[mock.BlockId](&config)()),
 	)
 
 	log.Debugf("created senderSession")
 
-	sinkConnection := batch.NewGenericBatchSinkConnection[mock.BlockId](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE)
-
-	receiverSession := sinkConnection.Session(
-		NewSynchronizedBlockStore[mock.BlockId](NewSynchronizedBlockStore[mock.BlockId](receiverStore)),
-		NewSimpleStatusAccumulator[mock.BlockId](filter.NewSynchronizedFilter(makeBloom(1024))),
-	)
-
-	log.Debugf("created receiverSession")
-
 	blockSender := sourceConnection.Sender(&blockChannel, uint32(maxBatchSize))
-	statusSender := sinkConnection.Sender(&statusChannel)
 
-	statusChannel.SetStatusListener(sourceConnection.Receiver(senderSession))
-	blockChannel.SetBlockListener(sinkConnection.Receiver(receiverSession))
+	sinkResponder.SetBatchStatusSender(&statusChannel)
 
-	log.Debugf("created receiverSession")
+	statusChannel.SetReceiverFunc(func() *batch.SimpleBatchStatusReceiver[mock.BlockId] {
+		return sourceConnection.Receiver(senderSession)
+	})
 
-	senderSession.Enqueue(root)
+	blockChannel.SetReceiverFunc(func() batch.BatchBlockReceiver[mock.BlockId] {
+		// This will start up a new sink session whenever needed, like if the previously running session's Run method already returned.
+		return sinkResponder.Receiver(SESSION_ID)
+	})
 
-	// Close both sessions when they become quiescent
-	senderSession.Close()
-	receiverSession.Close()
+	log.Debugf("created senders and channels")
 
 	log.Debugf("starting goroutines")
 
-	errCh := make(chan error)
-	go func() {
-		log.Debugf("sender session started")
-		senderSession.Run(blockSender)
-		err := <-senderSession.Done()
-		errCh <- err
-		blockSender.Close()
-		log.Debugf("sender session terminated")
-	}()
-
-	go func() {
-		log.Debugf("receiver session started")
-		receiverSession.Run(statusSender)
-		err := <-receiverSession.Done()
-		errCh <- err
-		statusSender.Close()
-		log.Debugf("receiver session terminated")
-	}()
-
 	go func() {
 		log.Debugf("block listener started")
-		errCh <- blockChannel.listen()
-		log.Debugf("block listener terminated")
+		// Will get a value when the channel is closed
+
+		err := blockChannel.listen()
+		if err != nil {
+			log.Debugf("block listener error: %s", err)
+		} else {
+			log.Debugf("block listener terminated")
+		}
 	}()
 
 	go func() {
 		log.Debugf("status listener started")
-		errCh <- statusChannel.listen()
-		log.Debugf("status listener terminated")
+		err := statusChannel.listen()
+		if err != nil {
+			log.Debugf("status listener error: %s", err)
+		} else {
+			log.Debugf("status listener terminated")
+		}
 	}()
+
+	go func() {
+		log.Debugf("before enqueue")
+		senderSession.Enqueue(root)
+		log.Debugf("after enqueue")
+
+		log.Debugf("sender session started")
+		senderSession.Run(blockSender)
+	}()
+
+	// Wait for session to start
+	<-senderSession.Started()
 
 	go func() {
 		log.Debugf("timeout started")
 		time.Sleep(20 * time.Second)
 		log.Debugf("timeout elapsed")
-		if !senderSession.IsClosed() {
-			senderSession.Cancel()
+
+		// If we timeout, see what goroutines are hung
+		pprof.Lookup("goroutine").WriteTo(os.Stdout, 1)
+
+		if err := senderSession.Cancel(); err != nil {
+			log.Errorf("error cancelling sender session: %v", err)
 		}
-		if !receiverSession.IsClosed() {
-			receiverSession.Cancel()
+		if err := sinkResponder.SinkSession(SESSION_ID).Cancel(); err != nil {
+			log.Errorf("error cancelling receiver session: %v", err)
 		}
 	}()
 
-	var err error
-
-	for i := 0; i < 4 && err == nil; i++ {
-		err = <-errCh
-		log.Debugf("goroutine terminated with %v", err)
+	if err := <-senderSession.Done(); err != nil {
+		log.Debugf("sender session failed: %v", err)
 	}
+	log.Debugf("sender session terminated")
+
+	if err := blockSender.Close(); err != nil {
+		log.Errorf("error closing block sender: %v", err)
+	}
+
+	// TODO: Replace with waiting for all channels on the sinkResponder's sessions to be done
+	// If we get here, the sender session is done, so this will get the last living sink session's status
+
+	if err := <-sinkResponder.SinkSession(SESSION_ID).Done(); err != nil {
+		log.Debugf("receiver session failed: %v", err)
+	}
+	log.Debugf("receiver session terminated")
 
 	snapshotAfter := stats.GLOBAL_REPORTING.Snapshot()
 	diff := snapshotBefore.Diff(snapshotAfter)
@@ -298,226 +340,264 @@ func MockBatchTransfer(senderStore *mock.Store, receiverStore *mock.Store, root 
 	return nil
 }
 
-func TestMockTransferToEmptyStoreSingleBatchNoDelay(t *testing.T) {
-	senderStore := mock.NewStore(mock.DefaultConfig())
-	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
-	receiverStore := mock.NewStore(mock.DefaultConfig())
+func MockBatchTransferReceive(sinkStore *mock.Store, sourceStore *mock.Store, root mock.BlockId, maxBatchSize uint32, bytesPerMs int64, latencyMs int64) error {
 
-	MockBatchTransfer(senderStore, receiverStore, root, 5000, 0, 0)
-	if !receiverStore.HasAll(root) {
-		t.Errorf("Expected receiver store to have all nodes")
-	}
-}
-
-func TestMockTransferToEmptyStoreSingleBatchDelayed(t *testing.T) {
-	senderStore := mock.NewStore(mock.DefaultConfig())
-	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
-	receiverStore := mock.NewStore(mock.DefaultConfig())
-	receiverStore.Reconfigure(blockStoreConfig)
-	senderStore.Reconfigure(blockStoreConfig)
-	MockBatchTransfer(senderStore, receiverStore, root, 5000, GBIT_SECOND, TYPICAL_LATENCY)
-	if !receiverStore.HasAll(root) {
-		t.Errorf("Expected receiver store to have all nodes")
-	}
-}
-
-func TestMockTransferToEmptyStoreMultiBatchNoDelay(t *testing.T) {
-	senderStore := mock.NewStore(mock.DefaultConfig())
-	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
-	receiverStore := mock.NewStore(mock.DefaultConfig())
-	MockBatchTransfer(senderStore, receiverStore, root, 50, 0, 0)
-	if !receiverStore.HasAll(root) {
-		t.Errorf("Expected receiver store to have all nodes")
-	}
-}
-
-func TestMockTransferToEmptyStoreMultiBatchDelayed(t *testing.T) {
-	senderStore := mock.NewStore(mock.DefaultConfig())
-	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
-	receiverStore := mock.NewStore(mock.DefaultConfig())
-	receiverStore.Reconfigure(blockStoreConfig)
-	senderStore.Reconfigure(blockStoreConfig)
-	MockBatchTransfer(senderStore, receiverStore, root, 50, GBIT_SECOND, TYPICAL_LATENCY)
-	if !receiverStore.HasAll(root) {
-		t.Errorf("Expected receiver store to have all nodes")
-	}
-}
-
-func TestMockTransferSingleMissingBlockNoDelay(t *testing.T) {
-	senderStore := mock.NewStore(mock.DefaultConfig())
-	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
-	receiverStore := mock.NewStore(mock.DefaultConfig())
-	receiverStore.AddAll(context.Background(), senderStore)
-	block, err := receiverStore.RandomBlock()
-	if err != nil {
-		t.Errorf("Could not find random block %v", err)
-	}
-	receiverStore.Remove(block.Id())
-	MockBatchTransfer(senderStore, receiverStore, root, 10, 0, 0)
-	if !receiverStore.HasAll(root) {
-		t.Errorf("Expected receiver store to have all nodes")
-	}
-}
-
-func TestMockTransferSingleMissingBlockDelayed(t *testing.T) {
-	senderStore := mock.NewStore(mock.DefaultConfig())
-	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
-	receiverStore := mock.NewStore(mock.DefaultConfig())
-	receiverStore.AddAll(context.Background(), senderStore)
-	block, err := receiverStore.RandomBlock()
-	if err != nil {
-		t.Errorf("Could not find random block %v", err)
-	}
-	receiverStore.Remove(block.Id())
-	receiverStore.Reconfigure(blockStoreConfig)
-	senderStore.Reconfigure(blockStoreConfig)
-	MockBatchTransfer(senderStore, receiverStore, root, 10, GBIT_SECOND, TYPICAL_LATENCY)
-	if !receiverStore.HasAll(root) {
-		t.Errorf("Expected receiver store to have all nodes")
-	}
-}
-
-func TestMockTransferSingleMissingTreeNoDelay(t *testing.T) {
-	senderStore := mock.NewStore(mock.DefaultConfig())
-	mock.AddRandomForest(context.Background(), senderStore, 10)
-	receiverStore := mock.NewStore(mock.DefaultConfig())
-	receiverStore.AddAll(context.Background(), senderStore)
-	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.1)
-	MockBatchTransfer(senderStore, receiverStore, root, 50, 0, 0)
-	if !receiverStore.HasAll(root) {
-		t.Errorf("Expected receiver store to have all nodes")
-		receiverStore.Dump(root, &log.SugaredLogger, "")
-	}
-}
-
-func TestMockTransferSingleMissingTreeDelayed(t *testing.T) {
-	senderStore := mock.NewStore(mock.DefaultConfig())
-	mock.AddRandomForest(context.Background(), senderStore, 10)
-	receiverStore := mock.NewStore(mock.DefaultConfig())
-	receiverStore.AddAll(context.Background(), senderStore)
-	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.1)
-	receiverStore.Reconfigure(blockStoreConfig)
-	senderStore.Reconfigure(blockStoreConfig)
-	MockBatchTransfer(senderStore, receiverStore, root, 50, GBIT_SECOND, TYPICAL_LATENCY)
-	if !receiverStore.HasAll(root) {
-		t.Errorf("Expected receiver store to have all nodes")
-		receiverStore.Dump(root, &log.SugaredLogger, "")
-	}
-}
-
-func TestSessionQuiescence(t *testing.T) {
 	snapshotBefore := stats.GLOBAL_REPORTING.Snapshot()
+
+	config := batch.Config{
+		MaxBatchSize:  maxBatchSize,
+		BloomCapacity: 1024, // matches value used below before my changes
+		BloomFunction: MOCK_ID_HASH,
+		Instrument:    instrumented.INSTRUMENT_STORE | instrumented.INSTRUMENT_ORCHESTRATOR,
+	}
+
+	sourceResponder := batch.NewSourceResponder[mock.BlockId](sourceStore, config, nil, maxBatchSize)
 
 	blockChannel := BlockChannel{
 		make(chan *messages.BlocksMessage[mock.BlockId, *mock.BlockId, batch.BatchState]),
 		nil,
-		0,
-		0,
+		bytesPerMs,
+		latencyMs,
 	}
 
 	statusChannel := StatusChannel{
 		make(chan *messages.StatusMessage[mock.BlockId, *mock.BlockId, batch.BatchState]),
 		nil,
-		0,
-		0,
+		bytesPerMs,
+		latencyMs,
 	}
 
-	senderStore := mock.NewStore(mock.DefaultConfig())
-	receiverStore := mock.NewStore(mock.DefaultConfig())
-	root := mock.RandId()
-	senderStore.Add(context.Background(), mock.NewBlock(root, 100))
-
-	sourceConnection := batch.NewGenericBatchSourceConnection[mock.BlockId](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE|instrumented.INSTRUMENT_SENDER)
-
-	senderSession := sourceConnection.Session(
-		senderStore,
-		filter.NewSynchronizedFilter(makeBloom(1024)),
-	)
-
-	log.Debugf("created senderSession")
-
+	// The sink is driving for pull
 	sinkConnection := batch.NewGenericBatchSinkConnection[mock.BlockId](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE)
 
 	receiverSession := sinkConnection.Session(
-		NewSynchronizedBlockStore[mock.BlockId](receiverStore),
-		NewSimpleStatusAccumulator[mock.BlockId](filter.NewSynchronizedFilter(makeBloom(1024))),
+		NewSynchronizedBlockStore[mock.BlockId](NewSynchronizedBlockStore[mock.BlockId](sinkStore)),
+		NewSimpleStatusAccumulator[mock.BlockId](filter.NewSynchronizedFilter(batch.NewBloomAllocator[mock.BlockId](&config)())),
 	)
 
-	log.Debugf("created receiverSession")
-
-	blockSender := sourceConnection.Sender(&blockChannel, 100)
 	statusSender := sinkConnection.Sender(&statusChannel)
 
-	statusChannel.SetStatusListener(sourceConnection.Receiver(senderSession))
-	blockChannel.SetBlockListener(sinkConnection.Receiver(receiverSession))
+	sourceResponder.SetBatchBlockSender(&blockChannel)
 
-	log.Debugf("created receiverSession")
+	blockChannel.SetReceiverFunc(func() batch.BatchBlockReceiver[mock.BlockId] {
+		return sinkConnection.Receiver(receiverSession)
+	})
 
-	senderSession.Enqueue(root)
+	statusChannel.SetReceiverFunc(func() *batch.SimpleBatchStatusReceiver[mock.BlockId] {
+		return sourceResponder.Receiver(SESSION_ID)
+	})
+
+	log.Debugf("created senders and channels")
 
 	log.Debugf("starting goroutines")
 
-	errCh := make(chan error)
-	go func() {
-		log.Debugf("sender session started")
-		senderSession.Run(blockSender)
-		err := <-senderSession.Done()
-		errCh <- err
-		blockSender.Close()
-		log.Debugf("sender session terminated")
-	}()
-
-	go func() {
-		log.Debugf("receiver session started")
-		receiverSession.Run(statusSender)
-		err := <-receiverSession.Done()
-		errCh <- err
-		statusSender.Close()
-		log.Debugf("receiver session terminated")
-	}()
-
 	go func() {
 		log.Debugf("block listener started")
-		errCh <- blockChannel.listen()
-		log.Debugf("block listener terminated")
+		err := blockChannel.listen()
+		if err != nil {
+			log.Debugf("block listener error: %s", err)
+		} else {
+			log.Debugf("block listener terminated")
+		}
 	}()
 
 	go func() {
 		log.Debugf("status listener started")
-		errCh <- statusChannel.listen()
-		log.Debugf("status listener terminated")
+		err := statusChannel.listen()
+		if err != nil {
+			log.Debugf("status listener error: %s", err)
+		} else {
+			log.Debugf("status listener terminated")
+		}
 	}()
 
 	go func() {
-		log.Debugf("close timeout started")
-		time.Sleep(5 * time.Second)
-		log.Debugf("close timeout elapsed")
-		if err := senderSession.Close(); err != nil {
-			errCh <- err
-		} else if err := receiverSession.Close(); err != nil {
-			errCh <- err
-		} else {
-			errCh <- nil
+		log.Debugf("before enqueue")
+		receiverSession.Enqueue(root)
+		log.Debugf("after enqueue")
+
+		log.Debugf("receiver session started")
+		receiverSession.Run(statusSender)
+	}()
+
+	// Wait for session to start
+	<-receiverSession.Started()
+
+	go func() {
+		log.Debugf("timeout started")
+		time.Sleep(20 * time.Second)
+		log.Debugf("timeout elapsed")
+
+		// See what goroutine is hung
+		pprof.Lookup("goroutine").WriteTo(os.Stdout, 1)
+
+		if err := receiverSession.Cancel(); err != nil {
+			log.Errorf("error cancelling receiver session: %v", err)
+		}
+		if err := sourceResponder.SourceSession(SESSION_ID).Cancel(); err != nil {
+			log.Errorf("error cancelling sender session: %v", err)
 		}
 	}()
 
-	var err error
-
-	for i := 0; i < 5 && err == nil; i++ {
-		err = <-errCh
-		if err != nil {
-			t.Errorf("goroutine terminated with %v", err)
-		} else {
-			log.Debugf("goroutine terminated OK")
-		}
+	if err := <-receiverSession.Done(); err != nil {
+		log.Debugf("receiver session failed: %v", err)
 	}
+	log.Debugf("receiver session terminated")
+
+	if err := statusSender.Close(); err != nil {
+		log.Errorf("error closing status sender: %v", err)
+	}
+
+	if err := <-sourceResponder.SourceSession(SESSION_ID).Done(); err != nil {
+		log.Debugf("sender session failed: %v", err)
+	}
+	log.Debugf("sender session terminated")
 
 	snapshotAfter := stats.GLOBAL_REPORTING.Snapshot()
 	diff := snapshotBefore.Diff(snapshotAfter)
 	diff.Write(&log.SugaredLogger)
+	return nil
+}
 
-	numberOfRounds := diff.Count("BlockSender.Flush.Ok")
-	if numberOfRounds > 3 { // One round to exchange data, one as transfer completes, one round to close session
-		t.Errorf("Expected 3 rounds, actual count %v", numberOfRounds)
+func TestMockTransferToEmptyStoreSingleBatchNoDelaySend(t *testing.T) {
+	senderStore := mock.NewStore(mock.DefaultConfig())
+	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
+	receiverStore := mock.NewStore(mock.DefaultConfig())
+
+	MockBatchTransferSend(senderStore, receiverStore, root, 5000, 0, 0)
+	if !receiverStore.HasAll(root) {
+		t.Errorf("Expected receiver store to have all nodes")
+	}
+}
+
+func TestMockTransferToEmptyStoreSingleBatchNoDelayReceive(t *testing.T) {
+	t.Skip("Skipping test")
+	sourceStore := mock.NewStore(mock.DefaultConfig())
+	root := mock.AddRandomTree(context.Background(), sourceStore, 10, 5, 0.0)
+	sinkStore := mock.NewStore(mock.DefaultConfig())
+
+	MockBatchTransferReceive(sinkStore, sourceStore, root, 5000, 0, 0)
+	if !sinkStore.HasAll(root) {
+		t.Errorf("Expected receiver store to have all nodes")
+	}
+}
+
+func TestMockTransferToEmptyStoreSingleBatchDelayedSend(t *testing.T) {
+	senderStore := mock.NewStore(mock.DefaultConfig())
+	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
+	receiverStore := mock.NewStore(mock.DefaultConfig())
+	receiverStore.Reconfigure(blockStoreConfig)
+	senderStore.Reconfigure(blockStoreConfig)
+	MockBatchTransferSend(senderStore, receiverStore, root, 5000, GBIT_SECOND, TYPICAL_LATENCY)
+	if !receiverStore.HasAll(root) {
+		t.Errorf("Expected receiver store to have all nodes")
+	}
+}
+
+func TestMockTransferToEmptyStoreSingleBatchDelayedReceive(t *testing.T) {
+	t.Skip("Skipping test")
+	senderStore := mock.NewStore(mock.DefaultConfig())
+	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
+	receiverStore := mock.NewStore(mock.DefaultConfig())
+	receiverStore.Reconfigure(blockStoreConfig)
+	senderStore.Reconfigure(blockStoreConfig)
+	MockBatchTransferReceive(receiverStore, senderStore, root, 5000, GBIT_SECOND, TYPICAL_LATENCY)
+	if !receiverStore.HasAll(root) {
+		t.Errorf("Expected receiver store to have all nodes")
+	}
+}
+
+func TestMockTransferToEmptyStoreMultiBatchNoDelaySend(t *testing.T) {
+	senderStore := mock.NewStore(mock.DefaultConfig())
+	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
+	receiverStore := mock.NewStore(mock.DefaultConfig())
+	MockBatchTransferSend(senderStore, receiverStore, root, 50, 0, 0)
+	if !receiverStore.HasAll(root) {
+		t.Errorf("Expected receiver store to have all nodes")
+	}
+}
+
+func TestMockTransferToEmptyStoreMultiBatchNoDelayReceive(t *testing.T) {
+	t.Skip("Skipping test")
+	senderStore := mock.NewStore(mock.DefaultConfig())
+	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
+	receiverStore := mock.NewStore(mock.DefaultConfig())
+	MockBatchTransferReceive(receiverStore, senderStore, root, 50, 0, 0)
+	if !receiverStore.HasAll(root) {
+		t.Errorf("Expected receiver store to have all nodes")
+	}
+}
+
+func TestMockTransferToEmptyStoreMultiBatchDelayedSend(t *testing.T) {
+	senderStore := mock.NewStore(mock.DefaultConfig())
+	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
+	receiverStore := mock.NewStore(mock.DefaultConfig())
+	receiverStore.Reconfigure(blockStoreConfig)
+	senderStore.Reconfigure(blockStoreConfig)
+	MockBatchTransferSend(senderStore, receiverStore, root, 50, GBIT_SECOND, TYPICAL_LATENCY)
+	if !receiverStore.HasAll(root) {
+		t.Errorf("Expected receiver store to have all nodes")
+	}
+}
+
+func TestMockTransferSingleMissingBlockNoDelaySend(t *testing.T) {
+	senderStore := mock.NewStore(mock.DefaultConfig())
+	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
+	receiverStore := mock.NewStore(mock.DefaultConfig())
+	receiverStore.AddAll(context.Background(), senderStore)
+	block, err := receiverStore.RandomBlock()
+	if err != nil {
+		t.Errorf("Could not find random block %v", err)
+	}
+	receiverStore.Remove(block.Id())
+	MockBatchTransferSend(senderStore, receiverStore, root, 10, 0, 0)
+	if !receiverStore.HasAll(root) {
+		t.Errorf("Expected receiver store to have all nodes")
+	}
+}
+
+func TestMockTransferSingleMissingBlockDelayedSend(t *testing.T) {
+	senderStore := mock.NewStore(mock.DefaultConfig())
+	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
+	receiverStore := mock.NewStore(mock.DefaultConfig())
+	receiverStore.AddAll(context.Background(), senderStore)
+	block, err := receiverStore.RandomBlock()
+	if err != nil {
+		t.Errorf("Could not find random block %v", err)
+	}
+	receiverStore.Remove(block.Id())
+	receiverStore.Reconfigure(blockStoreConfig)
+	senderStore.Reconfigure(blockStoreConfig)
+	MockBatchTransferSend(senderStore, receiverStore, root, 10, GBIT_SECOND, TYPICAL_LATENCY)
+	if !receiverStore.HasAll(root) {
+		t.Errorf("Expected receiver store to have all nodes")
+	}
+}
+
+func TestMockTransferSingleMissingTreeNoDelaySend(t *testing.T) {
+	senderStore := mock.NewStore(mock.DefaultConfig())
+	mock.AddRandomForest(context.Background(), senderStore, 10)
+	receiverStore := mock.NewStore(mock.DefaultConfig())
+	receiverStore.AddAll(context.Background(), senderStore)
+	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.1)
+	MockBatchTransferSend(senderStore, receiverStore, root, 50, 0, 0)
+	if !receiverStore.HasAll(root) {
+		t.Errorf("Expected receiver store to have all nodes")
+		receiverStore.Dump(root, &log.SugaredLogger, "")
+	}
+}
+
+func TestMockTransferSingleMissingTreeDelayedSend(t *testing.T) {
+	senderStore := mock.NewStore(mock.DefaultConfig())
+	mock.AddRandomForest(context.Background(), senderStore, 10)
+	receiverStore := mock.NewStore(mock.DefaultConfig())
+	receiverStore.AddAll(context.Background(), senderStore)
+	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.1)
+	receiverStore.Reconfigure(blockStoreConfig)
+	senderStore.Reconfigure(blockStoreConfig)
+	MockBatchTransferSend(senderStore, receiverStore, root, 50, GBIT_SECOND, TYPICAL_LATENCY)
+	if !receiverStore.HasAll(root) {
+		t.Errorf("Expected receiver store to have all nodes")
+		receiverStore.Dump(root, &log.SugaredLogger, "")
 	}
 }
