@@ -215,6 +215,23 @@ func NewBatchSourceOrchestrator() *BatchSourceOrchestrator {
 // TODO: Should context be passed, to allow for cancellation and timeouts?  In particular I'm thinking of ENQUEUE or any function that could impact user experience.
 func (bso *BatchSourceOrchestrator) Notify(event core.SessionEvent) error {
 	switch event {
+	case core.BEGIN_SESSION:
+		// This wait allows us to start a session before enqueueing any blocks.
+		bso.state.WaitAny(SOURCE_PROCESSING|CANCELLED|SOURCE_CLOSED|SOURCE_CLOSING, 0)
+	case core.END_SESSION:
+		bso.state.Update(SOURCE, SOURCE_CLOSED)
+	case core.BEGIN_ENQUEUE:
+		// Does nothing
+	case core.END_ENQUEUE:
+		// This is necessary because if the session is quiescent (e.g. has no in-flight exchange)
+		// the session Run loop will be waiting on SOURCE_PROCESSING, and we need to set it to wake
+		// up the session.  If the receiver is not flushing, waiting, or ready, it is quiescent.
+		// TODO: This shouldn't be needed any more, since there's no longer such thing as a quiescent session,
+		// and we terminate the loop based on session termination criteria before notifying BEGIN_PROCESSING.
+		// Didn't turn out to be true.  Hung.  But I should try again and see why and what I'm missing.
+		if !bso.state.ContainsAny(SOURCE_FLUSHING | SOURCE_WAITING | SOURCE_PROCESSING) {
+			bso.state.Set(SOURCE_PROCESSING)
+		}
 	case core.BEGIN_PROCESSING:
 		// TODO: I think it's possible SOURCE_CLOSED and SOURCE_CLOSING should be removed.  Check.
 		state := bso.state.WaitAny(SOURCE_PROCESSING|CANCELLED|SOURCE_CLOSED|SOURCE_CLOSING, 0)
@@ -243,21 +260,6 @@ func (bso *BatchSourceOrchestrator) Notify(event core.SessionEvent) error {
 		if bso.state.ContainsExact(SOURCE_CLOSING|SOURCE_SENDING, SOURCE_CLOSING) {
 			bso.state.Set(SOURCE_CLOSED)
 		}
-	case core.END_ENQUEUE:
-		// This is necessary because if the session is quiescent (e.g. has no in-flight exchange)
-		// the session Run loop will be waiting on SOURCE_PROCESSING, and we need to set it to wake
-		// up the session.  If the receiver is not flushing, waiting, or ready, it is quiescent.
-		// TODO: This shouldn't be needed any more, since there's no longer such thing as a quiescent session,
-		// and we terminate the loop based on session termination criteria before notifying BEGIN_PROCESSING.
-		// Didn't turn out to be true.  Hung.  But I should try again and see why and what I'm missing.
-		if !bso.state.ContainsAny(SOURCE_FLUSHING | SOURCE_WAITING | SOURCE_PROCESSING) {
-			bso.state.Set(SOURCE_PROCESSING)
-		}
-	case core.BEGIN_SESSION:
-		// This wait allows us to start a session before enqueueing any blocks.
-		bso.state.WaitAny(SOURCE_PROCESSING|CANCELLED|SOURCE_CLOSED|SOURCE_CLOSING, 0)
-	case core.END_SESSION:
-		bso.state.Update(SOURCE, SOURCE_CLOSED)
 	case core.CANCEL:
 		bso.state.Update(SOURCE, CANCELLED)
 	case core.BEGIN_SEND:
@@ -310,6 +312,7 @@ func (bro *BatchSinkOrchestrator) Notify(event core.SessionEvent) error {
 		bro.state.Set(SINK_ENQUEUING)
 	case core.END_ENQUEUE:
 		bro.state.Update(SINK_ENQUEUING, SINK_SENDING)
+		bro.state.Set(SINK_PROCESSING)
 		// // This is necessary because if the session is quiescent (e.g. has no in-flight exchange)
 		// // the session Run loop will be waiting on SINK_PROCESSING, and we need to set it to send
 		// // an initial 'want' message to the block source. If the receiver is not sending, waiting,
