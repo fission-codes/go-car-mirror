@@ -14,12 +14,12 @@ build:
 
 .PHONY: test
 test:
-	go test -count=1 ./...
+	go test -race -count=1 ./...
 	./fuzz.sh
 
 .PHONY: test-v
 test-v:
-	GOLOG_LOG_LEVEL=debug go test -count=1 -v ./...
+	GOLOG_LOG_LEVEL=debug go test -race -count=1 -v ./...
 	GOLOG_LOG_LEVEL=debug ./fuzz.sh
 
 .PHONY: watch
