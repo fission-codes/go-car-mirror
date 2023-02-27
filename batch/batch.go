@@ -154,11 +154,12 @@ func NewSimpleBatchBlockSender[I core.BlockId](batchBlockSender BatchBlockSender
 func (sbbs *SimpleBatchBlockSender[I]) SendBlock(block core.RawBlock[I]) error {
 	sbbs.listMutex.Lock()
 	sbbs.list = append(sbbs.list, block)
+	listLen := len(sbbs.list)
 	sbbs.listMutex.Unlock()
 
 	// TODO: Add logic around maxBatchSizeColdCall if needed.
 
-	if len(sbbs.list) >= int(sbbs.maxBatchSize) {
+	if listLen >= int(sbbs.maxBatchSize) {
 		return sbbs.Flush()
 	}
 
@@ -181,7 +182,13 @@ func (sbbs *SimpleBatchBlockSender[I]) Flush() error {
 	if batchState&(SOURCE_SENDING|SOURCE_CLOSED) != 0 {
 		sbbs.listMutex.Lock()
 		defer sbbs.listMutex.Unlock()
-		if err := sbbs.batchBlockSender.SendList(batchState&SOURCE, sbbs.list); err != nil {
+
+		// Clone the list before sending, to avoid data races.
+		// While we have a mutex in this method, we don't know what will happen when passed to SendList.
+		sendList := make([]core.RawBlock[I], len(sbbs.list))
+		copy(sendList, sbbs.list)
+
+		if err := sbbs.batchBlockSender.SendList(batchState&SOURCE, sendList); err != nil {
 			return err
 		}
 		sbbs.list = sbbs.list[:0]
