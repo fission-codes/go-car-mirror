@@ -239,6 +239,11 @@ func (bso *BatchSourceOrchestrator) Notify(event core.SessionEvent) error {
 		if !bso.state.ContainsAny(SOURCE_FLUSHING | SOURCE_WAITING | SOURCE_PROCESSING) {
 			bso.state.Set(SOURCE_PROCESSING)
 		}
+	case core.BEGIN_BATCH:
+		// Does nothing
+		bso.state.Set(SOURCE_PROCESSING)
+	case core.END_BATCH:
+		// Does nothing
 	case core.BEGIN_PROCESSING:
 		// TODO: I think it's possible SOURCE_CLOSED and SOURCE_CLOSING should be removed.  Check.
 		state := bso.state.WaitAny(SOURCE_PROCESSING|CANCELLED|SOURCE_CLOSED|SOURCE_CLOSING, 0)
