@@ -123,3 +123,89 @@ func NewBloomAllocator[I core.BlockId](config *Config) func() filter.Filter[I] {
 		return filter
 	}
 }
+
+type SourceSessionData[I core.BlockId] struct {
+	// conn is different for http.  Is a func the way to go or generics?
+	// Just using what we need in test to start with.
+	conn    *GenericBatchSourceConnection[I]
+	Session *core.SourceSession[I, BatchState]
+}
+
+type SourceResponder[I core.BlockId] struct {
+	// for responder sessions, we don't need to do anything to them other then Run?  No, we might need to cancel.
+	store            core.BlockStore[I]
+	sourceSessions   *util.SynchronizedMap[SessionId, *SourceSessionData[I]]
+	filterAllocator  func() filter.Filter[I]
+	batchBlockSender BatchBlockSender[I]
+	batchSize        uint32
+}
+
+func NewSourceResponder[I core.BlockId](store core.BlockStore[I], config Config, batchBlockSender BatchBlockSender[I], batchSize uint32) *SourceResponder[I] {
+	return &SourceResponder[I]{
+		store,
+		util.NewSynchronizedMap[SessionId, *SourceSessionData[I]](),
+		NewBloomAllocator[I](&config),
+		batchBlockSender,
+		batchSize,
+	}
+}
+
+func (sr *SourceResponder[I]) newSourceConnection() *GenericBatchSourceConnection[I] {
+	return NewGenericBatchSourceConnection[I](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE)
+}
+
+func (sr *SourceResponder[I]) SourceSessionData(sessionId SessionId) *SourceSessionData[I] {
+	sessionData := sr.sourceSessions.GetOrInsert(
+		sessionId,
+		func() *SourceSessionData[I] {
+			return sr.startSourceSession(sessionId)
+		},
+	)
+
+	return sessionData
+}
+
+func (sr *SourceResponder[I]) SourceSession(sessionId SessionId) *core.SourceSession[I, BatchState] {
+	sessionData := sr.SourceSessionData(sessionId)
+	return sessionData.Session
+}
+
+func (sr *SourceResponder[I]) SourceConnection(sessionId SessionId) *GenericBatchSourceConnection[I] {
+	sessionData := sr.SourceSessionData(sessionId)
+	return sessionData.conn
+}
+
+func (sr *SourceResponder[I]) Receiver(sessionId SessionId) *SimpleBatchStatusReceiver[I] {
+	sessionData := sr.SourceSessionData(sessionId)
+	return sessionData.conn.Receiver(sessionData.Session)
+}
+
+func (sr *SourceResponder[I]) startSourceSession(sessionId SessionId) *SourceSessionData[I] {
+
+	sourceConnection := sr.newSourceConnection()
+
+	newSession := sourceConnection.Session(
+		sr.store,
+		sr.filterAllocator(),
+	)
+
+	blockSender := sourceConnection.Sender(sr.batchBlockSender, sr.batchSize)
+
+	go func() {
+		newSession.Run(blockSender)
+		// blockSender.Close()
+		sr.sourceSessions.Remove(sessionId)
+	}()
+
+	// Wait for the session to start
+	<-newSession.Started()
+
+	return &SourceSessionData[I]{
+		sourceConnection,
+		newSession,
+	}
+}
+
+func (sr *SourceResponder[I]) SetBatchBlockSender(batchBlockSender BatchBlockSender[I]) {
+	sr.batchBlockSender = batchBlockSender
+}

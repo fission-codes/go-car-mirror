@@ -76,10 +76,9 @@ func makeBloom(capacity uint) filter.Filter[mock.BlockId] {
 
 type BlockChannel struct {
 	channel      chan *messages.BlocksMessage[mock.BlockId, *mock.BlockId, batch.BatchState]
-	receiverFunc func() batch.BatchBlockReceiver[mock.BlockId] // replacing with responder below
-	rate         int64                                         // number of bytes transmitted per millisecond
-	latency      int64                                         // latency in milliseconds
-	// mutex        sync.Mutex
+	receiverFunc func() batch.BatchBlockReceiver[mock.BlockId]
+	rate         int64 // number of bytes transmitted per millisecond
+	latency      int64 // latency in milliseconds
 }
 
 func (ch *BlockChannel) SendList(state batch.BatchState, blocks []RawBlock[mock.BlockId]) error {
@@ -115,12 +114,12 @@ func (ch *BlockChannel) SetReceiverFunc(receiverFunc func() batch.BatchBlockRece
 func (ch *BlockChannel) listen() error {
 	var err error = nil
 	for result := range ch.channel {
-		// Look up receiver dynamically
-		if ch.Receiver() == nil {
+		receiver := ch.Receiver()
+		if receiver == nil {
 			return ErrReceiverNotSet
 		}
 		log.Debugw("received", "object", "BlockChannel", "method", "listen", "state", result.State, "blocks", len(result.Car.Blocks))
-		ch.Receiver().HandleList(result.Car.Blocks)
+		receiver.HandleList(result.Car.Blocks)
 	}
 	return err
 }
@@ -171,13 +170,13 @@ func (ch *StatusChannel) SetReceiverFunc(receiverFunc func() *batch.SimpleBatchS
 func (ch *StatusChannel) listen() error {
 	var err error = nil
 	for result := range ch.channel {
-		if ch.Receiver() == nil {
+		receiver := ch.Receiver()
+		if receiver == nil {
 			return ErrReceiverNotSet
 		}
 		have := result.Have.Any()
 		log.Debugw("received", "object", "StatusChannel", "method", "listen", "state", result.State, "have", have.Count(), "want", len(result.Want))
-		// Hung here?  per stack trace pprof?
-		ch.Receiver().HandleStatus(result.State, have, result.Want)
+		receiver.HandleStatus(result.State, have, result.Want)
 	}
 	return err
 }
@@ -229,6 +228,7 @@ func MockBatchTransfer(senderStore *mock.Store, receiverStore *mock.Store, root 
 
 	// No batch status sender to start with
 	sinkResponder := batch.NewSinkResponder[mock.BlockId](receiverStore, config, nil)
+	// sourceResponder := batch.NewSourceResponder[mock.BlockId](senderStore, config, nil, maxBatchSize)
 
 	blockChannel := BlockChannel{
 		make(chan *messages.BlocksMessage[mock.BlockId, *mock.BlockId, batch.BatchState]),
