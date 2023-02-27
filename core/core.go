@@ -749,7 +749,10 @@ func (ss *SourceSession[I, F]) HandleStatus(
 	}
 	defer ss.orchestrator.Notify(END_RECEIVE)
 	ss.stats.Logger().Debugw("begin processing", "object", "SourceSession", "method", "HandleStatus", "pendingBlocks", ss.pendingBlocks.Len(), "filter", ss.filter.Count())
-	ss.filter = ss.filter.AddAll(have)
+	// TODO: Had a race condition.  Write on line below, but read on 704.
+	// ss.filter = ss.filter.AddAll(have)
+	// This looks like what we want though.
+	ss.filter.AddAll(have)
 	ss.stats.Logger().Debugw("incoming have filter merged", "object", "SourceSession", "method", "HandleStatus", "filter", ss.filter.Count())
 	//ss.filter.Dump(ss.log, "SourceSession filter - ")
 	for _, id := range want {
