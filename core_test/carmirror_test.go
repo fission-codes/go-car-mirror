@@ -459,7 +459,7 @@ func MockBatchTransferReceive(sinkStore *mock.Store, sourceStore *mock.Store, ro
 	return nil
 }
 
-func TestMockTransferToEmptyStoreSingleBatchNoDelay(t *testing.T) {
+func TestMockTransferToEmptyStoreSingleBatchNoDelaySend(t *testing.T) {
 	senderStore := mock.NewStore(mock.DefaultConfig())
 	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
 	receiverStore := mock.NewStore(mock.DefaultConfig())
@@ -482,7 +482,7 @@ func TestMockTransferToEmptyStoreSingleBatchNoDelayReceive(t *testing.T) {
 	}
 }
 
-func TestMockTransferToEmptyStoreSingleBatchDelayed(t *testing.T) {
+func TestMockTransferToEmptyStoreSingleBatchDelayedSend(t *testing.T) {
 	senderStore := mock.NewStore(mock.DefaultConfig())
 	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
 	receiverStore := mock.NewStore(mock.DefaultConfig())
@@ -495,7 +495,7 @@ func TestMockTransferToEmptyStoreSingleBatchDelayed(t *testing.T) {
 }
 
 // TODO: Hanging
-func TestMockTransferToEmptyStoreMultiBatchNoDelay(t *testing.T) {
+func TestMockTransferToEmptyStoreMultiBatchNoDelaySend(t *testing.T) {
 	senderStore := mock.NewStore(mock.DefaultConfig())
 	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
 	receiverStore := mock.NewStore(mock.DefaultConfig())
@@ -506,7 +506,7 @@ func TestMockTransferToEmptyStoreMultiBatchNoDelay(t *testing.T) {
 }
 
 // TODO: Hanging
-func TestMockTransferToEmptyStoreMultiBatchDelayed(t *testing.T) {
+func TestMockTransferToEmptyStoreMultiBatchDelayedSend(t *testing.T) {
 	senderStore := mock.NewStore(mock.DefaultConfig())
 	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
 	receiverStore := mock.NewStore(mock.DefaultConfig())
@@ -518,7 +518,7 @@ func TestMockTransferToEmptyStoreMultiBatchDelayed(t *testing.T) {
 	}
 }
 
-func TestMockTransferSingleMissingBlockNoDelay(t *testing.T) {
+func TestMockTransferSingleMissingBlockNoDelaySend(t *testing.T) {
 	senderStore := mock.NewStore(mock.DefaultConfig())
 	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
 	receiverStore := mock.NewStore(mock.DefaultConfig())
@@ -535,7 +535,7 @@ func TestMockTransferSingleMissingBlockNoDelay(t *testing.T) {
 }
 
 // TODO: Hanging
-func TestMockTransferSingleMissingBlockDelayed(t *testing.T) {
+func TestMockTransferSingleMissingBlockDelayedSend(t *testing.T) {
 	senderStore := mock.NewStore(mock.DefaultConfig())
 	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
 	receiverStore := mock.NewStore(mock.DefaultConfig())
@@ -553,7 +553,7 @@ func TestMockTransferSingleMissingBlockDelayed(t *testing.T) {
 	}
 }
 
-func TestMockTransferSingleMissingTreeNoDelay(t *testing.T) {
+func TestMockTransferSingleMissingTreeNoDelaySend(t *testing.T) {
 	senderStore := mock.NewStore(mock.DefaultConfig())
 	mock.AddRandomForest(context.Background(), senderStore, 10)
 	receiverStore := mock.NewStore(mock.DefaultConfig())
@@ -567,7 +567,7 @@ func TestMockTransferSingleMissingTreeNoDelay(t *testing.T) {
 }
 
 // TODO: Hanging
-func TestMockTransferSingleMissingTreeDelayed(t *testing.T) {
+func TestMockTransferSingleMissingTreeDelayedSend(t *testing.T) {
 	senderStore := mock.NewStore(mock.DefaultConfig())
 	mock.AddRandomForest(context.Background(), senderStore, 10)
 	receiverStore := mock.NewStore(mock.DefaultConfig())
