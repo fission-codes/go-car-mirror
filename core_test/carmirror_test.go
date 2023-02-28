@@ -70,10 +70,6 @@ func IdHash(id mock.BlockId, seed uint64) uint64 {
 	return xxh3.HashSeed(id[:], seed)
 }
 
-func makeBloom(capacity uint) filter.Filter[mock.BlockId] {
-	return filter.NewBloomFilter(capacity, IdHash)
-}
-
 type BlockChannel struct {
 	channel      chan *messages.BlocksMessage[mock.BlockId, *mock.BlockId, batch.BatchState]
 	receiverFunc func() batch.BatchBlockReceiver[mock.BlockId]
@@ -134,7 +130,7 @@ type StatusChannel struct {
 func (ch *StatusChannel) SendStatus(state batch.BatchState, have filter.Filter[mock.BlockId], want []mock.BlockId) error {
 	var message *messages.StatusMessage[mock.BlockId, *mock.BlockId, batch.BatchState]
 	if ch.rate > 0 || ch.latency > 0 {
-		message = messages.NewStatusMessage(state, have, want)
+		message = messages.NewStatusMessage(state, have.Copy(), want)
 		buf := bytes.Buffer{}
 		// Simulated transmission over network
 		message.Write(&buf)
@@ -372,7 +368,7 @@ func MockBatchTransferReceive(sinkStore *mock.Store, sourceStore *mock.Store, ro
 
 	receiverSession := sinkConnection.Session(
 		NewSynchronizedBlockStore[mock.BlockId](NewSynchronizedBlockStore[mock.BlockId](sinkStore)),
-		NewSimpleStatusAccumulator[mock.BlockId](filter.NewSynchronizedFilter(batch.NewBloomAllocator[mock.BlockId](&config)())),
+		NewSimpleStatusAccumulator[mock.BlockId](batch.NewBloomAllocator[mock.BlockId](&config)()),
 	)
 
 	statusSender := sinkConnection.Sender(&statusChannel)

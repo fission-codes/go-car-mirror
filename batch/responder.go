@@ -19,8 +19,9 @@ type SinkSessionData[I core.BlockId] struct {
 
 type SinkResponder[I core.BlockId] struct {
 	// for responder sessions, we don't need to do anything to them other then Run?  No, we might need to cancel.
-	store             core.BlockStore[I]
-	sinkSessions      *util.SynchronizedMap[SessionId, *SinkSessionData[I]]
+	store        core.BlockStore[I]
+	sinkSessions *util.SynchronizedMap[SessionId, *SinkSessionData[I]]
+	// TODO: This gets invoked and passed to SimpleStatusAccumulator, which has mutex, so this allocator should just return a non-sync filter
 	filterAllocator   func() filter.Filter[I]
 	batchStatusSender BatchStatusSender[I]
 }
@@ -29,6 +30,7 @@ func NewSinkResponder[I core.BlockId](store core.BlockStore[I], config Config, b
 	return &SinkResponder[I]{
 		store,
 		util.NewSynchronizedMap[SessionId, *SinkSessionData[I]](),
+		// NewBloomAllocator isn't returning a synchronized filter
 		NewBloomAllocator[I](&config),
 		batchStatusSender,
 	}
@@ -70,6 +72,7 @@ func (sr *SinkResponder[I]) startSinkSession(sessionId SessionId) *SinkSessionDa
 
 	newSession := sinkConnection.Session(
 		sr.store,
+		// Since SimpleStatusAccumulator uses mutex locks, the filter allocator just returns a non-sync filter
 		core.NewSimpleStatusAccumulator(sr.filterAllocator()),
 	)
 
@@ -133,8 +136,9 @@ type SourceSessionData[I core.BlockId] struct {
 
 type SourceResponder[I core.BlockId] struct {
 	// for responder sessions, we don't need to do anything to them other then Run?  No, we might need to cancel.
-	store            core.BlockStore[I]
-	sourceSessions   *util.SynchronizedMap[SessionId, *SourceSessionData[I]]
+	store          core.BlockStore[I]
+	sourceSessions *util.SynchronizedMap[SessionId, *SourceSessionData[I]]
+	// TODO: SourceSession does not sync wrapping of the filter, ...
 	filterAllocator  func() filter.Filter[I]
 	batchBlockSender BatchBlockSender[I]
 	batchSize        uint32
@@ -186,7 +190,8 @@ func (sr *SourceResponder[I]) startSourceSession(sessionId SessionId) *SourceSes
 
 	newSession := sourceConnection.Session(
 		sr.store,
-		sr.filterAllocator(),
+		// TODO: SourceSession has no mutex locks for filter, so we need to wrap.  Inconsistent though and really should be cleaned up.
+		filter.NewSynchronizedFilter(sr.filterAllocator()),
 	)
 
 	blockSender := sourceConnection.Sender(sr.batchBlockSender, sr.batchSize)

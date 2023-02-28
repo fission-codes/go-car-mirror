@@ -262,7 +262,7 @@ func (bso *BatchSourceOrchestrator) Notify(event core.SessionEvent) error {
 		// Does nothing
 	case core.BEGIN_PROCESSING:
 		// TODO: I think it's possible SOURCE_CLOSED and SOURCE_CLOSING should be removed.  Check.
-		state := bso.state.WaitAny(SOURCE_PROCESSING|CANCELLED|SOURCE_CLOSED|SOURCE_CLOSING, 0)
+		state := bso.state.WaitAny(SOURCE_PROCESSING|CANCELLED|SOURCE_CLOSED|SOURCE_CLOSING|SOURCE_WAITING, 0)
 		if state&CANCELLED != 0 {
 			bso.log.Errorf("core.Orchestrator waiting for SOURCE_PROCESSING when CANCELLED seen")
 			return errors.ErrStateError
@@ -302,6 +302,7 @@ func (bso *BatchSourceOrchestrator) IsClosed() bool {
 }
 
 func (bso *BatchSourceOrchestrator) IsSafeStateToClose() bool {
+	// TODO: If we are the requester, this should include SOURCE_WAITING.
 	return !bso.state.ContainsAny(SOURCE_ENQUEUEING | SOURCE_SENDING | SOURCE_FLUSHING)
 }
 
@@ -348,7 +349,7 @@ func (bro *BatchSinkOrchestrator) Notify(event core.SessionEvent) error {
 	case core.BEGIN_PROCESSING:
 		// This lets us either proceed or eject at the beginning of every loop iteration.
 		// If we add complete session termination check at the top, does this buy us anything?
-		state := bro.state.WaitAny(SINK_PROCESSING|CANCELLED, 0) // waits for either flag to be set
+		state := bro.state.WaitAny(SINK_PROCESSING|CANCELLED|SINK_WAITING, 0) // waits for either flag to be set
 		if state&CANCELLED != 0 {
 			bro.log.Errorf("core.Orchestrator waiting for SINK_PROCESSING when CANCELLED seen")
 			return errors.ErrStateError
@@ -400,7 +401,8 @@ func (bro *BatchSinkOrchestrator) IsClosed() bool {
 }
 
 func (bro *BatchSinkOrchestrator) IsSafeStateToClose() bool {
-	return !bro.state.ContainsAny(SINK_ENQUEUEING | SINK_SENDING | SINK_FLUSHING)
+	// TODO: If we're the requester, than should include SINK_WAITING.
+	return !bro.state.ContainsAny(SINK_ENQUEUEING | SINK_SENDING | SINK_FLUSHING | SINK_WAITING)
 }
 
 type SimpleBatchStatusReceiver[I core.BlockId] struct {
