@@ -325,6 +325,7 @@ type SinkSession[
 	stats             stats.Stats
 	startedCh         chan bool
 	doneCh            chan error
+	requester         bool // requester or responder
 }
 
 // Struct for returning summary information about the session. This is intended to allow implementers to
@@ -347,6 +348,7 @@ func NewSinkSession[I BlockId, F Flags](
 	statusAccumulator StatusAccumulator[I], // Accumulator for status information
 	orchestrator Orchestrator[F], // Orchestrator used to synchronize this session with its communication channel
 	stats stats.Stats, // Collector for session-related statistics
+	requester bool,
 ) *SinkSession[I, F] {
 	return &SinkSession[I, F]{
 		statusAccumulator,
@@ -356,6 +358,7 @@ func NewSinkSession[I BlockId, F Flags](
 		stats,
 		make(chan bool, 1),
 		make(chan error, 1),
+		requester,
 	}
 }
 
@@ -581,6 +584,7 @@ type SourceSession[
 	stats         stats.Stats
 	startedCh     chan bool
 	doneCh        chan error
+	requester     bool
 }
 
 // NewSourceSession creates a new SourceSession.
@@ -589,6 +593,7 @@ func NewSourceSession[I BlockId, F Flags](
 	filter filter.Filter[I], // Filter to which 'Haves' from the sink will be added
 	orchestrator Orchestrator[F], // Orchestrator used to synchronize this session with its communication channel
 	stats stats.Stats, // Collector for session-related statistics
+	requester bool, // Requester or responder
 ) *SourceSession[I, F] {
 	return &SourceSession[I, F]{
 		store,
@@ -599,6 +604,7 @@ func NewSourceSession[I BlockId, F Flags](
 		stats,
 		make(chan bool, 1),
 		make(chan error, 1),
+		requester,
 	}
 }
 

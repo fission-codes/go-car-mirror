@@ -192,6 +192,9 @@ func (sbbs *SimpleBatchBlockSender[I]) Flush() error {
 		sendList := make([]core.RawBlock[I], len(sbbs.list))
 		copy(sendList, sbbs.list)
 
+		// This is wrapped in begin flush and flush.
+		// END_FLUSH is what sets _WAITING.
+		// It would be nice to only notify this if we actually have something to flush.
 		if err := sbbs.batchBlockSender.SendList(batchState&SOURCE, sendList); err != nil {
 			return err
 		}
@@ -279,6 +282,7 @@ func (bso *BatchSourceOrchestrator) Notify(event core.SessionEvent) error {
 			bso.state.Set(SOURCE_CLOSED)
 		}
 	case core.END_DRAINING:
+		// bso.state.Update(SOURCE_FLUSHING|SOURCE_SENDING, SOURCE_WAITING)
 		if bso.state.ContainsExact(SOURCE_CLOSING|SOURCE_SENDING, SOURCE_CLOSING) {
 			bso.state.Set(SOURCE_CLOSED)
 		}
@@ -361,6 +365,10 @@ func (bro *BatchSinkOrchestrator) Notify(event core.SessionEvent) error {
 	case core.END_RECEIVE:
 		// TODO: Anything?  Source does the following with SOURCE.
 		// bro.state.Update(SINK_WAITING, SINK_PROCESSING)
+	case core.BEGIN_FLUSH:
+	// 	bro.state.Update(SINK_PROCESSING, SINK_FLUSHING)
+	case core.END_FLUSH:
+	// 	bro.state.Update(SINK_FLUSHING|SINK_SENDING, SINK_WAITING)
 	case core.BEGIN_SEND:
 		// bro.state.Set(SINK_SENDING)
 	case core.END_SEND:
@@ -402,7 +410,7 @@ func (bro *BatchSinkOrchestrator) IsClosed() bool {
 
 func (bro *BatchSinkOrchestrator) IsSafeStateToClose() bool {
 	// TODO: If we're the requester, than should include SINK_WAITING.
-	return !bro.state.ContainsAny(SINK_ENQUEUEING | SINK_SENDING | SINK_FLUSHING | SINK_WAITING)
+	return !bro.state.ContainsAny(SINK_ENQUEUEING | SINK_SENDING | SINK_FLUSHING)
 }
 
 type SimpleBatchStatusReceiver[I core.BlockId] struct {

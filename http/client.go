@@ -53,6 +53,7 @@ func (c *Client[I, R]) startSourceSession(url string) *core.SourceSession[I, bat
 	newSession := sourceConnection.Session(
 		c.store,
 		filter.NewSynchronizedFilter[I](filter.NewEmptyFilter(c.allocator)),
+		true, // Requester
 	)
 
 	newSender := sourceConnection.ImmediateSender(newSession, c.maxBatchSize)
@@ -110,6 +111,7 @@ func (c *Client[I, R]) startSinkSession(url string) *core.SinkSession[I, batch.B
 	newSession := sinkConnection.Session(
 		c.store,
 		core.NewSimpleStatusAccumulator(c.allocator()),
+		true, // Requester
 	)
 
 	sender := sinkConnection.ImmediateSender(newSession)

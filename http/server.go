@@ -104,6 +104,7 @@ func (srv *Server[I, R]) startSourceSession(token SessionToken) *ServerSourceSes
 	newSession := sourceConnection.Session(
 		srv.store,
 		filter.NewSynchronizedFilter[I](filter.NewEmptyFilter(srv.allocator)),
+		false, // Server is always responder, not requester
 	)
 
 	newSender := sourceConnection.DeferredSender(srv.maxBatchSize)
@@ -219,6 +220,7 @@ func (srv *Server[I, R]) startSinkSession(token SessionToken) *ServerSinkSession
 	newSession := sourceConnection.Session(
 		srv.store,
 		core.NewSimpleStatusAccumulator(srv.allocator()),
+		false, // Server is always responder, not requester
 	)
 
 	sender := sourceConnection.DeferredSender()

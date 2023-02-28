@@ -242,6 +242,7 @@ func MockBatchTransferSend(senderStore *mock.Store, receiverStore *mock.Store, r
 	senderSession := sourceConnection.Session(
 		senderStore,
 		filter.NewSynchronizedFilter(batch.NewBloomAllocator[mock.BlockId](&config)()),
+		true, // Requester
 	)
 
 	log.Debugf("created senderSession")
@@ -368,7 +369,8 @@ func MockBatchTransferReceive(sinkStore *mock.Store, sourceStore *mock.Store, ro
 
 	receiverSession := sinkConnection.Session(
 		NewSynchronizedBlockStore[mock.BlockId](NewSynchronizedBlockStore[mock.BlockId](sinkStore)),
-		NewSimpleStatusAccumulator[mock.BlockId](batch.NewBloomAllocator[mock.BlockId](&config)()),
+		NewSimpleStatusAccumulator(batch.NewBloomAllocator[mock.BlockId](&config)()),
+		true, // Requester
 	)
 
 	statusSender := sinkConnection.Sender(&statusChannel)

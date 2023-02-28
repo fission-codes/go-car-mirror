@@ -74,6 +74,7 @@ func (sr *SinkResponder[I]) startSinkSession(sessionId SessionId) *SinkSessionDa
 		sr.store,
 		// Since SimpleStatusAccumulator uses mutex locks, the filter allocator just returns a non-sync filter
 		core.NewSimpleStatusAccumulator(sr.filterAllocator()),
+		false, // Not a requester
 	)
 
 	// TODO: validate that we have a batch status sender first
@@ -192,6 +193,7 @@ func (sr *SourceResponder[I]) startSourceSession(sessionId SessionId) *SourceSes
 		sr.store,
 		// TODO: SourceSession has no mutex locks for filter, so we need to wrap.  Inconsistent though and really should be cleaned up.
 		filter.NewSynchronizedFilter(sr.filterAllocator()),
+		false, // Not a requester
 	)
 
 	blockSender := sourceConnection.Sender(sr.batchBlockSender, sr.batchSize)
