@@ -305,11 +305,11 @@ type Orchestrator[F Flags] interface {
 	// IsClosed returns true if the orchestrator is closed.
 	IsClosed() bool
 
-	// ShouldClose returns true if the state of the Orchestrator indicates that the session should close.
+	// IsSafeStateToClose returns true if the state of the Orchestrator indicates that the session should close.
 	// Other factors may need to be taken into account as well to determine if close should happen, but this
 	// tells us if the states indicate a close is safe.
 	// TODO: Maybe rename to IsSafeToClose or IsSafeCloseState?
-	ShouldClose() bool
+	IsSafeStateToClose() bool
 }
 
 // SinkSession is a session that receives blocks and sends out status updates. Two type parameters
@@ -467,7 +467,7 @@ func (ss *SinkSession[I, F]) Run(
 	defer ss.orchestrator.Notify(END_SESSION)
 
 	for !ss.orchestrator.IsClosed() {
-		if ss.pendingBlocks.Len() == 0 && ss.statusAccumulator.WantCount() == 0 && ss.orchestrator.ShouldClose() {
+		if ss.pendingBlocks.Len() == 0 && ss.statusAccumulator.WantCount() == 0 && ss.orchestrator.IsSafeStateToClose() {
 			if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
 				ss.doneCh <- err
 				return
@@ -659,7 +659,7 @@ func (ss *SourceSession[I, F]) Run(
 		// Note that this check means you must enqueue before running a session.
 		// TODO: Is there any need to mutex this so we get it for both variables simultaneously?
 		log.Debugw("SourceSession.Run() checking for pending blocks", "pendingBlocks", ss.pendingBlocks.Len(), "blockSender", blockSender.Len())
-		if ss.pendingBlocks.Len() == 0 && blockSender.Len() == 0 {
+		if ss.pendingBlocks.Len() == 0 && blockSender.Len() == 0 && ss.orchestrator.IsSafeStateToClose() {
 			if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
 				ss.doneCh <- err
 				return
@@ -668,8 +668,6 @@ func (ss *SourceSession[I, F]) Run(
 				ss.doneCh <- err
 				return
 			}
-
-			continue
 		}
 
 		if err := ss.orchestrator.Notify(BEGIN_PROCESSING); err != nil {

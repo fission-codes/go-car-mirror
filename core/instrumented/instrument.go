@@ -48,9 +48,9 @@ func (io *Orchestrator[F]) IsClosed() bool {
 	return result
 }
 
-func (io *Orchestrator[F]) ShouldClose() bool {
-	result := io.orchestrator.ShouldClose()
-	io.stats.Logger().Debugw("exit", "method", "ShouldClose", "state", io.orchestrator.State(), "result", result)
+func (io *Orchestrator[F]) IsSafeStateToClose() bool {
+	result := io.orchestrator.IsSafeStateToClose()
+	io.stats.Logger().Debugw("exit", "method", "IsSafeStateToClose", "state", io.orchestrator.State(), "result", result)
 	return result
 }
 

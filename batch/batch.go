@@ -24,17 +24,18 @@ const (
 	SINK_PROCESSING   // Sink is processing a batch of blocks
 	SINK_FLUSHING     // Sink is in the process of sending a status message
 	SINK_WAITING      // Sink is waiting for a batch of blocks
-	SINK_ENQUEUING    // Sink is processing a block id that has been explicitly requested
+	SINK_ENQUEUEING   // Sink is processing a block id that has been explicitly requested
 	SINK_SENDING      // Sink may have status pending flush
 	SOURCE_PROCESSING // Source is processing a batch of blocks.  Technically it's also being used to signal that we're *ready* to process, such that BEGIN_PROCESSING will let processing happen.
 	SOURCE_FLUSHING   // Source is flushing blocks
 	SOURCE_WAITING    // Source is waiting for a status message
+	SOURCE_ENQUEUEING // Source is processing a block id that has been explicitly requested
 	SOURCE_SENDING    // Source has unflushed blocks
 	SOURCE_CLOSING
 	SOURCE_CLOSED
 	CANCELLED
-	SINK   = SINK_CLOSING | CANCELLED | SINK_PROCESSING | SINK_FLUSHING | SINK_WAITING | SINK_CLOSED | SINK_SENDING | SINK_ENQUEUING
-	SOURCE = SOURCE_CLOSING | CANCELLED | SOURCE_PROCESSING | SOURCE_FLUSHING | SOURCE_WAITING | SOURCE_CLOSED | SOURCE_SENDING
+	SINK   = SINK_CLOSING | CANCELLED | SINK_PROCESSING | SINK_FLUSHING | SINK_WAITING | SINK_CLOSED | SINK_SENDING | SINK_ENQUEUEING
+	SOURCE = SOURCE_CLOSING | CANCELLED | SOURCE_PROCESSING | SOURCE_FLUSHING | SOURCE_WAITING | SOURCE_CLOSED | SOURCE_SENDING | SOURCE_ENQUEUEING
 )
 
 // Strings returns a slice of strings describing the given BatchState.
@@ -58,8 +59,8 @@ func (bs BatchState) Strings() []string {
 	if bs&SINK_WAITING != 0 {
 		strings = append(strings, "SINK_WAITING")
 	}
-	if bs&SINK_ENQUEUING != 0 {
-		strings = append(strings, "SINK_ENQUEUING")
+	if bs&SINK_ENQUEUEING != 0 {
+		strings = append(strings, "SINK_ENQUEUEING")
 	}
 	if bs&SOURCE_PROCESSING != 0 {
 		strings = append(strings, "SOURCE_PROCESSING")
@@ -78,6 +79,9 @@ func (bs BatchState) Strings() []string {
 	}
 	if bs&SOURCE_FLUSHING != 0 {
 		strings = append(strings, "SOURCE_FLUSHING")
+	}
+	if bs&SOURCE_ENQUEUEING != 0 {
+		strings = append(strings, "SOURCE_ENQUEUEING")
 	}
 	if bs&CANCELLED != 0 {
 		strings = append(strings, "CANCELLED")
@@ -217,28 +221,40 @@ func NewBatchSourceOrchestrator() *BatchSourceOrchestrator {
 	}
 }
 
-// Notify notifies the orchestrator of a session event.
-// Events lead to state transitions in the orchestrator.
-// TODO: Should context be passed, to allow for cancellation and timeouts?  In particular I'm thinking of ENQUEUE or any function that could impact user experience.
+// Notify notifies the orchestrator of a session event, updating the state as appropriate.
 func (bso *BatchSourceOrchestrator) Notify(event core.SessionEvent) error {
 	switch event {
 	case core.BEGIN_SESSION:
 		// This wait allows us to start a session before enqueueing any blocks.
-		bso.state.WaitAny(SOURCE_PROCESSING|CANCELLED|SOURCE_CLOSED|SOURCE_CLOSING, 0)
+		// bso.state.WaitAny(SOURCE_PROCESSING|SOURCE_CLOSED|CANCELLED, 0)
 	case core.END_SESSION:
-		bso.state.Update(SOURCE, SOURCE_CLOSED)
+		bso.state.Set(SOURCE_CLOSED)
 	case core.BEGIN_ENQUEUE:
 		// Does nothing
+		// For sink, we wait for flushing to be 0 and then set enqueueing.
+		bso.state.WaitExact(SOURCE_FLUSHING, 0) // Can't enqueue while sending
+		bso.state.Set(SOURCE_ENQUEUEING)        // no such state
 	case core.END_ENQUEUE:
+		bso.state.Update(SOURCE_ENQUEUEING, SOURCE_SENDING)
+		bso.state.Set(SOURCE_PROCESSING)
 		// This is necessary because if the session is quiescent (e.g. has no in-flight exchange)
 		// the session Run loop will be waiting on SOURCE_PROCESSING, and we need to set it to wake
 		// up the session.  If the receiver is not flushing, waiting, or ready, it is quiescent.
 		// TODO: This shouldn't be needed any more, since there's no longer such thing as a quiescent session,
 		// and we terminate the loop based on session termination criteria before notifying BEGIN_PROCESSING.
 		// Didn't turn out to be true.  Hung.  But I should try again and see why and what I'm missing.
-		if !bso.state.ContainsAny(SOURCE_FLUSHING | SOURCE_WAITING | SOURCE_PROCESSING) {
-			bso.state.Set(SOURCE_PROCESSING)
-		}
+		// if !bso.state.ContainsAny(SOURCE_FLUSHING | SOURCE_WAITING | SOURCE_PROCESSING) {
+		// 	bso.state.Set(SOURCE_PROCESSING)
+		// }
+	case core.BEGIN_CLOSE:
+		bso.state.Set(SOURCE_CLOSING)
+		// if bso.state.Contains(SOURCE_WAITING) {
+		// 	bso.state.Update(SOURCE_WAITING, SOURCE_CLOSED)
+		// } else {
+		// 	bso.state.Set(SOURCE_CLOSING)
+		// }
+	case core.END_CLOSE:
+		// Nothing
 	case core.BEGIN_BATCH:
 		// Does nothing
 		bso.state.Set(SOURCE_PROCESSING)
@@ -253,12 +269,6 @@ func (bso *BatchSourceOrchestrator) Notify(event core.SessionEvent) error {
 		}
 	case core.END_RECEIVE:
 		bso.state.Update(SOURCE_WAITING, SOURCE_PROCESSING)
-	case core.BEGIN_CLOSE:
-		if bso.state.Contains(SOURCE_WAITING) {
-			bso.state.Update(SOURCE_WAITING, SOURCE_CLOSED)
-		} else {
-			bso.state.Set(SOURCE_CLOSING)
-		}
 	case core.BEGIN_FLUSH:
 		bso.state.Update(SOURCE_PROCESSING, SOURCE_FLUSHING)
 	case core.END_FLUSH:
@@ -291,9 +301,8 @@ func (bso *BatchSourceOrchestrator) IsClosed() bool {
 	return bso.state.ContainsAny(SOURCE_CLOSED | CANCELLED)
 }
 
-func (bso *BatchSourceOrchestrator) ShouldClose() bool {
-	// TODO: Not needed for source orchestrator?
-	return false
+func (bso *BatchSourceOrchestrator) IsSafeStateToClose() bool {
+	return !bso.state.ContainsAny(SOURCE_ENQUEUEING | SOURCE_SENDING | SOURCE_FLUSHING)
 }
 
 // BatchSinkOrchestrator is an orchestrator for receiving batches of blocks.
@@ -316,14 +325,14 @@ func (bro *BatchSinkOrchestrator) Notify(event core.SessionEvent) error {
 	switch event {
 	case core.BEGIN_SESSION:
 		// This wait allows us to start a session before handling any status messages.
-		bro.state.WaitAny(SINK_PROCESSING|SINK_CLOSED|CANCELLED, 0)
+		// bro.state.WaitAny(SINK_PROCESSING|SINK_CLOSED|CANCELLED, 0)
 	case core.END_SESSION:
 		bro.state.Set(SINK_CLOSED)
 	case core.BEGIN_ENQUEUE:
 		bro.state.WaitExact(SINK_FLUSHING, 0) // Can't enqueue while sending
-		bro.state.Set(SINK_ENQUEUING)
+		bro.state.Set(SINK_ENQUEUEING)
 	case core.END_ENQUEUE:
-		bro.state.Update(SINK_ENQUEUING, SINK_SENDING)
+		bro.state.Update(SINK_ENQUEUEING, SINK_SENDING)
 		bro.state.Set(SINK_PROCESSING)
 		// // This is necessary because if the session is quiescent (e.g. has no in-flight exchange)
 		// // the session Run loop will be waiting on SINK_PROCESSING, and we need to set it to send
@@ -356,7 +365,7 @@ func (bro *BatchSinkOrchestrator) Notify(event core.SessionEvent) error {
 	case core.END_SEND:
 		// TODO: Anything?
 	case core.BEGIN_DRAINING:
-		bro.state.WaitExact(SINK_ENQUEUING, 0) // Can't flush while enqueuing
+		bro.state.WaitExact(SINK_ENQUEUEING, 0) // Can't flush while enqueuing
 		bro.state.Update(SINK_PROCESSING, SINK_FLUSHING)
 		// If we are draining (the queue is empty) and we have no pending status to send, we can close
 		if bro.state.ContainsExact(SINK_CLOSING|SINK_SENDING, SINK_CLOSING) {
@@ -390,8 +399,8 @@ func (bro *BatchSinkOrchestrator) IsClosed() bool {
 	return bro.state.ContainsAny(SINK_CLOSED | CANCELLED)
 }
 
-func (bro *BatchSinkOrchestrator) ShouldClose() bool {
-	return !bro.state.ContainsAny(SINK_ENQUEUING | SINK_SENDING | SINK_FLUSHING)
+func (bro *BatchSinkOrchestrator) IsSafeStateToClose() bool {
+	return !bro.state.ContainsAny(SINK_ENQUEUEING | SINK_SENDING | SINK_FLUSHING)
 }
 
 type SimpleBatchStatusReceiver[I core.BlockId] struct {
