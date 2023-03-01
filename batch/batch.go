@@ -353,13 +353,15 @@ func (bro *BatchSinkOrchestrator) Notify(event core.SessionEvent) error {
 	case core.BEGIN_PROCESSING:
 		// This lets us either proceed or eject at the beginning of every loop iteration.
 		// If we add complete session termination check at the top, does this buy us anything?
-		state := bro.state.WaitAny(SINK_PROCESSING|CANCELLED|SINK_WAITING, 0) // waits for either flag to be set
+		state := bro.state.WaitAny(SINK_PROCESSING|CANCELLED|SINK_CLOSING|SINK_CLOSED, 0) // waits for either flag to be set
 		if state&CANCELLED != 0 {
 			bro.log.Errorf("core.Orchestrator waiting for SINK_PROCESSING when CANCELLED seen")
 			return errors.ErrStateError
 		}
 	case core.END_PROCESSING:
-		// TODO: Anything?
+		if bro.state.ContainsExact(SINK_CLOSING|SINK_SENDING, SINK_CLOSING) {
+			bro.state.Set(SINK_CLOSED)
+		}
 	case core.BEGIN_RECEIVE:
 		// TODO: Anything?
 	case core.END_RECEIVE:
@@ -381,6 +383,7 @@ func (bro *BatchSinkOrchestrator) Notify(event core.SessionEvent) error {
 			bro.state.Set(SINK_CLOSED)
 		}
 	case core.END_DRAINING:
+		// TODO: We should only flip to WAITING if we actually sent something.
 		bro.state.Update(SINK_FLUSHING|SINK_SENDING, SINK_WAITING)
 
 		// TODO: Is this needed here and BEGIN_DRAINING?
@@ -390,6 +393,7 @@ func (bro *BatchSinkOrchestrator) Notify(event core.SessionEvent) error {
 	case core.BEGIN_BATCH:
 		// TODO: Anything?
 	case core.END_BATCH:
+		// TODO: Is this right?
 		bro.state.Update(SINK_WAITING, SINK_PROCESSING)
 	case core.CANCEL:
 		bro.state.Update(SINK, CANCELLED)
@@ -410,7 +414,7 @@ func (bro *BatchSinkOrchestrator) IsClosed() bool {
 
 func (bro *BatchSinkOrchestrator) IsSafeStateToClose() bool {
 	// TODO: If we're the requester, than should include SINK_WAITING.
-	return !bro.state.ContainsAny(SINK_ENQUEUEING | SINK_SENDING | SINK_FLUSHING)
+	return !bro.state.ContainsAny(SINK_ENQUEUEING | SINK_SENDING | SINK_FLUSHING | SINK_WAITING)
 }
 
 type SimpleBatchStatusReceiver[I core.BlockId] struct {

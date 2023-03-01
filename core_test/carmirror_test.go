@@ -469,7 +469,7 @@ func TestMockTransferToEmptyStoreSingleBatchNoDelaySend(t *testing.T) {
 }
 
 func TestMockTransferToEmptyStoreSingleBatchNoDelayReceive(t *testing.T) {
-	t.Skip("Skipping test")
+	// t.Skip("Skipping test")
 	sourceStore := mock.NewStore(mock.DefaultConfig())
 	root := mock.AddRandomTree(context.Background(), sourceStore, 10, 5, 0.0)
 	sinkStore := mock.NewStore(mock.DefaultConfig())

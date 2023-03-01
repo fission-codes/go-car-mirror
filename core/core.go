@@ -455,10 +455,6 @@ func (ss *SinkSession[I, F]) Run(
 		log.Debugw("SinkSession.Run() exiting")
 		close(ss.doneCh)
 		log.Debugw("SinkSession.Run() exited")
-
-		// log.Debugw("SinkSession.Run() closing statusSender")
-		// statusSender.Close()
-		// log.Debugw("SinkSession.Run() closed statusSender")
 	}()
 	ss.startedCh <- true
 	close(ss.startedCh)
@@ -515,15 +511,29 @@ func (ss *SinkSession[I, F]) Run(
 			// the only time we'd want to send. But for streaming maybe this should be in a separate loop
 			// so it can be triggered by the orchestrator - otherwise we wind up sending a status update every
 			// time the pending blocks list becomes empty.
+			// if ss.pendingBlocks.Len() == 0 && ss.statusAccumulator.WantCount() == 0 && ss.orchestrator.IsSafeStateToClose() {
+			// 	if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
+			// 		ss.doneCh <- err
+			// 		return
+			// 	}
+			// 	if err := ss.orchestrator.Notify(END_CLOSE); err != nil {
+			// 		ss.doneCh <- err
+			// 		return
+			// 	}
+			// }
 
 			if err := ss.orchestrator.Notify(BEGIN_DRAINING); err != nil {
 				ss.doneCh <- err
 				return
 			}
-			if err := ss.statusAccumulator.Send(statusSender); err != nil {
-				ss.doneCh <- err
-				return
+			if ss.statusAccumulator.WantCount() > 0 || !ss.requester {
+				if err := ss.statusAccumulator.Send(statusSender); err != nil {
+					ss.doneCh <- err
+					return
+				}
 			}
+			// This puts us in waiting, but we don't want to be in waiting unless we sent something.
+			// Is it flushing that should take us out of waiting?
 			if err := ss.orchestrator.Notify(END_DRAINING); err != nil {
 				ss.doneCh <- err
 				return
@@ -643,10 +653,6 @@ func (ss *SourceSession[I, F]) Run(
 		log.Debugw("SourceSession.Run() exiting")
 		close(ss.doneCh)
 		log.Debugw("SourceSession.Run() exited")
-
-		// log.Debugw("SourceSession.Run() closing blockSender")
-		// blockSender.Close()
-		// log.Debugw("SourceSession.Run() closed blockSender")
 	}()
 	ss.startedCh <- true
 	close(ss.startedCh)

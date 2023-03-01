@@ -48,6 +48,8 @@ func (sr *SinkResponder[I]) SinkSessionData(sessionId SessionId) *SinkSessionDat
 		},
 	)
 
+	log.Debugw("SinkSessionData", "sessionId", sessionId, "sessionData", sessionData)
+
 	return sessionData
 }
 
@@ -166,6 +168,7 @@ func (sr *SourceResponder[I]) SourceSessionData(sessionId SessionId) *SourceSess
 			return sr.startSourceSession(sessionId)
 		},
 	)
+	log.Debugw("SourceSessionData", "sessionId", sessionId, "sessionData", sessionData)
 
 	return sessionData
 }
