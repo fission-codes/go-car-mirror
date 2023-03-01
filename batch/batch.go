@@ -128,6 +128,9 @@ func (sbbr *SimpleBatchBlockReceiver[I]) HandleList(list []core.RawBlock[I]) err
 	sbbr.orchestrator.Notify(core.BEGIN_BATCH)
 	defer sbbr.orchestrator.Notify(core.END_BATCH)
 
+	// Possibly notify BEGIN_RECEIVE and END_RECEIVE here.  Check HandleBlock.
+	sbbr.orchestrator.Notify(core.BEGIN_RECEIVE)
+	defer sbbr.orchestrator.Notify(core.END_RECEIVE)
 	for _, block := range list {
 		sbbr.session.HandleBlock(block)
 	}
@@ -177,8 +180,6 @@ func (sbbs *SimpleBatchBlockSender[I]) Close() error {
 
 // Flush sends the current batch of blocks.
 func (sbbs *SimpleBatchBlockSender[I]) Flush() error {
-	sbbs.orchestrator.Notify(core.BEGIN_FLUSH)
-	defer sbbs.orchestrator.Notify(core.END_FLUSH)
 
 	batchState := sbbs.orchestrator.State()
 	// Only actually send a list if we have data OR we are closed, so we would like to communicate this state to the sink
@@ -187,10 +188,15 @@ func (sbbs *SimpleBatchBlockSender[I]) Flush() error {
 		sbbs.listMutex.Lock()
 		defer sbbs.listMutex.Unlock()
 
+		// Only notify if we actually send
+		sbbs.orchestrator.Notify(core.BEGIN_FLUSH)
+		defer sbbs.orchestrator.Notify(core.END_FLUSH)
+
 		// Clone the list before sending, to avoid data races.
 		// While we have a mutex in this method, we don't know what will happen when passed to SendList.
 		sendList := make([]core.RawBlock[I], len(sbbs.list))
 		copy(sendList, sbbs.list)
+		log.Debugw("Sending batch", "list length", len(sbbs.list), "copied list length", len(sendList))
 
 		// This is wrapped in begin flush and flush.
 		// END_FLUSH is what sets _WAITING.
@@ -229,40 +235,26 @@ func (bso *BatchSourceOrchestrator) Notify(event core.SessionEvent) error {
 	switch event {
 	case core.BEGIN_SESSION:
 		// This wait allows us to start a session before enqueueing any blocks.
-		// bso.state.WaitAny(SOURCE_PROCESSING|SOURCE_CLOSED|CANCELLED, 0)
+		bso.state.WaitAny(SOURCE_PROCESSING|SOURCE_CLOSED|CANCELLED, 0)
 	case core.END_SESSION:
 		bso.state.Set(SOURCE_CLOSED)
 	case core.BEGIN_ENQUEUE:
-		// Does nothing
 		// For sink, we wait for flushing to be 0 and then set enqueueing.
 		bso.state.WaitExact(SOURCE_FLUSHING, 0) // Can't enqueue while sending
 		bso.state.Set(SOURCE_ENQUEUEING)        // no such state
 	case core.END_ENQUEUE:
 		bso.state.Update(SOURCE_ENQUEUEING, SOURCE_SENDING)
 		bso.state.Set(SOURCE_PROCESSING)
-		// This is necessary because if the session is quiescent (e.g. has no in-flight exchange)
-		// the session Run loop will be waiting on SOURCE_PROCESSING, and we need to set it to wake
-		// up the session.  If the receiver is not flushing, waiting, or ready, it is quiescent.
-		// TODO: This shouldn't be needed any more, since there's no longer such thing as a quiescent session,
-		// and we terminate the loop based on session termination criteria before notifying BEGIN_PROCESSING.
-		// Didn't turn out to be true.  Hung.  But I should try again and see why and what I'm missing.
-		// if !bso.state.ContainsAny(SOURCE_FLUSHING | SOURCE_WAITING | SOURCE_PROCESSING) {
-		// 	bso.state.Set(SOURCE_PROCESSING)
-		// }
 	case core.BEGIN_CLOSE:
 		bso.state.Set(SOURCE_CLOSING)
-		// if bso.state.Contains(SOURCE_WAITING) {
-		// 	bso.state.Update(SOURCE_WAITING, SOURCE_CLOSED)
-		// } else {
-		// 	bso.state.Set(SOURCE_CLOSING)
-		// }
 	case core.END_CLOSE:
 		// Nothing
 	case core.BEGIN_BATCH:
 		// Does nothing
-		bso.state.Set(SOURCE_PROCESSING)
 	case core.END_BATCH:
 		// Does nothing
+		// bso.state.Set(SOURCE_PROCESSING)
+		bso.state.Update(SOURCE_WAITING, SOURCE_PROCESSING)
 	case core.BEGIN_PROCESSING:
 		// TODO: I think it's possible SOURCE_CLOSED and SOURCE_CLOSING should be removed.  Check.
 		state := bso.state.WaitAny(SOURCE_PROCESSING|CANCELLED|SOURCE_CLOSED|SOURCE_CLOSING|SOURCE_WAITING, 0)
@@ -271,7 +263,8 @@ func (bso *BatchSourceOrchestrator) Notify(event core.SessionEvent) error {
 			return errors.ErrStateError
 		}
 	case core.END_RECEIVE:
-		bso.state.Update(SOURCE_WAITING, SOURCE_PROCESSING)
+		// TODO: Maybe unset waiting and wait for end batch to set processing?
+		// bso.state.Update(SOURCE_WAITING, SOURCE_PROCESSING)
 	case core.BEGIN_FLUSH:
 		bso.state.Update(SOURCE_PROCESSING, SOURCE_FLUSHING)
 	case core.END_FLUSH:
@@ -282,7 +275,6 @@ func (bso *BatchSourceOrchestrator) Notify(event core.SessionEvent) error {
 			bso.state.Set(SOURCE_CLOSED)
 		}
 	case core.END_DRAINING:
-		// bso.state.Update(SOURCE_FLUSHING|SOURCE_SENDING, SOURCE_WAITING)
 		if bso.state.ContainsExact(SOURCE_CLOSING|SOURCE_SENDING, SOURCE_CLOSING) {
 			bso.state.Set(SOURCE_CLOSED)
 		}
@@ -330,7 +322,7 @@ func (bro *BatchSinkOrchestrator) Notify(event core.SessionEvent) error {
 	switch event {
 	case core.BEGIN_SESSION:
 		// This wait allows us to start a session before handling any status messages.
-		// bro.state.WaitAny(SINK_PROCESSING|SINK_CLOSED|CANCELLED, 0)
+		bro.state.WaitAny(SINK_PROCESSING|SINK_CLOSED|CANCELLED, 0)
 	case core.END_SESSION:
 		bro.state.Set(SINK_CLOSED)
 	case core.BEGIN_ENQUEUE:
@@ -368,32 +360,28 @@ func (bro *BatchSinkOrchestrator) Notify(event core.SessionEvent) error {
 		// TODO: Anything?  Source does the following with SOURCE.
 		// bro.state.Update(SINK_WAITING, SINK_PROCESSING)
 	case core.BEGIN_FLUSH:
-	// 	bro.state.Update(SINK_PROCESSING, SINK_FLUSHING)
+		bro.state.Update(SINK_PROCESSING, SINK_FLUSHING)
 	case core.END_FLUSH:
-	// 	bro.state.Update(SINK_FLUSHING|SINK_SENDING, SINK_WAITING)
+		bro.state.Update(SINK_FLUSHING|SINK_SENDING, SINK_WAITING)
 	case core.BEGIN_SEND:
 		// bro.state.Set(SINK_SENDING)
 	case core.END_SEND:
 		// TODO: Anything?
 	case core.BEGIN_DRAINING:
 		bro.state.WaitExact(SINK_ENQUEUEING, 0) // Can't flush while enqueuing
-		bro.state.Update(SINK_PROCESSING, SINK_FLUSHING)
 		// If we are draining (the queue is empty) and we have no pending status to send, we can close
 		if bro.state.ContainsExact(SINK_CLOSING|SINK_SENDING, SINK_CLOSING) {
 			bro.state.Set(SINK_CLOSED)
 		}
 	case core.END_DRAINING:
-		// TODO: We should only flip to WAITING if we actually sent something.
-		bro.state.Update(SINK_FLUSHING|SINK_SENDING, SINK_WAITING)
-
 		// TODO: Is this needed here and BEGIN_DRAINING?
 		if bro.state.ContainsExact(SINK_CLOSING|SINK_SENDING, SINK_CLOSING) {
 			bro.state.Set(SINK_CLOSED)
 		}
 	case core.BEGIN_BATCH:
-		// TODO: Anything?
+		// bro.state.Set(SINK_PROCESSING)
 	case core.END_BATCH:
-		// TODO: Is this right?
+		// Does nothing
 		bro.state.Update(SINK_WAITING, SINK_PROCESSING)
 	case core.CANCEL:
 		bro.state.Update(SINK, CANCELLED)
@@ -436,6 +424,8 @@ func (sbbr *SimpleBatchStatusReceiver[I]) HandleStatus(state BatchState, have fi
 	defer sbbr.orchestrator.Notify(core.END_BATCH)
 	// TODO: handle errors.  Can't yet because HandleStatus doesn't return an error.
 	sbbr.session.HandleStatus(have, want)
+
+	// Should we notify below HandleStatus?  Is above okay?
 
 	return nil
 }

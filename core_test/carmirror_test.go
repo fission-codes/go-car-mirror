@@ -88,7 +88,9 @@ func (ch *BlockChannel) SendList(state batch.BatchState, blocks []RawBlock[mock.
 		time.Sleep(pause)
 		message.Read(&buf)
 	}
+	log.Debugw("sending", "object", "BlockChannel", "method", "SendList", "state", state, "blocks", len(blocks))
 	ch.channel <- message
+	log.Debugw("sent", "object", "BlockChannel", "method", "SendList", "state", state, "blocks", len(blocks))
 	return nil
 }
 
@@ -115,7 +117,8 @@ func (ch *BlockChannel) listen() error {
 			return ErrReceiverNotSet
 		}
 		log.Debugw("received", "object", "BlockChannel", "method", "listen", "state", result.State, "blocks", len(result.Car.Blocks))
-		receiver.HandleList(result.Car.Blocks)
+		err := receiver.HandleList(result.Car.Blocks)
+		log.Debugw("handled list", "object", "BlockChannel", "method", "listen", "state", result.State, "blocks", len(result.Car.Blocks), "err", err)
 	}
 	return err
 }
@@ -326,10 +329,10 @@ func MockBatchTransferSend(senderStore *mock.Store, receiverStore *mock.Store, r
 	// TODO: Replace with waiting for all channels on the sinkResponder's sessions to be done
 	// If we get here, the sender session is done, so this will get the last living sink session's status
 
-	if err := <-sinkResponder.SinkSession(SESSION_ID).Done(); err != nil {
-		log.Debugf("receiver session failed: %v", err)
-	}
-	log.Debugf("receiver session terminated")
+	// if err := <-sinkResponder.SinkSession(SESSION_ID).Done(); err != nil {
+	// 	log.Debugf("receiver session failed: %v", err)
+	// }
+	// log.Debugf("receiver session terminated")
 
 	snapshotAfter := stats.GLOBAL_REPORTING.Snapshot()
 	diff := snapshotBefore.Diff(snapshotAfter)
@@ -446,10 +449,10 @@ func MockBatchTransferReceive(sinkStore *mock.Store, sourceStore *mock.Store, ro
 		log.Errorf("error closing status sender: %v", err)
 	}
 
-	if err := <-sourceResponder.SourceSession(SESSION_ID).Done(); err != nil {
-		log.Debugf("sender session failed: %v", err)
-	}
-	log.Debugf("sender session terminated")
+	// if err := <-sourceResponder.SourceSession(SESSION_ID).Done(); err != nil {
+	// 	log.Debugf("sender session failed: %v", err)
+	// }
+	// log.Debugf("sender session terminated")
 
 	snapshotAfter := stats.GLOBAL_REPORTING.Snapshot()
 	diff := snapshotBefore.Diff(snapshotAfter)
@@ -469,7 +472,6 @@ func TestMockTransferToEmptyStoreSingleBatchNoDelaySend(t *testing.T) {
 }
 
 func TestMockTransferToEmptyStoreSingleBatchNoDelayReceive(t *testing.T) {
-	// t.Skip("Skipping test")
 	sourceStore := mock.NewStore(mock.DefaultConfig())
 	root := mock.AddRandomTree(context.Background(), sourceStore, 10, 5, 0.0)
 	sinkStore := mock.NewStore(mock.DefaultConfig())
@@ -493,7 +495,6 @@ func TestMockTransferToEmptyStoreSingleBatchDelayedSend(t *testing.T) {
 }
 
 func TestMockTransferToEmptyStoreSingleBatchDelayedReceive(t *testing.T) {
-	t.Skip("Skipping test")
 	senderStore := mock.NewStore(mock.DefaultConfig())
 	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
 	receiverStore := mock.NewStore(mock.DefaultConfig())
@@ -516,7 +517,6 @@ func TestMockTransferToEmptyStoreMultiBatchNoDelaySend(t *testing.T) {
 }
 
 func TestMockTransferToEmptyStoreMultiBatchNoDelayReceive(t *testing.T) {
-	t.Skip("Skipping test")
 	senderStore := mock.NewStore(mock.DefaultConfig())
 	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
 	receiverStore := mock.NewStore(mock.DefaultConfig())

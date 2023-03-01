@@ -430,9 +430,6 @@ func (ss *SinkSession[I, F]) Enqueue(id I) error {
 // HandleBlock handles a block that is being received. Adds the block to the session's store, and
 // then queues the block for further processing.
 func (ss *SinkSession[I, F]) HandleBlock(rawBlock RawBlock[I]) {
-	ss.orchestrator.Notify(BEGIN_RECEIVE)
-	defer ss.orchestrator.Notify(END_RECEIVE)
-
 	block, err := ss.store.Add(context.TODO(), rawBlock)
 	if err != nil {
 		ss.stats.Logger().Errorf("Failed to add block to store. err = %v", err)
@@ -507,27 +504,20 @@ func (ss *SinkSession[I, F]) Run(
 				return
 			}
 		} else {
-			// If we get here it means we have no more blocks to process. In a batch based process that's
-			// the only time we'd want to send. But for streaming maybe this should be in a separate loop
-			// so it can be triggered by the orchestrator - otherwise we wind up sending a status update every
-			// time the pending blocks list becomes empty.
-			// if ss.pendingBlocks.Len() == 0 && ss.statusAccumulator.WantCount() == 0 && ss.orchestrator.IsSafeStateToClose() {
-			// 	if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
-			// 		ss.doneCh <- err
-			// 		return
-			// 	}
-			// 	if err := ss.orchestrator.Notify(END_CLOSE); err != nil {
-			// 		ss.doneCh <- err
-			// 		return
-			// 	}
-			// }
-
 			if err := ss.orchestrator.Notify(BEGIN_DRAINING); err != nil {
 				ss.doneCh <- err
 				return
 			}
 			if ss.statusAccumulator.WantCount() > 0 || !ss.requester {
+				if err := ss.orchestrator.Notify(BEGIN_FLUSH); err != nil {
+					ss.doneCh <- err
+					return
+				}
 				if err := ss.statusAccumulator.Send(statusSender); err != nil {
+					ss.doneCh <- err
+					return
+				}
+				if err := ss.orchestrator.Notify(END_FLUSH); err != nil {
 					ss.doneCh <- err
 					return
 				}
