@@ -71,14 +71,14 @@ func IdHash(id mock.BlockId, seed uint64) uint64 {
 }
 
 type BlockChannel struct {
-	channel      chan *messages.BlocksMessage[mock.BlockId, *mock.BlockId, batch.BatchState]
+	channel      chan *messages.BlocksMessage[mock.BlockId, *mock.BlockId]
 	receiverFunc func() batch.BatchBlockReceiver[mock.BlockId]
 	rate         int64 // number of bytes transmitted per millisecond
 	latency      int64 // latency in milliseconds
 }
 
-func (ch *BlockChannel) SendList(state batch.BatchState, blocks []RawBlock[mock.BlockId]) error {
-	message := messages.NewBlocksMessage(state, blocks)
+func (ch *BlockChannel) SendList(blocks []RawBlock[mock.BlockId]) error {
+	message := messages.NewBlocksMessage(blocks)
 	if ch.rate > 0 || ch.latency > 0 {
 		buf := bytes.Buffer{}
 		// Simulated transmission over network
@@ -88,9 +88,9 @@ func (ch *BlockChannel) SendList(state batch.BatchState, blocks []RawBlock[mock.
 		time.Sleep(pause)
 		message.Read(&buf)
 	}
-	log.Debugw("sending", "object", "BlockChannel", "method", "SendList", "state", state, "blocks", len(blocks))
+	log.Debugw("sending", "object", "BlockChannel", "method", "SendList", "blocks", len(blocks))
 	ch.channel <- message
-	log.Debugw("sent", "object", "BlockChannel", "method", "SendList", "state", state, "blocks", len(blocks))
+	log.Debugw("sent", "object", "BlockChannel", "method", "SendList", "blocks", len(blocks))
 	return nil
 }
 
@@ -116,24 +116,24 @@ func (ch *BlockChannel) listen() error {
 		if receiver == nil {
 			return ErrReceiverNotSet
 		}
-		log.Debugw("received", "object", "BlockChannel", "method", "listen", "state", result.State, "blocks", len(result.Car.Blocks))
+		log.Debugw("received", "object", "BlockChannel", "method", "listen", "blocks", len(result.Car.Blocks))
 		err := receiver.HandleList(result.Car.Blocks)
-		log.Debugw("handled list", "object", "BlockChannel", "method", "listen", "state", result.State, "blocks", len(result.Car.Blocks), "err", err)
+		log.Debugw("handled list", "object", "BlockChannel", "method", "listen", "blocks", len(result.Car.Blocks), "err", err)
 	}
 	return err
 }
 
 type StatusChannel struct {
-	channel      chan *messages.StatusMessage[mock.BlockId, *mock.BlockId, batch.BatchState]
+	channel      chan *messages.StatusMessage[mock.BlockId, *mock.BlockId]
 	receiverFunc func() *batch.SimpleBatchStatusReceiver[mock.BlockId]
 	rate         int64 // number of bytes transmitted per millisecond
 	latency      int64 // latency in milliseconds
 }
 
-func (ch *StatusChannel) SendStatus(state batch.BatchState, have filter.Filter[mock.BlockId], want []mock.BlockId) error {
-	var message *messages.StatusMessage[mock.BlockId, *mock.BlockId, batch.BatchState]
+func (ch *StatusChannel) SendStatus(have filter.Filter[mock.BlockId], want []mock.BlockId) error {
+	var message *messages.StatusMessage[mock.BlockId, *mock.BlockId]
 	if ch.rate > 0 || ch.latency > 0 {
-		message = messages.NewStatusMessage(state, have.Copy(), want)
+		message = messages.NewStatusMessage(have.Copy(), want)
 		buf := bytes.Buffer{}
 		// Simulated transmission over network
 		message.Write(&buf)
@@ -142,7 +142,7 @@ func (ch *StatusChannel) SendStatus(state batch.BatchState, have filter.Filter[m
 		time.Sleep(pause)
 		message.Read(&buf)
 	} else {
-		message = messages.NewStatusMessage(state, have.Copy(), want)
+		message = messages.NewStatusMessage(have.Copy(), want)
 	}
 	log.Debugw("sending", "object", "StatusChannel", "method", "SendStatus", "message", message)
 	ch.channel <- message
@@ -173,8 +173,8 @@ func (ch *StatusChannel) listen() error {
 			return ErrReceiverNotSet
 		}
 		have := result.Have.Any()
-		log.Debugw("received", "object", "StatusChannel", "method", "listen", "state", result.State, "have", have.Count(), "want", len(result.Want))
-		receiver.HandleStatus(result.State, have, result.Want)
+		log.Debugw("received", "object", "StatusChannel", "method", "listen", "have", have.Count(), "want", len(result.Want))
+		receiver.HandleStatus(have, result.Want)
 	}
 	return err
 }
@@ -192,8 +192,7 @@ func NewMockStatusSender(channel *StatusChannel, orchestrator Orchestrator[batch
 }
 
 func (sn *MockStatusSender) SendStatus(have filter.Filter[mock.BlockId], want []mock.BlockId) error {
-	state := sn.orchestrator.State()
-	sn.channel.SendStatus(state, have.Copy(), want)
+	sn.channel.SendStatus(have.Copy(), want)
 	return nil
 }
 
@@ -227,14 +226,14 @@ func MockBatchTransferSend(senderStore *mock.Store, receiverStore *mock.Store, r
 	sinkResponder := batch.NewSinkResponder[mock.BlockId](receiverStore, config, nil)
 
 	blockChannel := BlockChannel{
-		make(chan *messages.BlocksMessage[mock.BlockId, *mock.BlockId, batch.BatchState]),
+		make(chan *messages.BlocksMessage[mock.BlockId, *mock.BlockId]),
 		nil,
 		bytesPerMs,
 		latencyMs,
 	}
 
 	statusChannel := StatusChannel{
-		make(chan *messages.StatusMessage[mock.BlockId, *mock.BlockId, batch.BatchState]),
+		make(chan *messages.StatusMessage[mock.BlockId, *mock.BlockId]),
 		nil,
 		bytesPerMs,
 		latencyMs,
@@ -252,7 +251,7 @@ func MockBatchTransferSend(senderStore *mock.Store, receiverStore *mock.Store, r
 
 	blockSender := sourceConnection.Sender(&blockChannel, uint32(maxBatchSize))
 
-	sinkResponder.SetBatchStatusSender(&statusChannel)
+	sinkResponder.SetStatusSender(&statusChannel)
 
 	statusChannel.SetReceiverFunc(func() *batch.SimpleBatchStatusReceiver[mock.BlockId] {
 		return sourceConnection.Receiver(senderSession)
@@ -354,14 +353,14 @@ func MockBatchTransferReceive(sinkStore *mock.Store, sourceStore *mock.Store, ro
 	sourceResponder := batch.NewSourceResponder[mock.BlockId](sourceStore, config, nil, maxBatchSize)
 
 	blockChannel := BlockChannel{
-		make(chan *messages.BlocksMessage[mock.BlockId, *mock.BlockId, batch.BatchState]),
+		make(chan *messages.BlocksMessage[mock.BlockId, *mock.BlockId]),
 		nil,
 		bytesPerMs,
 		latencyMs,
 	}
 
 	statusChannel := StatusChannel{
-		make(chan *messages.StatusMessage[mock.BlockId, *mock.BlockId, batch.BatchState]),
+		make(chan *messages.StatusMessage[mock.BlockId, *mock.BlockId]),
 		nil,
 		bytesPerMs,
 		latencyMs,

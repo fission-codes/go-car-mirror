@@ -22,17 +22,17 @@ type SinkResponder[I core.BlockId] struct {
 	store        core.BlockStore[I]
 	sinkSessions *util.SynchronizedMap[SessionId, *SinkSessionData[I]]
 	// TODO: This gets invoked and passed to SimpleStatusAccumulator, which has mutex, so this allocator should just return a non-sync filter
-	filterAllocator   func() filter.Filter[I]
-	batchStatusSender BatchStatusSender[I]
+	filterAllocator func() filter.Filter[I]
+	statusSender    core.StatusSender[I]
 }
 
-func NewSinkResponder[I core.BlockId](store core.BlockStore[I], config Config, batchStatusSender BatchStatusSender[I]) *SinkResponder[I] {
+func NewSinkResponder[I core.BlockId](store core.BlockStore[I], config Config, statusSender core.StatusSender[I]) *SinkResponder[I] {
 	return &SinkResponder[I]{
 		store,
 		util.NewSynchronizedMap[SessionId, *SinkSessionData[I]](),
 		// NewBloomAllocator isn't returning a synchronized filter
 		NewBloomAllocator[I](&config),
-		batchStatusSender,
+		statusSender,
 	}
 }
 
@@ -58,6 +58,14 @@ func (sr *SinkResponder[I]) SinkSession(sessionId SessionId) *core.SinkSession[I
 	return sessionData.Session
 }
 
+// func (sr *SinkResponder[I]) SinkSessions() []core.SinkSession[I, BatchState] {
+// 	return sr.sinkSessions.Keys()
+// }
+
+func (sr *SinkResponder[I]) SinkSessionIds() []SessionId {
+	return sr.sinkSessions.Keys()
+}
+
 func (sr *SinkResponder[I]) SinkConnection(sessionId SessionId) *GenericBatchSinkConnection[I] {
 	sessionData := sr.SinkSessionData(sessionId)
 	return sessionData.conn
@@ -81,7 +89,7 @@ func (sr *SinkResponder[I]) startSinkSession(sessionId SessionId) *SinkSessionDa
 
 	// TODO: validate that we have a batch status sender first
 
-	statusSender := sinkConnection.Sender(sr.batchStatusSender)
+	statusSender := sinkConnection.Sender(sr.statusSender)
 
 	go func() {
 		newSession.Run(statusSender)
@@ -98,8 +106,8 @@ func (sr *SinkResponder[I]) startSinkSession(sessionId SessionId) *SinkSessionDa
 	}
 }
 
-func (sr *SinkResponder[I]) SetBatchStatusSender(batchStatusSender BatchStatusSender[I]) {
-	sr.batchStatusSender = batchStatusSender
+func (sr *SinkResponder[I]) SetStatusSender(statusSender core.StatusSender[I]) {
+	sr.statusSender = statusSender
 }
 
 // Need to get sink session, start it, allow dynamic looking up of its receiver
@@ -178,6 +186,10 @@ func (sr *SourceResponder[I]) SourceSession(sessionId SessionId) *core.SourceSes
 	return sessionData.Session
 }
 
+func (sr *SourceResponder[I]) SourceSessionIds() []SessionId {
+	return sr.sourceSessions.Keys()
+}
+
 func (sr *SourceResponder[I]) SourceConnection(sessionId SessionId) *GenericBatchSourceConnection[I] {
 	sessionData := sr.SourceSessionData(sessionId)
 	return sessionData.conn
@@ -199,11 +211,11 @@ func (sr *SourceResponder[I]) startSourceSession(sessionId SessionId) *SourceSes
 		false, // Not a requester
 	)
 
-	blockSender := sourceConnection.Sender(sr.batchBlockSender, sr.batchSize)
+	batchBlockSender := sourceConnection.Sender(sr.batchBlockSender, sr.batchSize)
 
 	go func() {
-		newSession.Run(blockSender)
-		// blockSender.Close()
+		newSession.Run(batchBlockSender)
+		// batchBlockSender.Close()
 		sr.sourceSessions.Remove(sessionId)
 	}()
 

@@ -25,13 +25,13 @@ type Client[I core.BlockId, R core.BlockIdRef[I]] struct {
 	instrumented   instrumented.InstrumentationOptions
 }
 
-func NewClient[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], config Config) *Client[I, R] {
+func NewClient[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], config batch.Config) *Client[I, R] {
 	return &Client[I, R]{
 		store,
 		util.NewSynchronizedMap[string, *core.SourceSession[I, batch.BatchState]](),
 		util.NewSynchronizedMap[string, *core.SinkSession[I, batch.BatchState]](),
 		config.MaxBatchSize,
-		NewBloomAllocator[I](&config),
+		batch.NewBloomAllocator[I](&config),
 		config.Instrument,
 	}
 }

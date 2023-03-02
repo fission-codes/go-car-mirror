@@ -21,15 +21,15 @@ type RequestBatchBlockSender[I core.BlockId, R core.BlockIdRef[I]] struct {
 	responseHandler *batch.SimpleBatchStatusReceiver[I]
 }
 
-func (bbs *RequestBatchBlockSender[I, R]) SendList(state batch.BatchState, blocks []core.RawBlock[I]) error {
-	log.Debugw("enter", "object", "RequestBatchBlockSender", "method", "SendList", "state", state, "blocks", len(blocks))
+func (bbs *RequestBatchBlockSender[I, R]) SendList(blocks []core.RawBlock[I]) error {
+	log.Debugw("enter", "object", "RequestBatchBlockSender", "method", "SendList", "blocks", len(blocks))
 	// We never send block requests for empty batches.
 	if len(blocks) == 0 {
-		log.Debugw("exit", "object", "RequestBatchBlockSender", "method", "SendList", "state", state, "blocks", len(blocks))
+		log.Debugw("exit", "object", "RequestBatchBlockSender", "method", "SendList", "blocks", len(blocks))
 		return nil
 	}
 
-	message := messages.NewBlocksMessage[I, R](state, blocks)
+	message := messages.NewBlocksMessage[I, R](blocks)
 	reader, writer := io.Pipe()
 
 	go func() {
@@ -48,7 +48,7 @@ func (bbs *RequestBatchBlockSender[I, R]) SendList(state batch.BatchState, block
 	} else {
 		if resp.StatusCode == http.StatusAccepted {
 			log.Debugw("post response", "object", "RequestBatchBlockSender", "method", "SendList", "url", bbs.url)
-			responseMessage := messages.StatusMessage[I, R, batch.BatchState]{}
+			responseMessage := messages.StatusMessage[I, R]{}
 			bufferedReader := bufio.NewReader(resp.Body)
 			if err := responseMessage.Read(bufferedReader); err != nil {
 				log.Debugw("exit", "object", "RequestBatchBlockSender", "method", "SendList", "error", err)
@@ -59,7 +59,7 @@ func (bbs *RequestBatchBlockSender[I, R]) SendList(state batch.BatchState, block
 				return err
 			}
 			// TODO: Handle error
-			bbs.responseHandler.HandleStatus(responseMessage.State, responseMessage.Have.Any(), responseMessage.Want)
+			bbs.responseHandler.HandleStatus(responseMessage.Have.Any(), responseMessage.Want)
 			log.Debugw("exit", "object", "RequestBatchBlockSender", "method", "SendList")
 			return nil
 		} else {
@@ -76,12 +76,12 @@ func (bbs *RequestBatchBlockSender[I, R]) Close() error {
 }
 
 type ResponseBatchBlockSender[I core.BlockId, R core.BlockIdRef[I]] struct {
-	messages chan<- *messages.BlocksMessage[I, R, batch.BatchState]
+	messages chan<- *messages.BlocksMessage[I, R]
 }
 
-func (bbs *ResponseBatchBlockSender[I, R]) SendList(state batch.BatchState, blocks []core.RawBlock[I]) error {
-	log.Debugw("ResponseBatchBlockSender - enter", "method", "SendList", "state", state, "blocks", len(blocks))
-	bbs.messages <- messages.NewBlocksMessage[I, R](state, blocks)
+func (bbs *ResponseBatchBlockSender[I, R]) SendList(blocks []core.RawBlock[I]) error {
+	log.Debugw("ResponseBatchBlockSender - enter", "method", "SendList", "blocks", len(blocks))
+	bbs.messages <- messages.NewBlocksMessage[I, R](blocks)
 	log.Debugw("ResponseBatchBlockSender - exit", "method", "SendList")
 	return nil
 }
@@ -97,7 +97,7 @@ type RequestStatusSender[I core.BlockId, R core.BlockIdRef[I]] struct {
 	responseHandler batch.BatchBlockReceiver[I]
 }
 
-func (ss *RequestStatusSender[I, R]) SendStatus(state batch.BatchState, have filter.Filter[I], want []I) error {
+func (ss *RequestStatusSender[I, R]) SendStatus(have filter.Filter[I], want []I) error {
 	log.Debugw("enter", "object", "RequestStatusSender", "method", "SendStatus", "have", have.Count(), "want", len(want))
 	// For requests, we never send status messages if we already have all the blocks we want.
 	if len(want) == 0 {
@@ -105,7 +105,7 @@ func (ss *RequestStatusSender[I, R]) SendStatus(state batch.BatchState, have fil
 		return nil
 	}
 
-	message := messages.NewStatusMessage[I, R](state, have, want)
+	message := messages.NewStatusMessage[I, R](have, want)
 	reader, writer := io.Pipe()
 
 	go func() {
@@ -123,7 +123,7 @@ func (ss *RequestStatusSender[I, R]) SendStatus(state batch.BatchState, have fil
 	} else {
 		if resp.StatusCode == http.StatusAccepted {
 			log.Debugw("post response", "object", "RequestStatusSender", "method", "SendStatus", "url", ss.url)
-			responseMessage := messages.BlocksMessage[I, R, batch.BatchState]{}
+			responseMessage := messages.BlocksMessage[I, R]{}
 			bufferedReader := bufio.NewReader(resp.Body)
 			if err := responseMessage.Read(bufferedReader); err != io.EOF { // read expected to terminate with EOF
 				log.Debugw("exit", "object", "RequestStatusSender", "method", "SendStatus", "error", err)
@@ -153,12 +153,12 @@ func (ss *RequestStatusSender[I, R]) Close() error {
 }
 
 type ResponseStatusSender[I core.BlockId, R core.BlockIdRef[I]] struct {
-	messages chan<- *messages.StatusMessage[I, R, batch.BatchState]
+	messages chan<- *messages.StatusMessage[I, R]
 }
 
-func (ss *ResponseStatusSender[I, R]) SendStatus(state batch.BatchState, have filter.Filter[I], want []I) error {
+func (ss *ResponseStatusSender[I, R]) SendStatus(have filter.Filter[I], want []I) error {
 	log.Debugw("enter", "object", "ResponseStatusSender", "method", "SendStatus", "have", have.Count(), "want", len(want))
-	ss.messages <- messages.NewStatusMessage[I, R](state, have, want)
+	ss.messages <- messages.NewStatusMessage[I, R](have, want)
 	log.Debugw("exit", "object", "ResponseStatusSender", "method", "SendStatus")
 	return nil
 }
@@ -170,13 +170,13 @@ func (ss *ResponseStatusSender[I, R]) Close() error {
 
 type HttpServerSourceConnection[I core.BlockId, R core.BlockIdRef[I]] struct {
 	*batch.GenericBatchSourceConnection[I]
-	messages chan *messages.BlocksMessage[I, R, batch.BatchState]
+	messages chan *messages.BlocksMessage[I, R]
 }
 
 func NewHttpServerSourceConnection[I core.BlockId, R core.BlockIdRef[I]](stats stats.Stats, instrument instrumented.InstrumentationOptions) *HttpServerSourceConnection[I, R] {
 	return &HttpServerSourceConnection[I, R]{
 		(*batch.GenericBatchSourceConnection[I])(batch.NewGenericBatchSourceConnection[I](stats, instrument)),
-		make(chan *messages.BlocksMessage[I, R, batch.BatchState]),
+		make(chan *messages.BlocksMessage[I, R]),
 	}
 }
 
@@ -184,19 +184,19 @@ func (conn *HttpServerSourceConnection[I, R]) DeferredSender(batchSize uint32) c
 	return conn.Sender(&ResponseBatchBlockSender[I, R]{conn.messages}, batchSize)
 }
 
-func (conn *HttpServerSourceConnection[I, R]) PendingResponse() *messages.BlocksMessage[I, R, batch.BatchState] {
+func (conn *HttpServerSourceConnection[I, R]) PendingResponse() *messages.BlocksMessage[I, R] {
 	return <-conn.messages
 }
 
 type HttpServerSinkConnection[I core.BlockId, R core.BlockIdRef[I]] struct {
 	*batch.GenericBatchSinkConnection[I]
-	messages chan *messages.StatusMessage[I, R, batch.BatchState]
+	messages chan *messages.StatusMessage[I, R]
 }
 
 func NewHttpServerSinkConnection[I core.BlockId, R core.BlockIdRef[I]](stats stats.Stats, instrument instrumented.InstrumentationOptions) *HttpServerSinkConnection[I, R] {
 	return &HttpServerSinkConnection[I, R]{
 		(*batch.GenericBatchSinkConnection[I])(batch.NewGenericBatchSinkConnection[I](stats, instrument)),
-		make(chan *messages.StatusMessage[I, R, batch.BatchState]),
+		make(chan *messages.StatusMessage[I, R]),
 	}
 }
 
@@ -204,7 +204,7 @@ func (conn *HttpServerSinkConnection[I, R]) DeferredSender() core.StatusSender[I
 	return conn.Sender(&ResponseStatusSender[I, R]{conn.messages})
 }
 
-func (conn *HttpServerSinkConnection[I, R]) PendingResponse() *messages.StatusMessage[I, R, batch.BatchState] {
+func (conn *HttpServerSinkConnection[I, R]) PendingResponse() *messages.StatusMessage[I, R] {
 	return <-conn.messages
 }
 

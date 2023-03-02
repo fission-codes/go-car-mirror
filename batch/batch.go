@@ -104,7 +104,7 @@ type BatchBlockReceiver[I core.BlockId] interface {
 // BatchBlockSender is an interface for sending batches of blocks.
 type BatchBlockSender[I core.BlockId] interface {
 	// SendList sends a list of blocks.
-	SendList(BatchState, []core.RawBlock[I]) error
+	SendList([]core.RawBlock[I]) error
 	// Close closes the sender.
 	Close() error
 }
@@ -184,6 +184,7 @@ func (sbbs *SimpleBatchBlockSender[I]) Flush() error {
 	batchState := sbbs.orchestrator.State()
 	// Only actually send a list if we have data OR we are closed, so we would like to communicate this state to the sink
 	// TODO: If we're closed we shouldn't be sending anything, right?
+	// TODO: Do we need this check here?  Are we already handling it before calling this?
 	if batchState&(SOURCE_SENDING|SOURCE_CLOSED) != 0 {
 		sbbs.listMutex.Lock()
 		defer sbbs.listMutex.Unlock()
@@ -201,7 +202,7 @@ func (sbbs *SimpleBatchBlockSender[I]) Flush() error {
 		// This is wrapped in begin flush and flush.
 		// END_FLUSH is what sets _WAITING.
 		// It would be nice to only notify this if we actually have something to flush.
-		if err := sbbs.batchBlockSender.SendList(batchState&SOURCE, sendList); err != nil {
+		if err := sbbs.batchBlockSender.SendList(sendList); err != nil {
 			return err
 		}
 		sbbs.list = sbbs.list[:0]
@@ -405,6 +406,8 @@ func (bro *BatchSinkOrchestrator) IsSafeStateToClose() bool {
 	return !bro.state.ContainsAny(SINK_ENQUEUEING | SINK_SENDING | SINK_FLUSHING | SINK_WAITING)
 }
 
+// TODO: Naming is confusing.  This has BatchStatusReceiver in its name, but it doesn't implement HandleList and therefore isn't a BatchStatusReceiver.
+// It is batch only in that it uses the orchestrator with BatchState to notify.
 type SimpleBatchStatusReceiver[I core.BlockId] struct {
 	session      core.StatusReceiver[I]
 	orchestrator core.Orchestrator[BatchState]
@@ -419,7 +422,7 @@ func NewSimpleBatchStatusReceiver[I core.BlockId](session core.StatusReceiver[I]
 }
 
 // HandleList handles a list of raw blocks.
-func (sbbr *SimpleBatchStatusReceiver[I]) HandleStatus(state BatchState, have filter.Filter[I], want []I) error {
+func (sbbr *SimpleBatchStatusReceiver[I]) HandleStatus(have filter.Filter[I], want []I) error {
 	sbbr.orchestrator.Notify(core.BEGIN_BATCH)
 	defer sbbr.orchestrator.Notify(core.END_BATCH)
 	// TODO: handle errors.  Can't yet because HandleStatus doesn't return an error.
