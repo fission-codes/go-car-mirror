@@ -1,6 +1,9 @@
 package batch
 
 import (
+	"fmt"
+	"sync"
+
 	"github.com/fission-codes/go-car-mirror/core"
 	"github.com/fission-codes/go-car-mirror/core/instrumented"
 	"github.com/fission-codes/go-car-mirror/filter"
@@ -34,6 +37,34 @@ func NewSinkResponder[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStor
 		NewBloomAllocator[I](&config),
 		statusSender,
 	}
+}
+
+func doneWaiter(wg *sync.WaitGroup, c <-chan error) {
+	defer wg.Done()
+	for {
+		value, ok := <-c
+		if !ok {
+			fmt.Printf("Worker done\n")
+			return
+		}
+		fmt.Printf("Worker received %v\n", value)
+	}
+}
+
+func (sr *SinkResponder[I, R]) AllDone() {
+	var wg sync.WaitGroup
+
+	for _, sessionKey := range sr.sinkSessions.Keys() {
+		session, ok := sr.sinkSessions.Get(sessionKey)
+		if !ok {
+			log.Warnw("Done: session not found", "sessionKey", sessionKey)
+			continue
+		}
+		wg.Add(1)
+		go doneWaiter(&wg, session.Session.Done())
+	}
+
+	wg.Wait()
 }
 
 func (sr *SinkResponder[I, R]) newSinkConnection() *GenericBatchSinkConnection[I, R] {
@@ -172,6 +203,34 @@ func NewSourceResponder[I core.BlockId, R core.BlockIdRef[I]](store core.BlockSt
 		batchBlockSender,
 		batchSize,
 	}
+}
+
+// func doneWaiter(wg *sync.WaitGroup, c <-chan error) {
+// 	defer wg.Done()
+// 	for {
+// 		value, ok := <-c
+// 		if !ok {
+// 			fmt.Printf("Worker done\n")
+// 			return
+// 		}
+// 		fmt.Printf("Worker received %v\n", value)
+// 	}
+// }
+
+func (sr *SourceResponder[I, R]) AllDone() {
+	var wg sync.WaitGroup
+
+	for _, sessionKey := range sr.sourceSessions.Keys() {
+		session, ok := sr.sourceSessions.Get(sessionKey)
+		if !ok {
+			log.Warnw("Done: session not found", "sessionKey", sessionKey)
+			continue
+		}
+		wg.Add(1)
+		go doneWaiter(&wg, session.Session.Done())
+	}
+
+	wg.Wait()
 }
 
 func (sr *SourceResponder[I, R]) newSourceConnection() *GenericBatchSourceConnection[I, R] {

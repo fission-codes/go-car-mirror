@@ -466,6 +466,7 @@ func (ss *SinkSession[I, F]) Run(
 	defer ss.orchestrator.Notify(END_SESSION)
 
 	for !ss.orchestrator.IsClosed() {
+		log.Debugw("SourceSession.Run() checking for pending blocks", "pendingBlocks", ss.pendingBlocks.Len(), "wantCount", ss.statusAccumulator.WantCount())
 		if ss.pendingBlocks.Len() == 0 && ss.statusAccumulator.WantCount() == 0 && ss.orchestrator.IsSafeStateToClose() {
 			if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
 				ss.doneCh <- err
@@ -485,15 +486,6 @@ func (ss *SinkSession[I, F]) Run(
 		// Pending blocks are blocks that have been recieved and added to our block store,
 		// but have not had status accumulated on their children yet.
 		if ss.pendingBlocks.Len() > 0 {
-			// TODO: Why is this sending?  We're only accumulating status here.
-			// Per docs, SINK_SENDING means we might have status pending flush.
-			// That could be true regardless of if there are pending blocks though, right?
-			// Feels like confusing naming.
-			// if err := ss.orchestrator.Notify(BEGIN_SEND); err != nil {
-			// 	ss.doneCh <- err
-			// 	return
-			// }
-
 			block := ss.pendingBlocks.PollFront()
 
 			for _, child := range block.Children() {
@@ -515,10 +507,6 @@ func (ss *SinkSession[I, F]) Run(
 					ss.doneCh <- err
 					return
 				}
-			}
-			if err := ss.orchestrator.Notify(END_SEND); err != nil {
-				ss.doneCh <- err
-				return
 			}
 		} else {
 			if err := ss.orchestrator.Notify(BEGIN_DRAINING); err != nil {

@@ -60,11 +60,17 @@ func (bs BatchState) Strings() []string {
 	if bs&SINK_SENDING != 0 {
 		strings = append(strings, "SINK_SENDING")
 	}
+	if bs&SINK_RECEIVING != 0 {
+		strings = append(strings, "SINK_RECEIVING")
+	}
 	if bs&SINK_WAITING != 0 {
 		strings = append(strings, "SINK_WAITING")
 	}
 	if bs&SINK_ENQUEUEING != 0 {
 		strings = append(strings, "SINK_ENQUEUEING")
+	}
+	if bs&SINK_HANDLING_BATCH != 0 {
+		strings = append(strings, "SINK_HANDLING_BATCH")
 	}
 	if bs&SOURCE_PROCESSING != 0 {
 		strings = append(strings, "SOURCE_PROCESSING")
@@ -78,6 +84,9 @@ func (bs BatchState) Strings() []string {
 	if bs&SOURCE_SENDING != 0 {
 		strings = append(strings, "SOURCE_SENDING")
 	}
+	if bs&SOURCE_RECEIVING != 0 {
+		strings = append(strings, "SOURCE_RECEIVING")
+	}
 	if bs&SOURCE_WAITING != 0 {
 		strings = append(strings, "SOURCE_WAITING")
 	}
@@ -86,6 +95,9 @@ func (bs BatchState) Strings() []string {
 	}
 	if bs&SOURCE_ENQUEUEING != 0 {
 		strings = append(strings, "SOURCE_ENQUEUEING")
+	}
+	if bs&SOURCE_HANDLING_BATCH != 0 {
+		strings = append(strings, "SOURCE_HANDLING_BATCH")
 	}
 	if bs&CANCELLED != 0 {
 		strings = append(strings, "CANCELLED")
@@ -261,9 +273,7 @@ func (bso *BatchSourceOrchestrator) Notify(event core.SessionEvent) error {
 	case core.BEGIN_BATCH:
 		bso.state.Set(SOURCE_HANDLING_BATCH)
 	case core.END_BATCH:
-		bso.state.Unset(SOURCE_HANDLING_BATCH)
-		bso.state.Update(SOURCE_WAITING, SOURCE_PROCESSING)
-		// Time to unset RECEIVING?
+		bso.state.Update(SOURCE_HANDLING_BATCH|SOURCE_WAITING, SOURCE_PROCESSING)
 	case core.BEGIN_PROCESSING:
 		// TODO: I think it's possible SOURCE_CLOSED and SOURCE_CLOSING should be removed.  Check.
 		state := bso.state.WaitAny(SOURCE_PROCESSING|CANCELLED|SOURCE_CLOSED|SOURCE_CLOSING, 0)
@@ -280,20 +290,23 @@ func (bso *BatchSourceOrchestrator) Notify(event core.SessionEvent) error {
 		// TODO: Maybe unset waiting and wait for end batch to set processing?
 		// bso.state.Update(SOURCE_WAITING, SOURCE_PROCESSING)
 	case core.BEGIN_FLUSH:
-		bso.state.Update(SOURCE_PROCESSING, SOURCE_FLUSHING)
-	case core.END_FLUSH:
-		// bso.state.Update(SOURCE_FLUSHING|SOURCE_SENDING, SOURCE_WAITING)
 		if bso.requester {
-			bso.state.Update(SOURCE_FLUSHING|SOURCE_SENDING, SOURCE_WAITING)
+			bso.state.Update(SOURCE_PROCESSING|SOURCE_SENDING, SOURCE_FLUSHING|SOURCE_WAITING)
 		} else {
-			bso.state.Update(SOURCE_FLUSHING|SOURCE_SENDING, SOURCE_PROCESSING)
-			// bso.state.Unset(SOURCE_FLUSHING | SOURCE_SENDING)
+			bso.state.Update(SOURCE_PROCESSING|SOURCE_SENDING, SOURCE_FLUSHING)
+		}
+	case core.END_FLUSH:
+		// bso.state.Update(SOURCE_FLUSHING, SOURCE_PROCESSING)
+		bso.state.Unset(SOURCE_FLUSHING)
+		if !bso.requester {
+			bso.state.Set(SOURCE_PROCESSING)
 		}
 	case core.BEGIN_SEND:
 		bso.state.Set(SOURCE_SENDING)
 	case core.END_SEND:
 		// Does nothing
 	case core.BEGIN_DRAINING:
+		bso.state.WaitExact(SOURCE_ENQUEUEING, 0) // Can't drain while enqueueing
 		// If we are draining (the queue is empty) and we have no pending blocks to send, we can close
 		if bso.state.ContainsExact(SOURCE_CLOSING|SOURCE_SENDING, SOURCE_CLOSING) {
 			bso.state.Set(SOURCE_CLOSED)
@@ -363,11 +376,6 @@ func (bro *BatchSinkOrchestrator) Notify(event core.SessionEvent) error {
 		bro.state.Set(SINK_ENQUEUEING)
 	case core.END_ENQUEUE:
 		bro.state.Update(SINK_ENQUEUEING, SINK_SENDING)
-		// bro.state.Set(SINK_PROCESSING)
-		// // This is necessary because if the session is quiescent (e.g. has no in-flight exchange)
-		// // the session Run loop will be waiting on SINK_PROCESSING, and we need to set it to send
-		// // an initial 'want' message to the block source. If the receiver is not sending, waiting,
-		// // or checking, it is quiescent.
 		if !bro.state.ContainsAny(SINK_FLUSHING | SINK_WAITING | SINK_PROCESSING) {
 			bro.state.Set(SINK_PROCESSING)
 		}
@@ -378,8 +386,7 @@ func (bro *BatchSinkOrchestrator) Notify(event core.SessionEvent) error {
 	case core.BEGIN_BATCH:
 		bro.state.Set(SINK_HANDLING_BATCH)
 	case core.END_BATCH:
-		bro.state.Unset(SINK_HANDLING_BATCH)
-		bro.state.Update(SINK_WAITING, SINK_PROCESSING)
+		bro.state.Update(SINK_HANDLING_BATCH|SINK_WAITING, SINK_PROCESSING)
 	case core.BEGIN_PROCESSING:
 		// This lets us either proceed or eject at the beginning of every loop iteration.
 		// If we add complete session termination check at the top, does this buy us anything?
@@ -389,26 +396,26 @@ func (bro *BatchSinkOrchestrator) Notify(event core.SessionEvent) error {
 			return errors.ErrStateError
 		}
 	case core.END_PROCESSING:
-		if bro.state.ContainsExact(SINK_CLOSING|SINK_SENDING, SINK_CLOSING) {
-			bro.state.Set(SINK_CLOSED)
-		}
+		// if bro.state.ContainsExact(SINK_CLOSING|SINK_SENDING, SINK_CLOSING) {
+		// 	bro.state.Set(SINK_CLOSED)
+		// }
 	case core.BEGIN_RECEIVE:
 		// TODO: Anything?
 	case core.END_RECEIVE:
 		// TODO: Anything?  Source does the following with SOURCE.
 		bro.state.Update(SINK_WAITING, SINK_PROCESSING)
 	case core.BEGIN_FLUSH:
-		bro.state.Update(SINK_PROCESSING, SINK_FLUSHING)
-	case core.END_FLUSH:
-		// WAITING should only happen if we are the requester.
-		// if requester, update flushing/sending to waiting.
-		// else unset flushing/sending.
 		if bro.requester {
-			bro.state.Update(SINK_FLUSHING|SINK_SENDING, SINK_WAITING)
+			bro.state.Update(SINK_PROCESSING|SINK_SENDING, SINK_FLUSHING|SINK_WAITING)
 		} else {
-			bro.state.Update(SINK_FLUSHING|SINK_SENDING, SINK_PROCESSING)
-			// bro.state.Unset(SINK_FLUSHING | SINK_SENDING)
+			bro.state.Update(SINK_PROCESSING|SINK_SENDING, SINK_FLUSHING)
 		}
+	case core.END_FLUSH:
+		bro.state.Unset(SINK_FLUSHING)
+		if !bro.requester {
+			bro.state.Set(SINK_PROCESSING)
+		}
+		// bro.state.Update(SINK_FLUSHING, SINK_PROCESSING)
 	case core.BEGIN_SEND:
 		bro.state.Set(SINK_SENDING)
 	case core.END_SEND:
@@ -420,6 +427,7 @@ func (bro *BatchSinkOrchestrator) Notify(event core.SessionEvent) error {
 			bro.state.Set(SINK_CLOSED)
 		}
 	case core.END_DRAINING:
+		bro.state.Unset(SINK_SENDING)
 		// TODO: Is this needed here and BEGIN_DRAINING?
 		if bro.state.ContainsExact(SINK_CLOSING|SINK_SENDING, SINK_CLOSING) {
 			bro.state.Set(SINK_CLOSED)
@@ -444,9 +452,9 @@ func (bro *BatchSinkOrchestrator) IsClosed() bool {
 func (bro *BatchSinkOrchestrator) IsSafeStateToClose() bool {
 	// TODO: If we're the requester, than should include SINK_WAITING.
 	if bro.requester {
-		return !bro.state.ContainsAny(SINK_ENQUEUEING | SINK_SENDING | SINK_FLUSHING | SINK_HANDLING_BATCH | SINK_WAITING)
+		return !bro.state.ContainsAny(SINK_ENQUEUEING | SINK_FLUSHING | SINK_HANDLING_BATCH | SINK_WAITING)
 	} else {
-		return !bro.state.ContainsAny(SINK_ENQUEUEING | SINK_SENDING | SINK_FLUSHING | SINK_HANDLING_BATCH)
+		return !bro.state.ContainsAny(SINK_ENQUEUEING | SINK_FLUSHING | SINK_HANDLING_BATCH)
 	}
 }
 

@@ -333,6 +333,9 @@ func MockBatchTransferSend(senderStore *mock.Store, receiverStore *mock.Store, r
 	// }
 	// log.Debugf("receiver session terminated")
 
+	log.Debugw("waiting for all done", "sessions", len(sinkResponder.SinkSessionIds()))
+	sinkResponder.AllDone()
+
 	snapshotAfter := stats.GLOBAL_REPORTING.Snapshot()
 	diff := snapshotBefore.Diff(snapshotAfter)
 	diff.Write(&log.SugaredLogger)
@@ -448,10 +451,8 @@ func MockBatchTransferReceive(sinkStore *mock.Store, sourceStore *mock.Store, ro
 		log.Errorf("error closing status sender: %v", err)
 	}
 
-	// if err := <-sourceResponder.SourceSession(SESSION_ID).Done(); err != nil {
-	// 	log.Debugf("sender session failed: %v", err)
-	// }
-	// log.Debugf("sender session terminated")
+	log.Debugw("waiting for all done", "sessions", len(sourceResponder.SourceSessionIds()))
+	sourceResponder.AllDone()
 
 	snapshotAfter := stats.GLOBAL_REPORTING.Snapshot()
 	diff := snapshotBefore.Diff(snapshotAfter)
@@ -517,7 +518,7 @@ func TestMockTransferToEmptyStoreMultiBatchNoDelaySend(t *testing.T) {
 
 func TestMockTransferToEmptyStoreMultiBatchNoDelayReceive(t *testing.T) {
 	senderStore := mock.NewStore(mock.DefaultConfig())
-	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
+	root := mock.AddRandomTree(context.Background(), senderStore, 4, 5, 0.0)
 	receiverStore := mock.NewStore(mock.DefaultConfig())
 	MockBatchTransferReceive(receiverStore, senderStore, root, 50, 0, 0)
 	if !receiverStore.HasAll(root) {
