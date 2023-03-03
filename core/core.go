@@ -466,7 +466,7 @@ func (ss *SinkSession[I, F]) Run(
 	defer ss.orchestrator.Notify(END_SESSION)
 
 	for !ss.orchestrator.IsClosed() {
-		log.Debugw("SourceSession.Run() checking for pending blocks", "pendingBlocks", ss.pendingBlocks.Len(), "wantCount", ss.statusAccumulator.WantCount())
+		log.Debugw("SinkSession.Run() checking for pending blocks", "pendingBlocks", ss.pendingBlocks.Len(), "wantCount", ss.statusAccumulator.WantCount())
 		if ss.pendingBlocks.Len() == 0 && ss.statusAccumulator.WantCount() == 0 && ss.orchestrator.IsSafeStateToClose() {
 			if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
 				ss.doneCh <- err

@@ -150,7 +150,7 @@ func TestClientReceive(t *testing.T) {
 	// Wait for the session to go away
 	err := <-session.Done()
 
-	if err != ErrInvalidSession {
+	if err != nil {
 		t.Errorf("Closed with unexpected error %v", err)
 	}
 

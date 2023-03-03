@@ -196,9 +196,7 @@ func (sbbs *SimpleBatchBlockSender[I]) Close() error {
 
 // Flush sends the current batch of blocks.
 func (sbbs *SimpleBatchBlockSender[I]) Flush() error {
-
-	batchState := sbbs.orchestrator.State()
-	if batchState&(SOURCE_SENDING) != 0 {
+	if sbbs.Len() > 0 {
 		sbbs.listMutex.Lock()
 		defer sbbs.listMutex.Unlock()
 
