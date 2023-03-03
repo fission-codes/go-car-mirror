@@ -48,8 +48,8 @@ func (io *Orchestrator[F]) IsClosed() bool {
 	return result
 }
 
-func (io *Orchestrator[F]) IsSafeStateToClose() bool {
-	result := io.orchestrator.IsSafeStateToClose()
+func (io *Orchestrator[F]) IsSafeStateToClose(requester bool) bool {
+	result := io.orchestrator.IsSafeStateToClose(requester)
 	io.stats.Logger().Debugw("exit", "method", "IsSafeStateToClose", "state", io.orchestrator.State(), "result", result)
 	return result
 }

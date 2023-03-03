@@ -169,13 +169,13 @@ func (ss *ResponseStatusSender[I, R]) Close() error {
 }
 
 type HttpServerSourceConnection[I core.BlockId, R core.BlockIdRef[I]] struct {
-	*batch.GenericBatchSourceConnection[I]
+	*batch.GenericBatchSourceConnection[I, R]
 	messages chan *messages.BlocksMessage[I, R]
 }
 
 func NewHttpServerSourceConnection[I core.BlockId, R core.BlockIdRef[I]](stats stats.Stats, instrument instrumented.InstrumentationOptions) *HttpServerSourceConnection[I, R] {
 	return &HttpServerSourceConnection[I, R]{
-		(*batch.GenericBatchSourceConnection[I])(batch.NewGenericBatchSourceConnection[I](stats, instrument)),
+		(*batch.GenericBatchSourceConnection[I, R])(batch.NewGenericBatchSourceConnection[I, R](stats, instrument)),
 		make(chan *messages.BlocksMessage[I, R]),
 	}
 }
@@ -184,18 +184,22 @@ func (conn *HttpServerSourceConnection[I, R]) DeferredSender(batchSize uint32) c
 	return conn.Sender(&ResponseBatchBlockSender[I, R]{conn.messages}, batchSize)
 }
 
+func (conn *HttpServerSourceConnection[I, R]) DeferredBatchSender() batch.BatchBlockSender[I] {
+	return &ResponseBatchBlockSender[I, R]{conn.messages}
+}
+
 func (conn *HttpServerSourceConnection[I, R]) PendingResponse() *messages.BlocksMessage[I, R] {
 	return <-conn.messages
 }
 
 type HttpServerSinkConnection[I core.BlockId, R core.BlockIdRef[I]] struct {
-	*batch.GenericBatchSinkConnection[I]
+	*batch.GenericBatchSinkConnection[I, R]
 	messages chan *messages.StatusMessage[I, R]
 }
 
 func NewHttpServerSinkConnection[I core.BlockId, R core.BlockIdRef[I]](stats stats.Stats, instrument instrumented.InstrumentationOptions) *HttpServerSinkConnection[I, R] {
 	return &HttpServerSinkConnection[I, R]{
-		(*batch.GenericBatchSinkConnection[I])(batch.NewGenericBatchSinkConnection[I](stats, instrument)),
+		(*batch.GenericBatchSinkConnection[I, R])(batch.NewGenericBatchSinkConnection[I, R](stats, instrument)),
 		make(chan *messages.StatusMessage[I, R]),
 	}
 }
@@ -209,14 +213,14 @@ func (conn *HttpServerSinkConnection[I, R]) PendingResponse() *messages.StatusMe
 }
 
 type HttpClientSourceConnection[I core.BlockId, R core.BlockIdRef[I]] struct {
-	*batch.GenericBatchSourceConnection[I]
+	*batch.GenericBatchSourceConnection[I, R]
 	client *http.Client
 	url    string
 }
 
 func NewHttpClientSourceConnection[I core.BlockId, R core.BlockIdRef[I]](client *http.Client, url string, stats stats.Stats, instrument instrumented.InstrumentationOptions) *HttpClientSourceConnection[I, R] {
 	return &HttpClientSourceConnection[I, R]{
-		batch.NewGenericBatchSourceConnection[I](stats, instrument),
+		batch.NewGenericBatchSourceConnection[I, R](stats, instrument),
 		client,
 		url,
 	}
@@ -227,14 +231,14 @@ func (conn *HttpClientSourceConnection[I, R]) ImmediateSender(session *core.Sour
 }
 
 type HttpClientSinkConnection[I core.BlockId, R core.BlockIdRef[I]] struct {
-	*batch.GenericBatchSinkConnection[I]
+	*batch.GenericBatchSinkConnection[I, R]
 	client *http.Client
 	url    string
 }
 
 func NewHttpClientSinkConnection[I core.BlockId, R core.BlockIdRef[I]](client *http.Client, url string, stats stats.Stats, instrument instrumented.InstrumentationOptions) *HttpClientSinkConnection[I, R] {
 	return &HttpClientSinkConnection[I, R]{
-		batch.NewGenericBatchSinkConnection[I](stats, instrument),
+		batch.NewGenericBatchSinkConnection[I, R](stats, instrument),
 		client,
 		url,
 	}

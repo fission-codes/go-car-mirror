@@ -298,9 +298,13 @@ func (bso *BatchSourceOrchestrator) IsClosed() bool {
 	return bso.state.ContainsAny(SOURCE_CLOSED | CANCELLED)
 }
 
-func (bso *BatchSourceOrchestrator) IsSafeStateToClose() bool {
-	// TODO: If we are the requester, this should include SOURCE_WAITING.
-	return !bso.state.ContainsAny(SOURCE_ENQUEUEING | SOURCE_SENDING | SOURCE_FLUSHING)
+func (bso *BatchSourceOrchestrator) IsSafeStateToClose(requester bool) bool {
+	// TODO: If we are the requester, this should include SOURCE_WAITING, but we set WAITING even on responder.  Should only set WAITING on requester.
+	if requester {
+		return !bso.state.ContainsAny(SOURCE_ENQUEUEING | SOURCE_SENDING | SOURCE_FLUSHING | SOURCE_WAITING)
+	} else {
+		return !bso.state.ContainsAny(SOURCE_ENQUEUEING | SOURCE_SENDING | SOURCE_FLUSHING)
+	}
 }
 
 // BatchSinkOrchestrator is an orchestrator for receiving batches of blocks.
@@ -331,14 +335,14 @@ func (bro *BatchSinkOrchestrator) Notify(event core.SessionEvent) error {
 		bro.state.Set(SINK_ENQUEUEING)
 	case core.END_ENQUEUE:
 		bro.state.Update(SINK_ENQUEUEING, SINK_SENDING)
-		bro.state.Set(SINK_PROCESSING)
+		// bro.state.Set(SINK_PROCESSING)
 		// // This is necessary because if the session is quiescent (e.g. has no in-flight exchange)
 		// // the session Run loop will be waiting on SINK_PROCESSING, and we need to set it to send
 		// // an initial 'want' message to the block source. If the receiver is not sending, waiting,
 		// // or checking, it is quiescent.
-		// if !bro.state.ContainsAny(SINK_FLUSHING | SINK_WAITING | SINK_PROCESSING) {
-		// 	bro.state.Set(SINK_PROCESSING)
-		// }
+		if !bro.state.ContainsAny(SINK_FLUSHING | SINK_WAITING | SINK_PROCESSING) {
+			bro.state.Set(SINK_PROCESSING)
+		}
 	case core.BEGIN_CLOSE:
 		bro.state.Set(SINK_CLOSING)
 	case core.END_CLOSE:
@@ -359,10 +363,13 @@ func (bro *BatchSinkOrchestrator) Notify(event core.SessionEvent) error {
 		// TODO: Anything?
 	case core.END_RECEIVE:
 		// TODO: Anything?  Source does the following with SOURCE.
-		// bro.state.Update(SINK_WAITING, SINK_PROCESSING)
+		bro.state.Update(SINK_WAITING, SINK_PROCESSING)
 	case core.BEGIN_FLUSH:
 		bro.state.Update(SINK_PROCESSING, SINK_FLUSHING)
 	case core.END_FLUSH:
+		// WAITING should only happen if we are the requester.
+		// if requester, update flushing/sending to waiting.
+		// else unset flushing/sending.
 		bro.state.Update(SINK_FLUSHING|SINK_SENDING, SINK_WAITING)
 	case core.BEGIN_SEND:
 		// bro.state.Set(SINK_SENDING)
@@ -401,23 +408,27 @@ func (bro *BatchSinkOrchestrator) IsClosed() bool {
 	return bro.state.ContainsAny(SINK_CLOSED | CANCELLED)
 }
 
-func (bro *BatchSinkOrchestrator) IsSafeStateToClose() bool {
+func (bro *BatchSinkOrchestrator) IsSafeStateToClose(requester bool) bool {
 	// TODO: If we're the requester, than should include SINK_WAITING.
-	return !bro.state.ContainsAny(SINK_ENQUEUEING | SINK_SENDING | SINK_FLUSHING | SINK_WAITING)
+	if requester {
+		return !bro.state.ContainsAny(SINK_ENQUEUEING | SINK_SENDING | SINK_FLUSHING | SINK_WAITING)
+	} else {
+		return !bro.state.ContainsAny(SINK_ENQUEUEING | SINK_SENDING | SINK_FLUSHING)
+	}
 }
 
 // TODO: Naming is confusing.  This has BatchStatusReceiver in its name, but it doesn't implement HandleList and therefore isn't a BatchStatusReceiver.
 // It is batch only in that it uses the orchestrator with BatchState to notify.
 type SimpleBatchStatusReceiver[I core.BlockId] struct {
-	session      core.StatusReceiver[I]
-	orchestrator core.Orchestrator[BatchState]
+	statusReceiver core.StatusReceiver[I]
+	orchestrator   core.Orchestrator[BatchState]
 }
 
 // NewSimpleBatchStatusReceiver creates a new SimpleBatchStatusReceiver.
-func NewSimpleBatchStatusReceiver[I core.BlockId](session core.StatusReceiver[I], orchestrator core.Orchestrator[BatchState]) *SimpleBatchStatusReceiver[I] {
+func NewSimpleBatchStatusReceiver[I core.BlockId](statusReceiver core.StatusReceiver[I], orchestrator core.Orchestrator[BatchState]) *SimpleBatchStatusReceiver[I] {
 	return &SimpleBatchStatusReceiver[I]{
-		session:      session,
-		orchestrator: orchestrator,
+		statusReceiver: statusReceiver,
+		orchestrator:   orchestrator,
 	}
 }
 
@@ -425,10 +436,9 @@ func NewSimpleBatchStatusReceiver[I core.BlockId](session core.StatusReceiver[I]
 func (sbbr *SimpleBatchStatusReceiver[I]) HandleStatus(have filter.Filter[I], want []I) error {
 	sbbr.orchestrator.Notify(core.BEGIN_BATCH)
 	defer sbbr.orchestrator.Notify(core.END_BATCH)
-	// TODO: handle errors.  Can't yet because HandleStatus doesn't return an error.
-	sbbr.session.HandleStatus(have, want)
 
-	// Should we notify below HandleStatus?  Is above okay?
+	// TODO: handle errors.  Can't yet because HandleStatus doesn't return an error.
+	sbbr.statusReceiver.HandleStatus(have, want)
 
 	return nil
 }

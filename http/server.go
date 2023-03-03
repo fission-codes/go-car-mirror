@@ -13,7 +13,6 @@ import (
 	"github.com/fission-codes/go-car-mirror/core"
 	"github.com/fission-codes/go-car-mirror/core/instrumented"
 	"github.com/fission-codes/go-car-mirror/messages"
-	"github.com/fission-codes/go-car-mirror/stats"
 )
 
 type Server[I core.BlockId, R core.BlockIdRef[I]] struct {
@@ -21,8 +20,8 @@ type Server[I core.BlockId, R core.BlockIdRef[I]] struct {
 	maxBatchSize    uint32
 	http            *http.Server
 	instrumented    instrumented.InstrumentationOptions
-	sinkResponder   *batch.SinkResponder[I]
-	sourceResponder *batch.SourceResponder[I]
+	sinkResponder   *batch.SinkResponder[I, R]
+	sourceResponder *batch.SourceResponder[I, R]
 }
 
 // TODO: change config to something more flexible, so it can work for responder and this server.
@@ -35,17 +34,10 @@ func NewServer[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], s
 		nil,
 		responderConfig.Instrument,
 		// TODO: Set the batchStatusSender
-		batch.NewSinkResponder[I](store, responderConfig, nil),
+		batch.NewSinkResponder[I, R](store, responderConfig, nil),
 		// TODO: Set the batchBlockSender
-		batch.NewSourceResponder[I](store, responderConfig, nil, responderConfig.MaxBatchSize),
+		batch.NewSourceResponder[I, R](store, responderConfig, nil, responderConfig.MaxBatchSize),
 	}
-
-	sinkConn := NewHttpServerSinkConnection[I, R](stats.GLOBAL_STATS, responderConfig.Instrument)
-	server.sinkResponder.SetStatusSender(sinkConn.DeferredSender())
-
-	// sourceConn := NewHttpServerSourceConnection[I, R](stats.GLOBAL_STATS, responderConfig.Instrument)
-	// blockSender := sourceConn.DeferredSender(responderConfig.MaxBatchSize)
-	// server.sourceResponder.SetBatchBlockSender()
 
 	mux := http.NewServeMux()
 
@@ -66,42 +58,6 @@ func NewServer[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], s
 		WriteTimeout:   10 * time.Second,
 		MaxHeaderBytes: 1 << 20,
 	}
-
-	// TODO
-	// Call server.sinkResponder.SetStatusSender(...)
-	// Call server.sourceResponder.SetBatchBlockSender(...)
-	// Also make sure we can receive from the other side, whatever we pass into those.
-	// This is taking the place of DeferredSender and PendingResponse.
-
-	// For send we did:
-	// senderSession := sourceConnection.Session(
-	// 	senderStore,
-	// 	filter.NewSynchronizedFilter(batch.NewBloomAllocator[mock.BlockId](&config)()),
-	// 	true, // Requester
-	// )
-	// blockSender := sourceConnection.Sender(&blockChannel, uint32(maxBatchSize))
-	// sinkResponder.SetStatusSender(&statusChannel)
-	// statusChannel.SetReceiverFunc(func() *batch.SimpleBatchStatusReceiver[mock.BlockId] {
-	//   return sourceConnection.Receiver(senderSession)
-	// })
-
-	// For receive we did:
-	// receiverSession := sinkConnection.Session(
-	// 	NewSynchronizedBlockStore[mock.BlockId](NewSynchronizedBlockStore[mock.BlockId](sinkStore)),
-	// 	NewSimpleStatusAccumulator(batch.NewBloomAllocator[mock.BlockId](&config)()),
-	// 	true, // Requester
-	// )
-	// statusSender := sinkConnection.Sender(&statusChannel)
-
-	// sourceResponder.SetBatchBlockSender(&blockChannel)
-
-	// blockChannel.SetReceiverFunc(func() batch.BatchBlockReceiver[mock.BlockId] {
-	// 	return sinkConnection.Receiver(receiverSession)
-	// })
-
-	// statusChannel.SetReceiverFunc(func() *batch.SimpleBatchStatusReceiver[mock.BlockId] {
-	// 	return sourceResponder.Receiver(SESSION_ID)
-	// })
 
 	return server
 }
@@ -183,14 +139,13 @@ func (srv *Server[I, R]) HandleStatus(response http.ResponseWriter, request *htt
 	// Wait for a response from the session
 	log.Debugw("waiting on session", "object", "Server", "method", "HandleStatus", "session", sessionId)
 	// TODO: In the past this call hung due to reading from a channel with no sender.
-	// blocks := srv.sourceResponder.SourceConnection(sessionId).PendingResponse()
-
+	blocks := srv.sourceResponder.SourceConnection(sessionId).PendingResponse()
 	// blocks := sourceSession.conn.PendingResponse()
-	// log.Debugw("session returned blocks", "object", "Server", "method", "HandleStatus", "len", len(blocks.Car.Blocks))
+	log.Debugw("session returned blocks", "object", "Server", "method", "HandleStatus", "len", len(blocks.Car.Blocks))
 
 	// Write the response
 	response.WriteHeader(http.StatusAccepted)
-	// err = blocks.Write(response)
+	err = blocks.Write(response)
 
 	if err != nil {
 		log.Errorf("unexpected error writing response", "object", "Server", "method", "HandleStatus", "error", err)
@@ -247,24 +202,24 @@ func (srv *Server[I, R]) HandleBlocks(response http.ResponseWriter, request *htt
 
 	// Wait for a response from the session
 	log.Debugw("waiting on session", "object", "Server", "method", "HandleBlocks", "session", sessionId)
-	// status := srv.sinkResponder.SinkConnection(sessionId).PendingResponse()
-	// log.Debugw("session returned status", "object", "Server", "method", "HandleBlocks", "status", status)
+	status := srv.sinkResponder.SinkConnection(sessionId).PendingResponse()
+	log.Debugw("session returned status", "object", "Server", "method", "HandleBlocks", "status", status)
 
 	// Write the response
 	response.WriteHeader(http.StatusAccepted)
-	// err = status.Write(response)
+	err = status.Write(response)
 	if err != nil {
 		log.Errorf("unexpected error writing response", "object", "Server", "method", "HandleBlocks", "error", err)
 	}
 	log.Debugw("exit", "object", "Server", "method", "HandleBlocks")
 }
 
-func (srv *Server[I, R]) SourceSessions() []core.SourceSession[I, batch.BatchState] {
-	return nil
+func (srv *Server[I, R]) SourceSessions() []batch.SessionId {
+	return srv.sourceResponder.SourceSessionIds()
 }
 
-func (srv *Server[I, R]) SinkSessions() []core.SinkSession[I, batch.BatchState] {
-	return nil
+func (srv *Server[I, R]) SinkSessions() []batch.SessionId {
+	return srv.sinkResponder.SinkSessionIds()
 }
 
 func (srv *Server[I, R]) SinkInfo(token batch.SessionId) (*core.SinkSessionInfo[batch.BatchState], error) {

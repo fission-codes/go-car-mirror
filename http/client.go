@@ -62,11 +62,6 @@ func (c *Client[I, R]) startSourceSession(url string) *core.SourceSession[I, bat
 		log.Debugw("starting source session", "object", "Client", "method", "startSourceSession", "url", url)
 		newSession.Run(newSender)
 
-		// Close the sender
-		// if err := newSender.Close(); err != nil {
-		// 	log.Errorw("error closing sender", "object", "Client", "method", "startSourceSession", "url", url, "error", err)
-		// }
-
 		// TODO: potential race condition if Run() completes before the
 		// session is added to the list of sink sessions (which happens
 		// when startSourceSession returns)
@@ -119,11 +114,6 @@ func (c *Client[I, R]) startSinkSession(url string) *core.SinkSession[I, batch.B
 	go func() {
 		log.Debugw("starting sink session", "object", "Client", "method", "startSinkSession", "url", url)
 		newSession.Run(sender)
-
-		// TODO: close sender?
-		// if err := sender.Close(); err != nil {
-		// 	log.Errorw("error closing sender", "object", "Client", "method", "startSinkSession", "url", url, "error", err)
-		// }
 
 		// TODO: potential race condition if Run() completes before the
 		// session is added to the list of sink sessions (which happens

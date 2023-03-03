@@ -116,17 +116,14 @@ func TestBlocksMessageReadWrite(t *testing.T) {
 	buf := bytes.Buffer{}
 	blocks := make([]core.RawBlock[mock.BlockId], 1)
 	blocks[0] = mock.RandMockBlock()
-	message := NewBlocksMessage(uint(23), blocks)
+	message := NewBlocksMessage(blocks)
 
 	if err := message.Write(&buf); err != nil {
 		t.Errorf("Error writing archive, %v", err)
 	}
-	message2 := BlocksMessage[mock.BlockId, *mock.BlockId, uint]{}
+	message2 := BlocksMessage[mock.BlockId, *mock.BlockId]{}
 	if err := message2.Read(&buf); err != io.EOF {
 		t.Errorf("Error reading archive, %v", err)
-	}
-	if message.State != message2.State {
-		t.Errorf("State is not same, %v != %v", message.State, message2.State)
 	}
 	if !reflect.DeepEqual(message.Car.Header, message.Car.Header) {
 		t.Errorf("Archive Headers are no longer equal after transport")
@@ -144,17 +141,14 @@ func TestStatusMessageReadWrite(t *testing.T) {
 		t.Errorf("Error creating bloom filter, %v", err)
 	}
 
-	message := NewStatusMessage[mock.BlockId](uint(23), have, want)
+	message := NewStatusMessage[mock.BlockId](have, want)
 
 	if err := message.Write(&buf); err != nil {
 		t.Errorf("Error writing status, %v", err)
 	}
-	message2 := StatusMessage[mock.BlockId, *mock.BlockId, uint]{}
+	message2 := StatusMessage[mock.BlockId, *mock.BlockId]{}
 	if err := message2.Read(&buf); err != nil {
 		t.Errorf("Error reading filter, %v", err)
-	}
-	if message.State != message2.State {
-		t.Errorf("State is not same, %v != %v", message.State, message2.State)
 	}
 	if !message.Have.Any().Equal(message2.Have.Any()) {
 		t.Errorf("have lists no longer equal after transport")
