@@ -263,6 +263,10 @@ func (bso *BatchSourceOrchestrator) Notify(event core.SessionEvent) error {
 			bso.log.Errorf("core.Orchestrator waiting for SOURCE_PROCESSING when CANCELLED seen")
 			return errors.ErrStateError
 		}
+	case core.END_PROCESSING:
+		// Does nothing
+	case core.BEGIN_RECEIVE:
+		// Does nothing
 	case core.END_RECEIVE:
 		// TODO: Maybe unset waiting and wait for end batch to set processing?
 		// bso.state.Update(SOURCE_WAITING, SOURCE_PROCESSING)
@@ -270,6 +274,10 @@ func (bso *BatchSourceOrchestrator) Notify(event core.SessionEvent) error {
 		bso.state.Update(SOURCE_PROCESSING, SOURCE_FLUSHING)
 	case core.END_FLUSH:
 		bso.state.Update(SOURCE_FLUSHING|SOURCE_SENDING, SOURCE_WAITING)
+	case core.BEGIN_SEND:
+		bso.state.Set(SOURCE_SENDING)
+	case core.END_SEND:
+		// Does nothing
 	case core.BEGIN_DRAINING:
 		// If we are draining (the queue is empty) and we have no pending blocks to send, we can close
 		if bso.state.ContainsExact(SOURCE_CLOSING|SOURCE_SENDING, SOURCE_CLOSING) {
@@ -281,8 +289,6 @@ func (bso *BatchSourceOrchestrator) Notify(event core.SessionEvent) error {
 		}
 	case core.CANCEL:
 		bso.state.Update(SOURCE, CANCELLED)
-	case core.BEGIN_SEND:
-		bso.state.Set(SOURCE_SENDING)
 	}
 
 	return nil
@@ -347,6 +353,11 @@ func (bro *BatchSinkOrchestrator) Notify(event core.SessionEvent) error {
 		bro.state.Set(SINK_CLOSING)
 	case core.END_CLOSE:
 		// TODO: Anything?
+	case core.BEGIN_BATCH:
+		// bro.state.Set(SINK_PROCESSING)
+	case core.END_BATCH:
+		// Does nothing
+		bro.state.Update(SINK_WAITING, SINK_PROCESSING)
 	case core.BEGIN_PROCESSING:
 		// This lets us either proceed or eject at the beginning of every loop iteration.
 		// If we add complete session termination check at the top, does this buy us anything?
@@ -386,11 +397,6 @@ func (bro *BatchSinkOrchestrator) Notify(event core.SessionEvent) error {
 		if bro.state.ContainsExact(SINK_CLOSING|SINK_SENDING, SINK_CLOSING) {
 			bro.state.Set(SINK_CLOSED)
 		}
-	case core.BEGIN_BATCH:
-		// bro.state.Set(SINK_PROCESSING)
-	case core.END_BATCH:
-		// Does nothing
-		bro.state.Update(SINK_WAITING, SINK_PROCESSING)
 	case core.CANCEL:
 		bro.state.Update(SINK, CANCELLED)
 	}
