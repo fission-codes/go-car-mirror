@@ -175,7 +175,7 @@ type HttpServerSourceConnection[I core.BlockId, R core.BlockIdRef[I]] struct {
 
 func NewHttpServerSourceConnection[I core.BlockId, R core.BlockIdRef[I]](stats stats.Stats, instrument instrumented.InstrumentationOptions) *HttpServerSourceConnection[I, R] {
 	return &HttpServerSourceConnection[I, R]{
-		(*batch.GenericBatchSourceConnection[I, R])(batch.NewGenericBatchSourceConnection[I, R](stats, instrument)),
+		(*batch.GenericBatchSourceConnection[I, R])(batch.NewGenericBatchSourceConnection[I, R](stats, instrument, false)), // Responder
 		make(chan *messages.BlocksMessage[I, R]),
 	}
 }
@@ -199,7 +199,7 @@ type HttpServerSinkConnection[I core.BlockId, R core.BlockIdRef[I]] struct {
 
 func NewHttpServerSinkConnection[I core.BlockId, R core.BlockIdRef[I]](stats stats.Stats, instrument instrumented.InstrumentationOptions) *HttpServerSinkConnection[I, R] {
 	return &HttpServerSinkConnection[I, R]{
-		(*batch.GenericBatchSinkConnection[I, R])(batch.NewGenericBatchSinkConnection[I, R](stats, instrument)),
+		(*batch.GenericBatchSinkConnection[I, R])(batch.NewGenericBatchSinkConnection[I, R](stats, instrument, false)), // Responder
 		make(chan *messages.StatusMessage[I, R]),
 	}
 }
@@ -220,7 +220,7 @@ type HttpClientSourceConnection[I core.BlockId, R core.BlockIdRef[I]] struct {
 
 func NewHttpClientSourceConnection[I core.BlockId, R core.BlockIdRef[I]](client *http.Client, url string, stats stats.Stats, instrument instrumented.InstrumentationOptions) *HttpClientSourceConnection[I, R] {
 	return &HttpClientSourceConnection[I, R]{
-		batch.NewGenericBatchSourceConnection[I, R](stats, instrument),
+		batch.NewGenericBatchSourceConnection[I, R](stats, instrument, true), // Client is requester
 		client,
 		url,
 	}
@@ -238,7 +238,7 @@ type HttpClientSinkConnection[I core.BlockId, R core.BlockIdRef[I]] struct {
 
 func NewHttpClientSinkConnection[I core.BlockId, R core.BlockIdRef[I]](client *http.Client, url string, stats stats.Stats, instrument instrumented.InstrumentationOptions) *HttpClientSinkConnection[I, R] {
 	return &HttpClientSinkConnection[I, R]{
-		batch.NewGenericBatchSinkConnection[I, R](stats, instrument),
+		batch.NewGenericBatchSinkConnection[I, R](stats, instrument, true), // Client is requester
 		client,
 		url,
 	}

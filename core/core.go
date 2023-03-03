@@ -305,11 +305,14 @@ type Orchestrator[F Flags] interface {
 	// IsClosed returns true if the orchestrator is closed.
 	IsClosed() bool
 
+	// IsRequester returns true if the Orchestrator is the requester.
+	IsRequester() bool
+
 	// IsSafeStateToClose returns true if the state of the Orchestrator indicates that the session should close.
 	// Other factors may need to be taken into account as well to determine if close should happen, but this
 	// tells us if the states indicate a close is safe.
 	// TODO: Maybe rename to IsSafeToClose or IsSafeCloseState?
-	IsSafeStateToClose(requester bool) bool
+	IsSafeStateToClose() bool
 }
 
 // SinkSession is a session that receives blocks and sends out status updates. Two type parameters
@@ -463,7 +466,7 @@ func (ss *SinkSession[I, F]) Run(
 	defer ss.orchestrator.Notify(END_SESSION)
 
 	for !ss.orchestrator.IsClosed() {
-		if ss.pendingBlocks.Len() == 0 && ss.statusAccumulator.WantCount() == 0 && ss.orchestrator.IsSafeStateToClose(ss.requester) {
+		if ss.pendingBlocks.Len() == 0 && ss.statusAccumulator.WantCount() == 0 && ss.orchestrator.IsSafeStateToClose() {
 			if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
 				ss.doneCh <- err
 				return
@@ -486,15 +489,29 @@ func (ss *SinkSession[I, F]) Run(
 			// Per docs, SINK_SENDING means we might have status pending flush.
 			// That could be true regardless of if there are pending blocks though, right?
 			// Feels like confusing naming.
-			if err := ss.orchestrator.Notify(BEGIN_SEND); err != nil {
-				ss.doneCh <- err
-				return
-			}
+			// if err := ss.orchestrator.Notify(BEGIN_SEND); err != nil {
+			// 	ss.doneCh <- err
+			// 	return
+			// }
 
 			block := ss.pendingBlocks.PollFront()
 
 			for _, child := range block.Children() {
 				if err := ss.AccumulateStatus(child); err != nil {
+					ss.doneCh <- err
+					return
+				}
+			}
+
+			// Here is where we know if we should notify send.
+			// If responder, notify send, since we always want to flush status.
+			// If requester, only notify send if we have wants.
+			if ss.statusAccumulator.WantCount() > 0 || !ss.requester {
+				if err := ss.orchestrator.Notify(BEGIN_SEND); err != nil {
+					ss.doneCh <- err
+					return
+				}
+				if err := ss.orchestrator.Notify(END_SEND); err != nil {
 					ss.doneCh <- err
 					return
 				}
@@ -661,7 +678,7 @@ func (ss *SourceSession[I, F]) Run(
 		// Note that this check means you must enqueue before running a session.
 		// TODO: Is there any need to mutex this so we get it for both variables simultaneously?
 		log.Debugw("SourceSession.Run() checking for pending blocks", "pendingBlocks", ss.pendingBlocks.Len(), "blockSender", blockSender.Len())
-		if ss.pendingBlocks.Len() == 0 && blockSender.Len() == 0 && ss.orchestrator.IsSafeStateToClose(ss.requester) {
+		if ss.pendingBlocks.Len() == 0 && blockSender.Len() == 0 && ss.orchestrator.IsSafeStateToClose() {
 			if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
 				ss.doneCh <- err
 				return
@@ -691,14 +708,22 @@ func (ss *SourceSession[I, F]) Run(
 					}
 					// TODO: How do we notify that the request block was not found?
 				} else {
-					if err := ss.orchestrator.Notify(BEGIN_SEND); err != nil {
-						ss.doneCh <- err
-						return
-					}
 					if err := blockSender.SendBlock(block); err != nil {
 						// TODO: If error here, maybe we should remove it from ss.sent.
 						ss.doneCh <- err
 						return
+					}
+					// If we're the requester, we only flush if there's something to send.
+					if blockSender.Len() > 0 || !ss.requester {
+						if err := ss.orchestrator.Notify(BEGIN_SEND); err != nil {
+							ss.doneCh <- err
+							return
+
+						}
+						if err := ss.orchestrator.Notify(END_SEND); err != nil {
+							ss.doneCh <- err
+							return
+						}
 					}
 					for _, child := range block.Children() {
 						if ss.filter.DoesNotContain(child) {
@@ -708,10 +733,6 @@ func (ss *SourceSession[I, F]) Run(
 							}
 						}
 					}
-					if err := ss.orchestrator.Notify(END_SEND); err != nil {
-						ss.doneCh <- err
-						return
-					}
 				}
 			}
 		} else {
@@ -719,6 +740,9 @@ func (ss *SourceSession[I, F]) Run(
 				ss.doneCh <- err
 				return
 			}
+			// Flush uses SENDING state to determine if it should notify flush.
+			// That's why we don't need a nother test here.
+			// Maybe do similar for sink.
 			if err := blockSender.Flush(); err != nil {
 				ss.doneCh <- err
 				return

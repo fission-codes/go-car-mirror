@@ -15,8 +15,8 @@ type GenericBatchSourceConnection[I core.BlockId, R core.BlockIdRef[I]] struct {
 	messages   chan *messages.BlocksMessage[I, R]
 }
 
-func NewGenericBatchSourceConnection[I core.BlockId, R core.BlockIdRef[I]](stats stats.Stats, instrument instrumented.InstrumentationOptions) *GenericBatchSourceConnection[I, R] {
-	var orchestrator core.Orchestrator[BatchState] = NewBatchSourceOrchestrator()
+func NewGenericBatchSourceConnection[I core.BlockId, R core.BlockIdRef[I]](stats stats.Stats, instrument instrumented.InstrumentationOptions, requester bool) *GenericBatchSourceConnection[I, R] {
+	var orchestrator core.Orchestrator[BatchState] = NewBatchSourceOrchestrator(requester)
 
 	if instrument&instrumented.INSTRUMENT_ORCHESTRATOR != 0 {
 		orchestrator = instrumented.NewOrchestrator(orchestrator, stats.WithContext("SourceOrchestrator"))
@@ -28,6 +28,11 @@ func NewGenericBatchSourceConnection[I core.BlockId, R core.BlockIdRef[I]](stats
 		stats,
 		make(chan *messages.BlocksMessage[I, R]),
 	}
+}
+
+// IsRequester returns true if the connection is a requester.
+func (conn *GenericBatchSourceConnection[I, R]) IsRequester() bool {
+	return conn.Orchestrator.IsRequester()
 }
 
 func (conn *GenericBatchSourceConnection[I, R]) Receiver(session *core.SourceSession[I, BatchState]) *SimpleBatchStatusReceiver[I] {
@@ -65,9 +70,9 @@ type GenericBatchSinkConnection[I core.BlockId, R core.BlockIdRef[I]] struct {
 	messages   chan *messages.StatusMessage[I, R]
 }
 
-func NewGenericBatchSinkConnection[I core.BlockId, R core.BlockIdRef[I]](stats stats.Stats, instrument instrumented.InstrumentationOptions) *GenericBatchSinkConnection[I, R] {
+func NewGenericBatchSinkConnection[I core.BlockId, R core.BlockIdRef[I]](stats stats.Stats, instrument instrumented.InstrumentationOptions, requester bool) *GenericBatchSinkConnection[I, R] {
 
-	var orchestrator core.Orchestrator[BatchState] = NewBatchSinkOrchestrator()
+	var orchestrator core.Orchestrator[BatchState] = NewBatchSinkOrchestrator(requester)
 
 	if instrument&instrumented.INSTRUMENT_ORCHESTRATOR != 0 {
 		orchestrator = instrumented.NewOrchestrator(orchestrator, stats.WithContext("SinkOrchestrator"))

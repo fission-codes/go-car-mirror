@@ -37,7 +37,7 @@ func NewSinkResponder[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStor
 }
 
 func (sr *SinkResponder[I, R]) newSinkConnection() *GenericBatchSinkConnection[I, R] {
-	return NewGenericBatchSinkConnection[I, R](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE)
+	return NewGenericBatchSinkConnection[I, R](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE, false) // Responders aren't requesters
 }
 
 func (sr *SinkResponder[I, R]) SinkSessionData(sessionId SessionId) *SinkSessionData[I, R] {
@@ -175,7 +175,7 @@ func NewSourceResponder[I core.BlockId, R core.BlockIdRef[I]](store core.BlockSt
 }
 
 func (sr *SourceResponder[I, R]) newSourceConnection() *GenericBatchSourceConnection[I, R] {
-	return NewGenericBatchSourceConnection[I, R](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE)
+	return NewGenericBatchSourceConnection[I, R](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE, false) // Responders aren't requesters
 }
 
 func (sr *SourceResponder[I, R]) SourceSessionData(sessionId SessionId) *SourceSessionData[I, R] {

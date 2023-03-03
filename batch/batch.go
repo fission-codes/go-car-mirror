@@ -21,21 +21,25 @@ type BatchState uint32
 const (
 	SINK_CLOSING BatchState = 1 << iota
 	SINK_CLOSED
-	SINK_PROCESSING   // Sink is processing a batch of blocks
-	SINK_FLUSHING     // Sink is in the process of sending a status message
-	SINK_WAITING      // Sink is waiting for a batch of blocks
-	SINK_ENQUEUEING   // Sink is processing a block id that has been explicitly requested
-	SINK_SENDING      // Sink may have status pending flush
+	SINK_PROCESSING // Sink is processing a batch of blocks
+	SINK_FLUSHING   // Sink is in the process of sending a status message
+	SINK_WAITING    // Sink is waiting for a batch of blocks
+	SINK_ENQUEUEING // Sink is processing a block id that has been explicitly requested
+	SINK_SENDING    // Sink may have status pending flush
+	SINK_RECEIVING  // Sink is receiving blocks
+	SINK_HANDLING_BATCH
 	SOURCE_PROCESSING // Source is processing a batch of blocks.  Technically it's also being used to signal that we're *ready* to process, such that BEGIN_PROCESSING will let processing happen.
 	SOURCE_FLUSHING   // Source is flushing blocks
 	SOURCE_WAITING    // Source is waiting for a status message
 	SOURCE_ENQUEUEING // Source is processing a block id that has been explicitly requested
 	SOURCE_SENDING    // Source has unflushed blocks
+	SOURCE_RECEIVING  // Source is receiving blocks
+	SOURCE_HANDLING_BATCH
 	SOURCE_CLOSING
 	SOURCE_CLOSED
 	CANCELLED
-	SINK   = SINK_CLOSING | CANCELLED | SINK_PROCESSING | SINK_FLUSHING | SINK_WAITING | SINK_CLOSED | SINK_SENDING | SINK_ENQUEUEING
-	SOURCE = SOURCE_CLOSING | CANCELLED | SOURCE_PROCESSING | SOURCE_FLUSHING | SOURCE_WAITING | SOURCE_CLOSED | SOURCE_SENDING | SOURCE_ENQUEUEING
+	SINK   = SINK_CLOSING | CANCELLED | SINK_PROCESSING | SINK_FLUSHING | SINK_WAITING | SINK_CLOSED | SINK_SENDING | SINK_ENQUEUEING | SINK_RECEIVING | SINK_HANDLING_BATCH
+	SOURCE = SOURCE_CLOSING | CANCELLED | SOURCE_PROCESSING | SOURCE_FLUSHING | SOURCE_WAITING | SOURCE_CLOSED | SOURCE_SENDING | SOURCE_ENQUEUEING | SOURCE_RECEIVING | SOURCE_HANDLING_BATCH
 )
 
 // Strings returns a slice of strings describing the given BatchState.
@@ -182,10 +186,7 @@ func (sbbs *SimpleBatchBlockSender[I]) Close() error {
 func (sbbs *SimpleBatchBlockSender[I]) Flush() error {
 
 	batchState := sbbs.orchestrator.State()
-	// Only actually send a list if we have data OR we are closed, so we would like to communicate this state to the sink
-	// TODO: If we're closed we shouldn't be sending anything, right?
-	// TODO: Do we need this check here?  Are we already handling it before calling this?
-	if batchState&(SOURCE_SENDING|SOURCE_CLOSED) != 0 {
+	if batchState&(SOURCE_SENDING) != 0 {
 		sbbs.listMutex.Lock()
 		defer sbbs.listMutex.Unlock()
 
@@ -219,16 +220,23 @@ func (sbbs *SimpleBatchBlockSender[I]) Len() int {
 
 // BatchSourceOrchestrator is an orchestrator for sending batches of blocks.
 type BatchSourceOrchestrator struct {
-	state util.SharedFlagSet[BatchState]
-	log   *zap.SugaredLogger
+	state     util.SharedFlagSet[BatchState]
+	log       *zap.SugaredLogger
+	requester bool
 }
 
 // NewBatchSourceOrchestrator creates a new BatchSourceOrchestrator.
-func NewBatchSourceOrchestrator() *BatchSourceOrchestrator {
+func NewBatchSourceOrchestrator(requester bool) *BatchSourceOrchestrator {
 	return &BatchSourceOrchestrator{
-		state: *util.NewSharedFlagSet(BatchState(0)),
-		log:   log.With("component", "BatchSourceOrchestrator"),
+		state:     *util.NewSharedFlagSet(BatchState(0)),
+		log:       log.With("component", "BatchSourceOrchestrator"),
+		requester: requester,
 	}
+}
+
+// IsRequester returns true if this is a requester.
+func (bso *BatchSourceOrchestrator) IsRequester() bool {
+	return bso.requester
 }
 
 // Notify notifies the orchestrator of a session event, updating the state as appropriate.
@@ -251,14 +259,14 @@ func (bso *BatchSourceOrchestrator) Notify(event core.SessionEvent) error {
 	case core.END_CLOSE:
 		// Nothing
 	case core.BEGIN_BATCH:
-		// Does nothing
+		bso.state.Set(SOURCE_HANDLING_BATCH)
 	case core.END_BATCH:
-		// Does nothing
-		// bso.state.Set(SOURCE_PROCESSING)
+		bso.state.Unset(SOURCE_HANDLING_BATCH)
 		bso.state.Update(SOURCE_WAITING, SOURCE_PROCESSING)
+		// Time to unset RECEIVING?
 	case core.BEGIN_PROCESSING:
 		// TODO: I think it's possible SOURCE_CLOSED and SOURCE_CLOSING should be removed.  Check.
-		state := bso.state.WaitAny(SOURCE_PROCESSING|CANCELLED|SOURCE_CLOSED|SOURCE_CLOSING|SOURCE_WAITING, 0)
+		state := bso.state.WaitAny(SOURCE_PROCESSING|CANCELLED|SOURCE_CLOSED|SOURCE_CLOSING, 0)
 		if state&CANCELLED != 0 {
 			bso.log.Errorf("core.Orchestrator waiting for SOURCE_PROCESSING when CANCELLED seen")
 			return errors.ErrStateError
@@ -267,13 +275,20 @@ func (bso *BatchSourceOrchestrator) Notify(event core.SessionEvent) error {
 		// Does nothing
 	case core.BEGIN_RECEIVE:
 		// Does nothing
+		// bso.state.Set(SOURCE_RECEIVING)
 	case core.END_RECEIVE:
 		// TODO: Maybe unset waiting and wait for end batch to set processing?
 		// bso.state.Update(SOURCE_WAITING, SOURCE_PROCESSING)
 	case core.BEGIN_FLUSH:
 		bso.state.Update(SOURCE_PROCESSING, SOURCE_FLUSHING)
 	case core.END_FLUSH:
-		bso.state.Update(SOURCE_FLUSHING|SOURCE_SENDING, SOURCE_WAITING)
+		// bso.state.Update(SOURCE_FLUSHING|SOURCE_SENDING, SOURCE_WAITING)
+		if bso.requester {
+			bso.state.Update(SOURCE_FLUSHING|SOURCE_SENDING, SOURCE_WAITING)
+		} else {
+			bso.state.Update(SOURCE_FLUSHING|SOURCE_SENDING, SOURCE_PROCESSING)
+			// bso.state.Unset(SOURCE_FLUSHING | SOURCE_SENDING)
+		}
 	case core.BEGIN_SEND:
 		bso.state.Set(SOURCE_SENDING)
 	case core.END_SEND:
@@ -304,27 +319,34 @@ func (bso *BatchSourceOrchestrator) IsClosed() bool {
 	return bso.state.ContainsAny(SOURCE_CLOSED | CANCELLED)
 }
 
-func (bso *BatchSourceOrchestrator) IsSafeStateToClose(requester bool) bool {
+func (bso *BatchSourceOrchestrator) IsSafeStateToClose() bool {
 	// TODO: If we are the requester, this should include SOURCE_WAITING, but we set WAITING even on responder.  Should only set WAITING on requester.
-	if requester {
-		return !bso.state.ContainsAny(SOURCE_ENQUEUEING | SOURCE_SENDING | SOURCE_FLUSHING | SOURCE_WAITING)
+	if bso.requester {
+		return !bso.state.ContainsAny(SOURCE_ENQUEUEING | SOURCE_SENDING | SOURCE_FLUSHING | SOURCE_HANDLING_BATCH | SOURCE_WAITING)
 	} else {
-		return !bso.state.ContainsAny(SOURCE_ENQUEUEING | SOURCE_SENDING | SOURCE_FLUSHING)
+		return !bso.state.ContainsAny(SOURCE_ENQUEUEING | SOURCE_SENDING | SOURCE_FLUSHING | SOURCE_HANDLING_BATCH)
 	}
 }
 
 // BatchSinkOrchestrator is an orchestrator for receiving batches of blocks.
 type BatchSinkOrchestrator struct {
-	state util.SharedFlagSet[BatchState]
-	log   *zap.SugaredLogger
+	state     util.SharedFlagSet[BatchState]
+	log       *zap.SugaredLogger
+	requester bool
 }
 
 // NewBatchSinkOrchestrator creates a new BatchSinkOrchestrator.
-func NewBatchSinkOrchestrator() *BatchSinkOrchestrator {
+func NewBatchSinkOrchestrator(requester bool) *BatchSinkOrchestrator {
 	return &BatchSinkOrchestrator{
-		state: *util.NewSharedFlagSet(BatchState(0)),
-		log:   log.With("component", "BatchSinkOrchestrator"),
+		state:     *util.NewSharedFlagSet(BatchState(0)),
+		log:       log.With("component", "BatchSinkOrchestrator"),
+		requester: requester,
 	}
+}
+
+// IsRequester returns true if this is a requester.
+func (bro *BatchSinkOrchestrator) IsRequester() bool {
+	return bro.requester
 }
 
 // Notify notifies the orchestrator of a session event, updating the state as appropriate.
@@ -354,9 +376,9 @@ func (bro *BatchSinkOrchestrator) Notify(event core.SessionEvent) error {
 	case core.END_CLOSE:
 		// TODO: Anything?
 	case core.BEGIN_BATCH:
-		// bro.state.Set(SINK_PROCESSING)
+		bro.state.Set(SINK_HANDLING_BATCH)
 	case core.END_BATCH:
-		// Does nothing
+		bro.state.Unset(SINK_HANDLING_BATCH)
 		bro.state.Update(SINK_WAITING, SINK_PROCESSING)
 	case core.BEGIN_PROCESSING:
 		// This lets us either proceed or eject at the beginning of every loop iteration.
@@ -381,9 +403,14 @@ func (bro *BatchSinkOrchestrator) Notify(event core.SessionEvent) error {
 		// WAITING should only happen if we are the requester.
 		// if requester, update flushing/sending to waiting.
 		// else unset flushing/sending.
-		bro.state.Update(SINK_FLUSHING|SINK_SENDING, SINK_WAITING)
+		if bro.requester {
+			bro.state.Update(SINK_FLUSHING|SINK_SENDING, SINK_WAITING)
+		} else {
+			bro.state.Update(SINK_FLUSHING|SINK_SENDING, SINK_PROCESSING)
+			// bro.state.Unset(SINK_FLUSHING | SINK_SENDING)
+		}
 	case core.BEGIN_SEND:
-		// bro.state.Set(SINK_SENDING)
+		bro.state.Set(SINK_SENDING)
 	case core.END_SEND:
 		// TODO: Anything?
 	case core.BEGIN_DRAINING:
@@ -414,12 +441,12 @@ func (bro *BatchSinkOrchestrator) IsClosed() bool {
 	return bro.state.ContainsAny(SINK_CLOSED | CANCELLED)
 }
 
-func (bro *BatchSinkOrchestrator) IsSafeStateToClose(requester bool) bool {
+func (bro *BatchSinkOrchestrator) IsSafeStateToClose() bool {
 	// TODO: If we're the requester, than should include SINK_WAITING.
-	if requester {
-		return !bro.state.ContainsAny(SINK_ENQUEUEING | SINK_SENDING | SINK_FLUSHING | SINK_WAITING)
+	if bro.requester {
+		return !bro.state.ContainsAny(SINK_ENQUEUEING | SINK_SENDING | SINK_FLUSHING | SINK_HANDLING_BATCH | SINK_WAITING)
 	} else {
-		return !bro.state.ContainsAny(SINK_ENQUEUEING | SINK_SENDING | SINK_FLUSHING)
+		return !bro.state.ContainsAny(SINK_ENQUEUEING | SINK_SENDING | SINK_FLUSHING | SINK_HANDLING_BATCH)
 	}
 }
 

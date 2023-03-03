@@ -25,6 +25,13 @@ func NewOrchestrator[F core.Flags](orchestrator core.Orchestrator[F], stats stat
 	}
 }
 
+// IsRequester calls the underlying orchestrator's IsRequester method and records stats.
+func (io *Orchestrator[F]) IsRequester() bool {
+	result := io.orchestrator.IsRequester()
+	io.stats.Logger().Debugw("exit", "method", "IsRequester", "result", result)
+	return result
+}
+
 // Notify calls the underlying orchestrator's Notify method and records stats.
 func (io *Orchestrator[F]) Notify(event core.SessionEvent) error {
 	io.stats.Logger().Debugw("enter", "method", "Notify", "event", event, "state", io.orchestrator.State())
@@ -48,8 +55,8 @@ func (io *Orchestrator[F]) IsClosed() bool {
 	return result
 }
 
-func (io *Orchestrator[F]) IsSafeStateToClose(requester bool) bool {
-	result := io.orchestrator.IsSafeStateToClose(requester)
+func (io *Orchestrator[F]) IsSafeStateToClose() bool {
+	result := io.orchestrator.IsSafeStateToClose()
 	io.stats.Logger().Debugw("exit", "method", "IsSafeStateToClose", "state", io.orchestrator.State(), "result", result)
 	return result
 }
