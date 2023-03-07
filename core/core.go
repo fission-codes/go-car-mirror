@@ -313,6 +313,9 @@ type Orchestrator[F Flags] interface {
 	// tells us if the states indicate a close is safe.
 	// TODO: Maybe rename to IsSafeToClose or IsSafeCloseState?
 	IsSafeStateToClose() bool
+
+	// ShouldFlush returns true if the state of the Orchestrator indicates that the session should flush.
+	ShouldFlush() bool
 }
 
 // SinkSession is a session that receives blocks and sends out status updates. Two type parameters
@@ -513,7 +516,7 @@ func (ss *SinkSession[I, F]) Run(
 				ss.doneCh <- err
 				return
 			}
-			if ss.statusAccumulator.WantCount() > 0 || !ss.requester {
+			if ss.orchestrator.ShouldFlush() && (!ss.requester || ss.statusAccumulator.WantCount() > 0) {
 				if err := ss.orchestrator.Notify(BEGIN_FLUSH); err != nil {
 					ss.doneCh <- err
 					return
@@ -706,7 +709,6 @@ func (ss *SourceSession[I, F]) Run(
 						if err := ss.orchestrator.Notify(BEGIN_SEND); err != nil {
 							ss.doneCh <- err
 							return
-
 						}
 						if err := ss.orchestrator.Notify(END_SEND); err != nil {
 							ss.doneCh <- err
@@ -728,12 +730,11 @@ func (ss *SourceSession[I, F]) Run(
 				ss.doneCh <- err
 				return
 			}
-			// Flush uses SENDING state to determine if it should notify flush.
-			// That's why we don't need a nother test here.
-			// Maybe do similar for sink.
-			if err := blockSender.Flush(); err != nil {
-				ss.doneCh <- err
-				return
+			if ss.orchestrator.ShouldFlush() && (!ss.requester || blockSender.Len() > 0) {
+				if err := blockSender.Flush(); err != nil {
+					ss.doneCh <- err
+					return
+				}
 			}
 			if err := ss.orchestrator.Notify(END_DRAINING); err != nil {
 				ss.doneCh <- err

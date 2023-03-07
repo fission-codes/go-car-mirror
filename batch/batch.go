@@ -271,7 +271,7 @@ func (bso *BatchSourceOrchestrator) Notify(event core.SessionEvent) error {
 	case core.BEGIN_BATCH:
 		bso.state.Set(SOURCE_HANDLING_BATCH)
 	case core.END_BATCH:
-		bso.state.Update(SOURCE_HANDLING_BATCH|SOURCE_WAITING, SOURCE_PROCESSING)
+		bso.state.Update(SOURCE_WAITING, SOURCE_PROCESSING)
 	case core.BEGIN_PROCESSING:
 		// TODO: I think it's possible SOURCE_CLOSED and SOURCE_CLOSING should be removed.  Check.
 		state := bso.state.WaitAny(SOURCE_PROCESSING|CANCELLED|SOURCE_CLOSED|SOURCE_CLOSING, 0)
@@ -310,6 +310,7 @@ func (bso *BatchSourceOrchestrator) Notify(event core.SessionEvent) error {
 			bso.state.Set(SOURCE_CLOSED)
 		}
 	case core.END_DRAINING:
+		bso.state.Unset(SOURCE_HANDLING_BATCH)
 		if bso.state.ContainsExact(SOURCE_CLOSING|SOURCE_SENDING, SOURCE_CLOSING) {
 			bso.state.Set(SOURCE_CLOSED)
 		}
@@ -337,6 +338,13 @@ func (bso *BatchSourceOrchestrator) IsSafeStateToClose() bool {
 	} else {
 		return !bso.state.ContainsAny(SOURCE_ENQUEUEING | SOURCE_SENDING | SOURCE_FLUSHING | SOURCE_HANDLING_BATCH)
 	}
+}
+
+// ShouldFlush returns true if either:
+//   - We are requester and we haven't already flushed and are therefore waiting for a response, OR
+//   - We are responder and have received a request and are handling it, meaning we haven't responded yet.
+func (bso *BatchSourceOrchestrator) ShouldFlush() bool {
+	return (bso.IsRequester() && !bso.state.ContainsAny(SOURCE_WAITING)) || bso.state.ContainsAny(SOURCE_HANDLING_BATCH)
 }
 
 // BatchSinkOrchestrator is an orchestrator for receiving batches of blocks.
@@ -384,7 +392,7 @@ func (bro *BatchSinkOrchestrator) Notify(event core.SessionEvent) error {
 	case core.BEGIN_BATCH:
 		bro.state.Set(SINK_HANDLING_BATCH)
 	case core.END_BATCH:
-		bro.state.Update(SINK_HANDLING_BATCH|SINK_WAITING, SINK_PROCESSING)
+		bro.state.Update(SINK_WAITING, SINK_PROCESSING)
 	case core.BEGIN_PROCESSING:
 		// This lets us either proceed or eject at the beginning of every loop iteration.
 		// If we add complete session termination check at the top, does this buy us anything?
@@ -426,6 +434,8 @@ func (bro *BatchSinkOrchestrator) Notify(event core.SessionEvent) error {
 		}
 	case core.END_DRAINING:
 		bro.state.Unset(SINK_SENDING)
+		// If we end draining, we will have flushed if needed, and that means we know we've handled any incoming requests, so unset handling batch.
+		bro.state.Unset(SINK_HANDLING_BATCH)
 		// TODO: Is this needed here and BEGIN_DRAINING?
 		if bro.state.ContainsExact(SINK_CLOSING|SINK_SENDING, SINK_CLOSING) {
 			bro.state.Set(SINK_CLOSED)
@@ -454,6 +464,13 @@ func (bro *BatchSinkOrchestrator) IsSafeStateToClose() bool {
 	} else {
 		return !bro.state.ContainsAny(SINK_ENQUEUEING | SINK_FLUSHING | SINK_HANDLING_BATCH)
 	}
+}
+
+// ShouldFlush returns true if either:
+//   - We are requester and we haven't already flushed and are therefore waiting for a response, OR
+//   - We are responder and have received a request and are handling it, meaning we haven't responded yet.
+func (bro *BatchSinkOrchestrator) ShouldFlush() bool {
+	return (bro.IsRequester() && !bro.state.ContainsAny(SINK_WAITING)) || bro.state.ContainsAny(SINK_HANDLING_BATCH)
 }
 
 // TODO: Naming is confusing.  This has BatchStatusReceiver in its name, but it doesn't implement HandleList and therefore isn't a BatchStatusReceiver.

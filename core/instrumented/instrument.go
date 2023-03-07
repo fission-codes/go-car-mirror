@@ -61,6 +61,12 @@ func (io *Orchestrator[F]) IsSafeStateToClose() bool {
 	return result
 }
 
+func (io *Orchestrator[F]) ShouldFlush() bool {
+	result := io.orchestrator.ShouldFlush()
+	io.stats.Logger().Debugw("exit", "method", "ShouldFlush", "state", io.orchestrator.State(), "result", result)
+	return result
+}
+
 // BlockStore is a BlockStore that records stats for events.
 type BlockStore[I core.BlockId] struct {
 	store core.BlockStore[I]
