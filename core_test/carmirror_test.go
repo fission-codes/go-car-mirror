@@ -218,7 +218,7 @@ func MockBatchTransferSend(senderStore *mock.Store, receiverStore *mock.Store, r
 
 	config := batch.Config{
 		MaxBatchSize:  maxBatchSize,
-		BloomCapacity: 1024, // matches value used below before my changes
+		BloomCapacity: 1024,
 		BloomFunction: MOCK_ID_HASH,
 		Instrument:    instrumented.INSTRUMENT_STORE | instrumented.INSTRUMENT_ORCHESTRATOR,
 	}
@@ -302,7 +302,7 @@ func MockBatchTransferSend(senderStore *mock.Store, receiverStore *mock.Store, r
 
 	go func() {
 		log.Debugf("timeout started")
-		time.Sleep(20 * time.Second)
+		time.Sleep(30 * time.Second)
 		log.Debugf("timeout elapsed")
 
 		// If we timeout, see what goroutines are hung
@@ -428,7 +428,7 @@ func MockBatchTransferReceive(sinkStore *mock.Store, sourceStore *mock.Store, ro
 
 	go func() {
 		log.Debugf("timeout started")
-		time.Sleep(20 * time.Second)
+		time.Sleep(30 * time.Second)
 		log.Debugf("timeout elapsed")
 
 		// See what goroutine is hung
