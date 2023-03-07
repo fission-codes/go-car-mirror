@@ -25,8 +25,8 @@ func TestClientSend(t *testing.T) {
 		Address: ":8021",
 	}
 	responderConfig := batch.Config{
-		MaxBatchSize:  100,
-		BloomCapacity: 256,
+		MaxBatchSize:  1024,
+		BloomCapacity: 1024,
 		BloomFunction: MOCK_ID_HASH,
 		Instrument:    instrumented.INSTRUMENT_STORE | instrumented.INSTRUMENT_ORCHESTRATOR,
 	}
@@ -54,7 +54,7 @@ func TestClientSend(t *testing.T) {
 
 	go func() {
 		log.Debugf("timeout started")
-		time.Sleep(10 * time.Second)
+		time.Sleep(50 * time.Second)
 		log.Debugf("timeout elapsed")
 
 		// If we timeout, see what goroutines are hung
@@ -100,8 +100,8 @@ func TestClientReceive(t *testing.T) {
 		Address: ":8021",
 	}
 	responderConfig := batch.Config{
-		MaxBatchSize:  100,
-		BloomCapacity: 256,
+		MaxBatchSize:  1024,
+		BloomCapacity: 1024,
 		BloomFunction: MOCK_ID_HASH,
 		Instrument:    instrumented.INSTRUMENT_STORE | instrumented.INSTRUMENT_ORCHESTRATOR,
 	}
@@ -109,7 +109,7 @@ func TestClientReceive(t *testing.T) {
 	serverStore := mock.NewStore(mock.Config{})
 	clientStore := mock.NewStore(mock.Config{})
 
-	rootId := mock.AddRandomTree(context.Background(), serverStore, 2, 2, 0.0)
+	rootId := mock.AddRandomTree(context.Background(), serverStore, 12, 5, 0.0)
 
 	server := NewServer[mock.BlockId](serverStore, serverConfig, responderConfig)
 	client := NewClient[mock.BlockId](clientStore, responderConfig)
