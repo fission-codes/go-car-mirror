@@ -311,7 +311,6 @@ type Orchestrator[F Flags] interface {
 	// IsSafeStateToClose returns true if the state of the Orchestrator indicates that the session should close.
 	// Other factors may need to be taken into account as well to determine if close should happen, but this
 	// tells us if the states indicate a close is safe.
-	// TODO: Maybe rename to IsSafeToClose or IsSafeCloseState?
 	IsSafeStateToClose() bool
 
 	// ShouldFlush returns true if the state of the Orchestrator indicates that the session should flush.
@@ -421,16 +420,13 @@ func (ss *SinkSession[I, F]) AccumulateStatus(id I) error {
 
 // Enqueue a block for transfer (will retrieve block and children from the related source session)
 func (ss *SinkSession[I, F]) Enqueue(id I) error {
-	// When is it safe to do this?
-	// if we are currently checking (e.g. the polling loop is running)
-	// if we are not currently checking *and* we are not currently sending?
-	if err := ss.orchestrator.Notify(BEGIN_ENQUEUE); err != nil { // This should block if state is RECEIVER_SENDING
+	if err := ss.orchestrator.Notify(BEGIN_ENQUEUE); err != nil {
 		return err
 	}
 
-	defer ss.orchestrator.Notify(END_ENQUEUE) // This should set RECEIVER_CHECKING
+	defer ss.orchestrator.Notify(END_ENQUEUE)
 
-	return ss.AccumulateStatus(id) // This is recursive so it may take some time
+	return ss.AccumulateStatus(id)
 }
 
 // HandleBlock handles a block that is being received. Adds the block to the session's store, and
@@ -767,12 +763,8 @@ func (ss *SourceSession[I, F]) HandleStatus(
 	}
 	defer ss.orchestrator.Notify(END_RECEIVE)
 	ss.stats.Logger().Debugw("begin processing", "object", "SourceSession", "method", "HandleStatus", "pendingBlocks", ss.pendingBlocks.Len(), "filter", ss.filter.Count())
-	// TODO: Had a race condition.  Write on line below, but read on 704.
-	// ss.filter = ss.filter.AddAll(have)
-	// This looks like what we want though.
 	ss.filter.AddAll(have)
 	ss.stats.Logger().Debugw("incoming have filter merged", "object", "SourceSession", "method", "HandleStatus", "filter", ss.filter.Count())
-	//ss.filter.Dump(ss.log, "SourceSession filter - ")
 	for _, id := range want {
 		ss.pendingBlocks.PushFront(id) // send wants to the front of the queue
 	}
