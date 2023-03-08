@@ -52,11 +52,11 @@ func (conn *GenericBatchSourceConnection[I, R]) Session(store core.BlockStore[I]
 }
 
 func (conn *GenericBatchSourceConnection[I, R]) DeferredSender(batchSize uint32) core.BlockSender[I] {
-	return conn.Sender(&ResponseBatchBlockSender[I, R]{conn.messages}, batchSize)
+	return conn.Sender(&ResponseBatchBlockSender[I, R]{conn.messages, conn}, batchSize)
 }
 
 func (conn *GenericBatchSourceConnection[I, R]) DeferredBatchSender() BatchBlockSender[I] {
-	return &ResponseBatchBlockSender[I, R]{conn.messages}
+	return &ResponseBatchBlockSender[I, R]{conn.messages, conn}
 }
 
 func (conn *GenericBatchSourceConnection[I, R]) PendingResponse() *messages.BlocksMessage[I, R] {
@@ -103,11 +103,11 @@ func (conn *GenericBatchSinkConnection[I, R]) Session(store core.BlockStore[I], 
 }
 
 func (conn *GenericBatchSinkConnection[I, R]) DeferredBatchSender() core.StatusSender[I] {
-	return &ResponseStatusSender[I, R]{conn.messages}
+	return &ResponseStatusSender[I, R]{conn.messages, conn}
 }
 
 func (conn *GenericBatchSinkConnection[I, R]) DeferredSender() core.StatusSender[I] {
-	return conn.Sender(&ResponseStatusSender[I, R]{conn.messages})
+	return conn.Sender(&ResponseStatusSender[I, R]{conn.messages, conn})
 }
 
 func (conn *GenericBatchSinkConnection[I, R]) PendingResponse() *messages.StatusMessage[I, R] {
@@ -115,13 +115,20 @@ func (conn *GenericBatchSinkConnection[I, R]) PendingResponse() *messages.Status
 }
 
 type ResponseBatchBlockSender[I core.BlockId, R core.BlockIdRef[I]] struct {
-	messages chan<- *messages.BlocksMessage[I, R]
+	messages     chan<- *messages.BlocksMessage[I, R]
+	orchestrator core.Orchestrator[BatchState]
 }
 
 func (bbs *ResponseBatchBlockSender[I, R]) SendList(blocks []core.RawBlock[I]) error {
+	if err := bbs.orchestrator.Notify(core.BEGIN_FLUSH); err != nil {
+		return err
+	}
 	log.Debugw("ResponseBatchBlockSender - enter", "method", "SendList", "blocks", len(blocks))
 	bbs.messages <- messages.NewBlocksMessage[I, R](blocks)
 	log.Debugw("ResponseBatchBlockSender - exit", "method", "SendList")
+	if err := bbs.orchestrator.Notify(core.END_FLUSH); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -131,13 +138,20 @@ func (bbs *ResponseBatchBlockSender[I, R]) Close() error {
 }
 
 type ResponseStatusSender[I core.BlockId, R core.BlockIdRef[I]] struct {
-	messages chan<- *messages.StatusMessage[I, R]
+	messages     chan<- *messages.StatusMessage[I, R]
+	orchestrator core.Orchestrator[BatchState]
 }
 
 func (ss *ResponseStatusSender[I, R]) SendStatus(have filter.Filter[I], want []I) error {
+	if err := ss.orchestrator.Notify(core.BEGIN_FLUSH); err != nil {
+		return err
+	}
 	log.Debugw("enter", "object", "ResponseStatusSender", "method", "SendStatus", "have", have.Count(), "want", len(want))
 	ss.messages <- messages.NewStatusMessage[I, R](have, want)
 	log.Debugw("exit", "object", "ResponseStatusSender", "method", "SendStatus")
+	if err := ss.orchestrator.Notify(core.END_FLUSH); err != nil {
+		return err
+	}
 	return nil
 }
 

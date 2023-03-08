@@ -29,6 +29,10 @@ func (bbs *RequestBatchBlockSender[I, R]) SendList(blocks []core.RawBlock[I]) er
 		return nil
 	}
 
+	if err := bbs.responseHandler.Orchestrator().Notify(core.BEGIN_FLUSH); err != nil {
+		return err
+	}
+
 	message := messages.NewBlocksMessage[I, R](blocks)
 	reader, writer := io.Pipe()
 
@@ -44,6 +48,10 @@ func (bbs *RequestBatchBlockSender[I, R]) SendList(blocks []core.RawBlock[I]) er
 	if resp, err := bbs.client.Post(bbs.url, CONTENT_TYPE_CBOR, reader); err != nil {
 		log.Errorw("exit", "object", "RequestBatchBlockSender", "method", "SendList", "error", err)
 		// HERE: we're getting a TCP dial error here and returning it.
+		if err := bbs.responseHandler.Orchestrator().Notify(core.END_FLUSH); err != nil {
+			// TODO: This hides the other error
+			return err
+		}
 		return err
 	} else {
 		if resp.StatusCode == http.StatusAccepted {
@@ -58,6 +66,14 @@ func (bbs *RequestBatchBlockSender[I, R]) SendList(blocks []core.RawBlock[I]) er
 				log.Debugw("exit", "object", "RequestBatchBlockSender", "method", "SendList", "error", err)
 				return err
 			}
+			// Ending flush here so we don't nest the new batch within it below.
+			if err := bbs.responseHandler.Orchestrator().Notify(core.END_FLUSH); err != nil {
+				return err
+			}
+
+			// This is it.  We are still in flush but now we're handling a new batch.  Move the event notifications here if possible.
+			// Will need an orchestrator.
+
 			// TODO: Handle error
 			bbs.responseHandler.HandleStatus(responseMessage.Have.Any(), responseMessage.Want)
 			log.Debugw("exit", "object", "RequestBatchBlockSender", "method", "SendList")
@@ -76,13 +92,20 @@ func (bbs *RequestBatchBlockSender[I, R]) Close() error {
 }
 
 type ResponseBatchBlockSender[I core.BlockId, R core.BlockIdRef[I]] struct {
-	messages chan<- *messages.BlocksMessage[I, R]
+	messages     chan<- *messages.BlocksMessage[I, R]
+	orchestrator core.Orchestrator[batch.BatchState]
 }
 
 func (bbs *ResponseBatchBlockSender[I, R]) SendList(blocks []core.RawBlock[I]) error {
+	if err := bbs.orchestrator.Notify(core.BEGIN_FLUSH); err != nil {
+		return err
+	}
 	log.Debugw("ResponseBatchBlockSender - enter", "method", "SendList", "blocks", len(blocks))
 	bbs.messages <- messages.NewBlocksMessage[I, R](blocks)
 	log.Debugw("ResponseBatchBlockSender - exit", "method", "SendList")
+	if err := bbs.orchestrator.Notify(core.END_FLUSH); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -94,10 +117,14 @@ func (bbs *ResponseBatchBlockSender[I, R]) Close() error {
 type RequestStatusSender[I core.BlockId, R core.BlockIdRef[I]] struct {
 	client          *http.Client
 	url             string
-	responseHandler batch.BatchBlockReceiver[I]
+	responseHandler *batch.SimpleBatchBlockReceiver[I]
 }
 
 func (ss *RequestStatusSender[I, R]) SendStatus(have filter.Filter[I], want []I) error {
+	if err := ss.responseHandler.Orchestrator().Notify(core.BEGIN_FLUSH); err != nil {
+		return err
+	}
+
 	log.Debugw("enter", "object", "RequestStatusSender", "method", "SendStatus", "have", have.Count(), "want", len(want))
 	// For requests, we never send status messages if we already have all the blocks we want.
 	if len(want) == 0 {
@@ -133,6 +160,12 @@ func (ss *RequestStatusSender[I, R]) SendStatus(have filter.Filter[I], want []I)
 				log.Debugw("exit", "object", "RequestStatusSender", "method", "SendStatus", "error", err)
 				return err
 			}
+
+			// Notify END_FLUSH before we handle the response, to avoid nested events.
+			if err := ss.responseHandler.Orchestrator().Notify(core.END_FLUSH); err != nil {
+				return err
+			}
+
 			// TODO: We requested the blocks in want.  We got back blocks.
 			// Where are we checking if any requested roots were not returned, so we don't ask for them again?
 			// Recall that per spec, the requested roots (i.e. want) must always be returned.
@@ -141,6 +174,9 @@ func (ss *RequestStatusSender[I, R]) SendStatus(have filter.Filter[I], want []I)
 			return err
 		} else {
 			// TODO: Per spec, if the server returns 404, it could find no more new root CIDs.  Handle this case.
+			if err := ss.responseHandler.Orchestrator().Notify(core.END_FLUSH); err != nil {
+				return err
+			}
 
 			log.Debugw("Unexpected response", "object", "RequestBatchBlockSender", "status", resp.Status)
 			return ErrInvalidResponse
@@ -153,13 +189,20 @@ func (ss *RequestStatusSender[I, R]) Close() error {
 }
 
 type ResponseStatusSender[I core.BlockId, R core.BlockIdRef[I]] struct {
-	messages chan<- *messages.StatusMessage[I, R]
+	messages     chan<- *messages.StatusMessage[I, R]
+	orchestrator core.Orchestrator[batch.BatchState]
 }
 
 func (ss *ResponseStatusSender[I, R]) SendStatus(have filter.Filter[I], want []I) error {
+	if err := ss.orchestrator.Notify(core.BEGIN_FLUSH); err != nil {
+		return err
+	}
 	log.Debugw("enter", "object", "ResponseStatusSender", "method", "SendStatus", "have", have.Count(), "want", len(want))
 	ss.messages <- messages.NewStatusMessage[I, R](have, want)
 	log.Debugw("exit", "object", "ResponseStatusSender", "method", "SendStatus")
+	if err := ss.orchestrator.Notify(core.END_FLUSH); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -181,11 +224,11 @@ func NewHttpServerSourceConnection[I core.BlockId, R core.BlockIdRef[I]](stats s
 }
 
 func (conn *HttpServerSourceConnection[I, R]) DeferredSender(batchSize uint32) core.BlockSender[I] {
-	return conn.Sender(&ResponseBatchBlockSender[I, R]{conn.messages}, batchSize)
+	return conn.Sender(&ResponseBatchBlockSender[I, R]{conn.messages, conn}, batchSize)
 }
 
 func (conn *HttpServerSourceConnection[I, R]) DeferredBatchSender() batch.BatchBlockSender[I] {
-	return &ResponseBatchBlockSender[I, R]{conn.messages}
+	return &ResponseBatchBlockSender[I, R]{conn.messages, conn}
 }
 
 func (conn *HttpServerSourceConnection[I, R]) PendingResponse() *messages.BlocksMessage[I, R] {
@@ -205,7 +248,7 @@ func NewHttpServerSinkConnection[I core.BlockId, R core.BlockIdRef[I]](stats sta
 }
 
 func (conn *HttpServerSinkConnection[I, R]) DeferredSender() core.StatusSender[I] {
-	return conn.Sender(&ResponseStatusSender[I, R]{conn.messages})
+	return conn.Sender(&ResponseStatusSender[I, R]{conn.messages, conn})
 }
 
 func (conn *HttpServerSinkConnection[I, R]) PendingResponse() *messages.StatusMessage[I, R] {

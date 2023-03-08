@@ -517,15 +517,7 @@ func (ss *SinkSession[I, F]) Run(
 				return
 			}
 			if ss.orchestrator.ShouldFlush() && (!ss.requester || ss.statusAccumulator.WantCount() > 0) {
-				if err := ss.orchestrator.Notify(BEGIN_FLUSH); err != nil {
-					ss.doneCh <- err
-					return
-				}
 				if err := ss.statusAccumulator.Send(statusSender); err != nil {
-					ss.doneCh <- err
-					return
-				}
-				if err := ss.orchestrator.Notify(END_FLUSH); err != nil {
 					ss.doneCh <- err
 					return
 				}
@@ -699,6 +691,7 @@ func (ss *SourceSession[I, F]) Run(
 					}
 					// TODO: How do we notify that the request block was not found?
 				} else {
+					// Sending a block might lead to flushing.
 					if err := blockSender.SendBlock(block); err != nil {
 						// TODO: If error here, maybe we should remove it from ss.sent.
 						ss.doneCh <- err
@@ -734,6 +727,18 @@ func (ss *SourceSession[I, F]) Run(
 				if err := blockSender.Flush(); err != nil {
 					ss.doneCh <- err
 					return
+				}
+
+				if !ss.requester {
+					// Close
+					if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
+						ss.doneCh <- err
+						return
+					}
+					if err := ss.orchestrator.Notify(END_CLOSE); err != nil {
+						ss.doneCh <- err
+						return
+					}
 				}
 			}
 			if err := ss.orchestrator.Notify(END_DRAINING); err != nil {

@@ -154,6 +154,11 @@ func (sbbr *SimpleBatchBlockReceiver[I]) HandleList(list []core.RawBlock[I]) err
 	return nil
 }
 
+// Orchestrator returns the orchestrator.
+func (sbbr *SimpleBatchBlockReceiver[I]) Orchestrator() core.Orchestrator[BatchState] {
+	return sbbr.orchestrator
+}
+
 // SimpleBatchBlockSender is a simple implementation of BlockSender which wraps a BatchBlockSender
 type SimpleBatchBlockSender[I core.BlockId] struct {
 	orchestrator     core.Orchestrator[BatchState]
@@ -177,14 +182,14 @@ func NewSimpleBatchBlockSender[I core.BlockId](batchBlockSender BatchBlockSender
 func (sbbs *SimpleBatchBlockSender[I]) SendBlock(block core.RawBlock[I]) error {
 	sbbs.listMutex.Lock()
 	sbbs.list = append(sbbs.list, block)
-	listLen := len(sbbs.list)
+	// listLen := len(sbbs.list)
 	sbbs.listMutex.Unlock()
 
 	// TODO: Add logic around maxBatchSizeColdCall if needed.
-
-	if listLen >= int(sbbs.maxBatchSize) {
-		return sbbs.Flush()
-	}
+	// Should this logic be pulled into the main loop?  To ensure we know when we're flushing?
+	// if listLen >= int(sbbs.maxBatchSize) {
+	// 	return sbbs.Flush()
+	// }
 
 	return nil
 }
@@ -199,10 +204,6 @@ func (sbbs *SimpleBatchBlockSender[I]) Flush() error {
 	if sbbs.Len() > 0 {
 		sbbs.listMutex.Lock()
 		defer sbbs.listMutex.Unlock()
-
-		// Only notify if we actually send
-		sbbs.orchestrator.Notify(core.BEGIN_FLUSH)
-		defer sbbs.orchestrator.Notify(core.END_FLUSH)
 
 		// Clone the list before sending, to avoid data races.
 		// While we have a mutex in this method, we don't know what will happen when passed to SendList.
@@ -226,6 +227,11 @@ func (sbbs *SimpleBatchBlockSender[I]) Len() int {
 	sbbs.listMutex.Lock()
 	defer sbbs.listMutex.Unlock()
 	return len(sbbs.list)
+}
+
+// Orchestrator returns the orchestrator.
+func (sbbs *SimpleBatchBlockSender[I]) Orchestrator() core.Orchestrator[BatchState] {
+	return sbbs.orchestrator
 }
 
 // BatchSourceOrchestrator is an orchestrator for sending batches of blocks.
@@ -489,12 +495,17 @@ func NewSimpleBatchStatusReceiver[I core.BlockId](statusReceiver core.StatusRece
 }
 
 // HandleList handles a list of raw blocks.
-func (sbbr *SimpleBatchStatusReceiver[I]) HandleStatus(have filter.Filter[I], want []I) error {
-	sbbr.orchestrator.Notify(core.BEGIN_BATCH)
-	defer sbbr.orchestrator.Notify(core.END_BATCH)
+func (sbsr *SimpleBatchStatusReceiver[I]) HandleStatus(have filter.Filter[I], want []I) error {
+	sbsr.orchestrator.Notify(core.BEGIN_BATCH)
+	defer sbsr.orchestrator.Notify(core.END_BATCH)
 
 	// TODO: handle errors.  Can't yet because HandleStatus doesn't return an error.
-	sbbr.statusReceiver.HandleStatus(have, want)
+	sbsr.statusReceiver.HandleStatus(have, want)
 
 	return nil
+}
+
+// Orchestrator returns the orchestrator.
+func (sbsr *SimpleBatchStatusReceiver[I]) Orchestrator() core.Orchestrator[BatchState] {
+	return sbsr.orchestrator
 }
