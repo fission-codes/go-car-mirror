@@ -219,19 +219,16 @@ func (ah *Archive[T, R]) MarshalBinary() ([]byte, error) {
 }
 
 // BlocksMessage state and the archive.
-type BlocksMessage[T core.BlockId, R core.BlockIdRef[T], F core.Flags] struct {
-	State F
-	Car   Archive[T, R]
+type BlocksMessage[T core.BlockId, R core.BlockIdRef[T]] struct {
+	Car Archive[T, R]
 }
 
 // NewBlocksMessage creates a new blocks message.
 func NewBlocksMessage[
 	T core.BlockId,
 	R core.BlockIdRef[T],
-	F core.Flags,
-](state F, blocks []core.RawBlock[T]) *BlocksMessage[T, R, F] {
-	return &BlocksMessage[T, R, F]{
-		state,
+](blocks []core.RawBlock[T]) *BlocksMessage[T, R] {
+	return &BlocksMessage[T, R]{
 		Archive[T, R]{
 			ArchiveHeader[T]{
 				1,
@@ -243,66 +240,64 @@ func NewBlocksMessage[
 }
 
 // Write writes the blocks message to the writer.
-func (msg *BlocksMessage[T, B, F]) Write(writer io.Writer) error {
-	if data, err := cbor.Marshal(msg.State); err != nil {
-		return err
-	} else {
-		if err = writeBufferWithPrefix(writer, data); err != nil {
-			return err
-		}
-	}
+func (msg *BlocksMessage[T, B]) Write(writer io.Writer) error {
+	// if data, err := cbor.Marshal(msg.State); err != nil {
+	// 	return err
+	// } else {
+	// 	if err = writeBufferWithPrefix(writer, data); err != nil {
+	// 		return err
+	// 	}
+	// }
 
 	return msg.Car.Write(writer)
 }
 
 // Read reads the blocks message from the reader.
-func (msg *BlocksMessage[T, B, F]) Read(reader core.ByteAndBlockReader) error {
-	if data, err := readBufferWithPrefix(reader); err != nil {
-		log.Debugw("failed to read blocks message", "error", err)
-		return err
-	} else {
-		if err = cbor.Unmarshal(data, &msg.State); err != nil {
-			log.Debugw("failed to unmarshal blocks message state", "error", err)
-			return err
-		}
-	}
+func (msg *BlocksMessage[T, B]) Read(reader core.ByteAndBlockReader) error {
+	// if data, err := readBufferWithPrefix(reader); err != nil {
+	// 	log.Debugw("failed to read blocks message", "error", err)
+	// 	return err
+	// } else {
+	// 	if err = cbor.Unmarshal(data, &msg.State); err != nil {
+	// 		log.Debugw("failed to unmarshal blocks message state", "error", err)
+	// 		return err
+	// 	}
+	// }
 	return msg.Car.Read(reader)
 }
 
 // UnmarshalBinary implements the encoding.BinaryUnmarshaler interface.
-func (msg *BlocksMessage[T, B, F]) MarshalBinary() ([]byte, error) {
+func (msg *BlocksMessage[T, B]) MarshalBinary() ([]byte, error) {
 	var buf bytes.Buffer
 	err := msg.Write(&buf)
 	return buf.Bytes(), err
 }
 
 // UnmarshalBinary implements the encoding.BinaryUnmarshaler interface.
-func (msg *BlocksMessage[T, B, F]) UnmarshalBinary(data []byte) error {
+func (msg *BlocksMessage[T, B]) UnmarshalBinary(data []byte) error {
 	return msg.Read(bytes.NewBuffer(data))
 }
 
 // StatusMessageWireFormat is the wire format of a status message.
-type StatusMessageWireFormat[I core.BlockId, R core.BlockIdRef[I], S core.Flags] struct {
-	State S                           `json:"state"`
-	Have  *filter.FilterWireFormat[I] `json:"have"`
-	Want  []I                         `json:"want"`
+type StatusMessageWireFormat[I core.BlockId, R core.BlockIdRef[I]] struct {
+	Have *filter.FilterWireFormat[I] `json:"have"`
+	Want []I                         `json:"want"`
 }
 
 // StatusMessage represents a status message.
-type StatusMessage[I core.BlockId, R core.BlockIdRef[I], S core.Flags] StatusMessageWireFormat[I, R, S]
+type StatusMessage[I core.BlockId, R core.BlockIdRef[I]] StatusMessageWireFormat[I, R]
 
 // NewStatusMessage creates a new status message.
-func NewStatusMessage[I core.BlockId, R core.BlockIdRef[I], S core.Flags](state S, have filter.Filter[I], want []I) *StatusMessage[I, R, S] {
-	return &StatusMessage[I, R, S]{
-		state,
+func NewStatusMessage[I core.BlockId, R core.BlockIdRef[I]](have filter.Filter[I], want []I) *StatusMessage[I, R] {
+	return &StatusMessage[I, R]{
 		filter.NewFilterWireFormat(have),
 		want,
 	}
 }
 
 // Write writes the status message to the writer.
-func (msg *StatusMessage[I, R, S]) Write(writer io.Writer) error {
-	if data, err := cbor.Marshal((*StatusMessageWireFormat[I, R, S])(msg)); err != nil {
+func (msg *StatusMessage[I, R]) Write(writer io.Writer) error {
+	if data, err := cbor.Marshal((*StatusMessageWireFormat[I, R])(msg)); err != nil {
 		return err
 	} else {
 		return writeBufferWithPrefix(writer, data)
@@ -310,32 +305,32 @@ func (msg *StatusMessage[I, R, S]) Write(writer io.Writer) error {
 }
 
 // Read reads the status message from the reader.
-func (msg *StatusMessage[I, R, S]) Read(reader core.ByteAndBlockReader) error {
+func (msg *StatusMessage[I, R]) Read(reader core.ByteAndBlockReader) error {
 	if data, err := readBufferWithPrefix(reader); err != nil {
 		return err
 	} else {
-		return cbor.Unmarshal(data, (*StatusMessageWireFormat[I, R, S])(msg))
+		return cbor.Unmarshal(data, (*StatusMessageWireFormat[I, R])(msg))
 	}
 }
 
 // MarshalBinary implements the encoding.BinaryMarshaler interface.
-func (msg *StatusMessage[I, R, S]) MarshalBinary() ([]byte, error) {
+func (msg *StatusMessage[I, R]) MarshalBinary() ([]byte, error) {
 	var buf bytes.Buffer
 	err := msg.Write(&buf)
 	return buf.Bytes(), err
 }
 
 // UnmarshalBinary implements the encoding.BinaryUnmarshaler interface.
-func (msg *StatusMessage[I, R, S]) UnmarshalBinary(data []byte) error {
+func (msg *StatusMessage[I, R]) UnmarshalBinary(data []byte) error {
 	return msg.Read(bytes.NewBuffer(data))
 }
 
 // MarshalCBOR implements the cbor.Marshaler interface.
-func (msg *StatusMessage[I, R, S]) MarshalCBOR() ([]byte, error) {
-	return cbor.Marshal((*StatusMessageWireFormat[I, R, S])(msg))
+func (msg *StatusMessage[I, R]) MarshalCBOR() ([]byte, error) {
+	return cbor.Marshal((*StatusMessageWireFormat[I, R])(msg))
 }
 
 // UnmarshalCBOR implements the cbor.Unmarshaler interface.
-func (msg *StatusMessage[I, R, S]) UnmarshalCBOR(data []byte) error {
-	return cbor.Unmarshal(data, (*StatusMessageWireFormat[I, R, S])(msg))
+func (msg *StatusMessage[I, R]) UnmarshalCBOR(data []byte) error {
+	return cbor.Unmarshal(data, (*StatusMessageWireFormat[I, R])(msg))
 }

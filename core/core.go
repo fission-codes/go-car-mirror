@@ -305,11 +305,17 @@ type Orchestrator[F Flags] interface {
 	// IsClosed returns true if the orchestrator is closed.
 	IsClosed() bool
 
-	// ShouldClose returns true if the state of the Orchestrator indicates that the session should close.
+	// IsRequester returns true if the Orchestrator is the requester.
+	IsRequester() bool
+
+	// IsSafeStateToClose returns true if the state of the Orchestrator indicates that the session should close.
 	// Other factors may need to be taken into account as well to determine if close should happen, but this
 	// tells us if the states indicate a close is safe.
 	// TODO: Maybe rename to IsSafeToClose or IsSafeCloseState?
-	ShouldClose() bool
+	IsSafeStateToClose() bool
+
+	// ShouldFlush returns true if the state of the Orchestrator indicates that the session should flush.
+	ShouldFlush() bool
 }
 
 // SinkSession is a session that receives blocks and sends out status updates. Two type parameters
@@ -325,6 +331,7 @@ type SinkSession[
 	stats             stats.Stats
 	startedCh         chan bool
 	doneCh            chan error
+	requester         bool // requester or responder
 }
 
 // Struct for returning summary information about the session. This is intended to allow implementers to
@@ -347,6 +354,7 @@ func NewSinkSession[I BlockId, F Flags](
 	statusAccumulator StatusAccumulator[I], // Accumulator for status information
 	orchestrator Orchestrator[F], // Orchestrator used to synchronize this session with its communication channel
 	stats stats.Stats, // Collector for session-related statistics
+	requester bool,
 ) *SinkSession[I, F] {
 	return &SinkSession[I, F]{
 		statusAccumulator,
@@ -356,6 +364,7 @@ func NewSinkSession[I BlockId, F Flags](
 		stats,
 		make(chan bool, 1),
 		make(chan error, 1),
+		requester,
 	}
 }
 
@@ -427,9 +436,6 @@ func (ss *SinkSession[I, F]) Enqueue(id I) error {
 // HandleBlock handles a block that is being received. Adds the block to the session's store, and
 // then queues the block for further processing.
 func (ss *SinkSession[I, F]) HandleBlock(rawBlock RawBlock[I]) {
-	ss.orchestrator.Notify(BEGIN_RECEIVE)
-	defer ss.orchestrator.Notify(END_RECEIVE)
-
 	block, err := ss.store.Add(context.TODO(), rawBlock)
 	if err != nil {
 		ss.stats.Logger().Errorf("Failed to add block to store. err = %v", err)
@@ -452,10 +458,6 @@ func (ss *SinkSession[I, F]) Run(
 		log.Debugw("SinkSession.Run() exiting")
 		close(ss.doneCh)
 		log.Debugw("SinkSession.Run() exited")
-
-		// log.Debugw("SinkSession.Run() closing statusSender")
-		// statusSender.Close()
-		// log.Debugw("SinkSession.Run() closed statusSender")
 	}()
 	ss.startedCh <- true
 	close(ss.startedCh)
@@ -467,7 +469,8 @@ func (ss *SinkSession[I, F]) Run(
 	defer ss.orchestrator.Notify(END_SESSION)
 
 	for !ss.orchestrator.IsClosed() {
-		if ss.pendingBlocks.Len() == 0 && ss.statusAccumulator.WantCount() == 0 && ss.orchestrator.ShouldClose() {
+		log.Debugw("SinkSession.Run() checking for pending blocks", "pendingBlocks", ss.pendingBlocks.Len(), "wantCount", ss.statusAccumulator.WantCount())
+		if ss.pendingBlocks.Len() == 0 && ss.statusAccumulator.WantCount() == 0 && ss.orchestrator.IsSafeStateToClose() {
 			if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
 				ss.doneCh <- err
 				return
@@ -486,15 +489,6 @@ func (ss *SinkSession[I, F]) Run(
 		// Pending blocks are blocks that have been recieved and added to our block store,
 		// but have not had status accumulated on their children yet.
 		if ss.pendingBlocks.Len() > 0 {
-			// TODO: Why is this sending?  We're only accumulating status here.
-			// Per docs, SINK_SENDING means we might have status pending flush.
-			// That could be true regardless of if there are pending blocks though, right?
-			// Feels like confusing naming.
-			if err := ss.orchestrator.Notify(BEGIN_SEND); err != nil {
-				ss.doneCh <- err
-				return
-			}
-
 			block := ss.pendingBlocks.PollFront()
 
 			for _, child := range block.Children() {
@@ -503,24 +497,33 @@ func (ss *SinkSession[I, F]) Run(
 					return
 				}
 			}
-			if err := ss.orchestrator.Notify(END_SEND); err != nil {
-				ss.doneCh <- err
-				return
+
+			// Here is where we know if we should notify send.
+			// If responder, notify send, since we always want to flush status.
+			// If requester, only notify send if we have wants.
+			if ss.statusAccumulator.WantCount() > 0 || !ss.requester {
+				if err := ss.orchestrator.Notify(BEGIN_SEND); err != nil {
+					ss.doneCh <- err
+					return
+				}
+				if err := ss.orchestrator.Notify(END_SEND); err != nil {
+					ss.doneCh <- err
+					return
+				}
 			}
 		} else {
-			// If we get here it means we have no more blocks to process. In a batch based process that's
-			// the only time we'd want to send. But for streaming maybe this should be in a separate loop
-			// so it can be triggered by the orchestrator - otherwise we wind up sending a status update every
-			// time the pending blocks list becomes empty.
-
 			if err := ss.orchestrator.Notify(BEGIN_DRAINING); err != nil {
 				ss.doneCh <- err
 				return
 			}
-			if err := ss.statusAccumulator.Send(statusSender); err != nil {
-				ss.doneCh <- err
-				return
+			if ss.orchestrator.ShouldFlush() && (!ss.requester || ss.statusAccumulator.WantCount() > 0) {
+				if err := ss.statusAccumulator.Send(statusSender); err != nil {
+					ss.doneCh <- err
+					return
+				}
 			}
+			// This puts us in waiting, but we don't want to be in waiting unless we sent something.
+			// Is it flushing that should take us out of waiting?
 			if err := ss.orchestrator.Notify(END_DRAINING); err != nil {
 				ss.doneCh <- err
 				return
@@ -581,6 +584,7 @@ type SourceSession[
 	stats         stats.Stats
 	startedCh     chan bool
 	doneCh        chan error
+	requester     bool
 }
 
 // NewSourceSession creates a new SourceSession.
@@ -589,6 +593,7 @@ func NewSourceSession[I BlockId, F Flags](
 	filter filter.Filter[I], // Filter to which 'Haves' from the sink will be added
 	orchestrator Orchestrator[F], // Orchestrator used to synchronize this session with its communication channel
 	stats stats.Stats, // Collector for session-related statistics
+	requester bool, // Requester or responder
 ) *SourceSession[I, F] {
 	return &SourceSession[I, F]{
 		store,
@@ -599,6 +604,7 @@ func NewSourceSession[I BlockId, F Flags](
 		stats,
 		make(chan bool, 1),
 		make(chan error, 1),
+		requester,
 	}
 }
 
@@ -637,10 +643,6 @@ func (ss *SourceSession[I, F]) Run(
 		log.Debugw("SourceSession.Run() exiting")
 		close(ss.doneCh)
 		log.Debugw("SourceSession.Run() exited")
-
-		// log.Debugw("SourceSession.Run() closing blockSender")
-		// blockSender.Close()
-		// log.Debugw("SourceSession.Run() closed blockSender")
 	}()
 	ss.startedCh <- true
 	close(ss.startedCh)
@@ -659,7 +661,7 @@ func (ss *SourceSession[I, F]) Run(
 		// Note that this check means you must enqueue before running a session.
 		// TODO: Is there any need to mutex this so we get it for both variables simultaneously?
 		log.Debugw("SourceSession.Run() checking for pending blocks", "pendingBlocks", ss.pendingBlocks.Len(), "blockSender", blockSender.Len())
-		if ss.pendingBlocks.Len() == 0 && blockSender.Len() == 0 {
+		if ss.pendingBlocks.Len() == 0 && blockSender.Len() == 0 && ss.orchestrator.IsSafeStateToClose() {
 			if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
 				ss.doneCh <- err
 				return
@@ -668,8 +670,6 @@ func (ss *SourceSession[I, F]) Run(
 				ss.doneCh <- err
 				return
 			}
-
-			continue
 		}
 
 		if err := ss.orchestrator.Notify(BEGIN_PROCESSING); err != nil {
@@ -691,14 +691,22 @@ func (ss *SourceSession[I, F]) Run(
 					}
 					// TODO: How do we notify that the request block was not found?
 				} else {
-					if err := ss.orchestrator.Notify(BEGIN_SEND); err != nil {
-						ss.doneCh <- err
-						return
-					}
+					// Sending a block might lead to flushing.
 					if err := blockSender.SendBlock(block); err != nil {
 						// TODO: If error here, maybe we should remove it from ss.sent.
 						ss.doneCh <- err
 						return
+					}
+					// If we're the requester, we only flush if there's something to send.
+					if blockSender.Len() > 0 || !ss.requester {
+						if err := ss.orchestrator.Notify(BEGIN_SEND); err != nil {
+							ss.doneCh <- err
+							return
+						}
+						if err := ss.orchestrator.Notify(END_SEND); err != nil {
+							ss.doneCh <- err
+							return
+						}
 					}
 					for _, child := range block.Children() {
 						if ss.filter.DoesNotContain(child) {
@@ -708,10 +716,6 @@ func (ss *SourceSession[I, F]) Run(
 							}
 						}
 					}
-					if err := ss.orchestrator.Notify(END_SEND); err != nil {
-						ss.doneCh <- err
-						return
-					}
 				}
 			}
 		} else {
@@ -719,9 +723,23 @@ func (ss *SourceSession[I, F]) Run(
 				ss.doneCh <- err
 				return
 			}
-			if err := blockSender.Flush(); err != nil {
-				ss.doneCh <- err
-				return
+			if ss.orchestrator.ShouldFlush() && (!ss.requester || blockSender.Len() > 0) {
+				if err := blockSender.Flush(); err != nil {
+					ss.doneCh <- err
+					return
+				}
+
+				if !ss.requester {
+					// Close
+					if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
+						ss.doneCh <- err
+						return
+					}
+					if err := ss.orchestrator.Notify(END_CLOSE); err != nil {
+						ss.doneCh <- err
+						return
+					}
+				}
 			}
 			if err := ss.orchestrator.Notify(END_DRAINING); err != nil {
 				ss.doneCh <- err

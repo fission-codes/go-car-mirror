@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fission-codes/go-car-mirror/batch"
 	"github.com/fission-codes/go-car-mirror/core/instrumented"
 	"github.com/fission-codes/go-car-mirror/filter"
 	mock "github.com/fission-codes/go-car-mirror/fixtures"
 	"github.com/fission-codes/go-car-mirror/stats"
-	"github.com/fission-codes/go-car-mirror/util"
 )
 
 const MOCK_ID_HASH = 2
@@ -19,24 +19,14 @@ func init() {
 	filter.RegisterHash(MOCK_ID_HASH, mock.XX3HashBlockId)
 }
 
-func assertBytesEqual(a []byte, b []byte, t *testing.T) {
-	if len(a) != len(b) {
-		t.Errorf("Length ase different: %v, %v", len(a), len(b))
-	}
-	compareLength := util.Min(len(a), len(b))
-	var j int
-	for j = 0; j < compareLength && a[j] == b[j]; j++ {
-	}
-	if j < compareLength {
-		t.Errorf("First difference is at byte: %v", j)
-	}
-}
-
 func TestClientSend(t *testing.T) {
-	config := Config{
-		MaxBatchSize:  100,
-		Address:       ":8021",
-		BloomCapacity: 256,
+	// t.Skip()
+	serverConfig := Config{
+		Address: ":8021",
+	}
+	responderConfig := batch.Config{
+		MaxBatchSize:  1024,
+		BloomCapacity: 1024,
 		BloomFunction: MOCK_ID_HASH,
 		Instrument:    instrumented.INSTRUMENT_STORE | instrumented.INSTRUMENT_ORCHESTRATOR,
 	}
@@ -46,8 +36,8 @@ func TestClientSend(t *testing.T) {
 
 	rootId := mock.AddRandomTree(context.Background(), clientStore, 12, 5, 0.0)
 
-	server := NewServer[mock.BlockId](serverStore, config)
-	client := NewClient[mock.BlockId](clientStore, config)
+	server := NewServer[mock.BlockId](serverStore, serverConfig, responderConfig)
+	client := NewClient[mock.BlockId](clientStore, responderConfig)
 
 	errChan := make(chan error)
 
@@ -56,15 +46,33 @@ func TestClientSend(t *testing.T) {
 	// Give the server time to start up
 	time.Sleep(100 * time.Millisecond)
 
+	snapshotBefore := stats.GLOBAL_REPORTING.Snapshot()
+
 	// TODO: get session and enqueue before starting.
-	client.Send("http://localhost:8021", rootId)
+	url := "http://localhost:8021"
+	client.Send(url, rootId)
+
+	go func() {
+		log.Debugf("timeout started")
+		time.Sleep(50 * time.Second)
+		log.Debugf("timeout elapsed")
+
+		// If we timeout, see what goroutines are hung
+		// pprof.Lookup("goroutine").WriteTo(os.Stdout, 1)
+
+		if err := client.GetSourceSession(url).Cancel(); err != nil {
+			log.Errorf("error cancelling sender session: %v", err)
+		}
+
+		server.Stop()
+	}()
 
 	// Wait for the session to go away
-	info, err := client.SourceInfo("http://localhost:8021")
+	info, err := client.SourceInfo(url)
 	for err == nil {
 		log.Debugf("client info: %s", info.String())
 		time.Sleep(100 * time.Millisecond)
-		info, err = client.SourceInfo("http://localhost:8021")
+		info, err = client.SourceInfo(url)
 	}
 
 	if err != ErrInvalidSession {
@@ -77,18 +85,23 @@ func TestClientSend(t *testing.T) {
 		t.Errorf("Server closed with error %v", err)
 	}
 
+	snapshotAfter := stats.GLOBAL_REPORTING.Snapshot()
+	diff := snapshotBefore.Diff(snapshotAfter)
+	diff.Write(&log.SugaredLogger)
+
 	if !serverStore.HasAll(rootId) {
 		t.Errorf("Expected server store to have all children of %v", rootId)
 	}
 }
 
 func TestClientReceive(t *testing.T) {
-	t.Skip("TODO")
-
-	config := Config{
-		MaxBatchSize:  100,
-		Address:       ":8021",
-		BloomCapacity: 256,
+	// t.Skip("TODO")
+	serverConfig := Config{
+		Address: ":8021",
+	}
+	responderConfig := batch.Config{
+		MaxBatchSize:  1024,
+		BloomCapacity: 1024,
 		BloomFunction: MOCK_ID_HASH,
 		Instrument:    instrumented.INSTRUMENT_STORE | instrumented.INSTRUMENT_ORCHESTRATOR,
 	}
@@ -98,8 +111,8 @@ func TestClientReceive(t *testing.T) {
 
 	rootId := mock.AddRandomTree(context.Background(), serverStore, 12, 5, 0.0)
 
-	server := NewServer[mock.BlockId](serverStore, config)
-	client := NewClient[mock.BlockId](clientStore, config)
+	server := NewServer[mock.BlockId](serverStore, serverConfig, responderConfig)
+	client := NewClient[mock.BlockId](clientStore, responderConfig)
 
 	errChan := make(chan error)
 
@@ -110,17 +123,34 @@ func TestClientReceive(t *testing.T) {
 
 	snapshotBefore := stats.GLOBAL_REPORTING.Snapshot()
 
-	client.Receive("http://localhost:8021", rootId)
+	url := "http://localhost:8021"
+	session := client.GetSinkSession(url)
+	go func() {
+		if err := session.Enqueue(rootId); err != nil {
+			log.Debugw("error enqueuing root", "err", err)
+			return
+		}
+	}()
+
+	go func() {
+		log.Debugf("timeout started")
+		time.Sleep(10 * time.Second)
+		log.Debugf("timeout elapsed")
+
+		// If we timeout, see what goroutines are hung
+		// pprof.Lookup("goroutine").WriteTo(os.Stdout, 1)
+
+		if err := session.Cancel(); err != nil {
+			log.Errorf("error cancelling sender session: %v", err)
+		}
+
+		// server.Stop()
+	}()
 
 	// Wait for the session to go away
-	info, err := client.SinkInfo("http://localhost:8021")
-	for err == nil {
-		log.Debugf("client info: %s", info.String())
-		time.Sleep(1000 * time.Millisecond)
-		info, err = client.SinkInfo("http://localhost:8021")
-	}
+	err := <-session.Done()
 
-	if err != ErrInvalidSession {
+	if err != nil {
 		t.Errorf("Closed with unexpected error %v", err)
 	}
 

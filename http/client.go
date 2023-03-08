@@ -25,13 +25,13 @@ type Client[I core.BlockId, R core.BlockIdRef[I]] struct {
 	instrumented   instrumented.InstrumentationOptions
 }
 
-func NewClient[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], config Config) *Client[I, R] {
+func NewClient[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], config batch.Config) *Client[I, R] {
 	return &Client[I, R]{
 		store,
 		util.NewSynchronizedMap[string, *core.SourceSession[I, batch.BatchState]](),
 		util.NewSynchronizedMap[string, *core.SinkSession[I, batch.BatchState]](),
 		config.MaxBatchSize,
-		NewBloomAllocator[I](&config),
+		batch.NewBloomAllocator[I](&config),
 		config.Instrument,
 	}
 }
@@ -53,6 +53,7 @@ func (c *Client[I, R]) startSourceSession(url string) *core.SourceSession[I, bat
 	newSession := sourceConnection.Session(
 		c.store,
 		filter.NewSynchronizedFilter[I](filter.NewEmptyFilter(c.allocator)),
+		true, // Requester
 	)
 
 	newSender := sourceConnection.ImmediateSender(newSession, c.maxBatchSize)
@@ -60,11 +61,6 @@ func (c *Client[I, R]) startSourceSession(url string) *core.SourceSession[I, bat
 	go func() {
 		log.Debugw("starting source session", "object", "Client", "method", "startSourceSession", "url", url)
 		newSession.Run(newSender)
-
-		// Close the sender
-		// if err := newSender.Close(); err != nil {
-		// 	log.Errorw("error closing sender", "object", "Client", "method", "startSourceSession", "url", url, "error", err)
-		// }
 
 		// TODO: potential race condition if Run() completes before the
 		// session is added to the list of sink sessions (which happens
@@ -110,6 +106,7 @@ func (c *Client[I, R]) startSinkSession(url string) *core.SinkSession[I, batch.B
 	newSession := sinkConnection.Session(
 		c.store,
 		core.NewSimpleStatusAccumulator(c.allocator()),
+		true, // Requester
 	)
 
 	sender := sinkConnection.ImmediateSender(newSession)
@@ -117,11 +114,6 @@ func (c *Client[I, R]) startSinkSession(url string) *core.SinkSession[I, batch.B
 	go func() {
 		log.Debugw("starting sink session", "object", "Client", "method", "startSinkSession", "url", url)
 		newSession.Run(sender)
-
-		// TODO: close sender?
-		// if err := sender.Close(); err != nil {
-		// 	log.Errorw("error closing sender", "object", "Client", "method", "startSinkSession", "url", url, "error", err)
-		// }
 
 		// TODO: potential race condition if Run() completes before the
 		// session is added to the list of sink sessions (which happens

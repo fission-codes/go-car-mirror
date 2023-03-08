@@ -25,6 +25,13 @@ func NewOrchestrator[F core.Flags](orchestrator core.Orchestrator[F], stats stat
 	}
 }
 
+// IsRequester calls the underlying orchestrator's IsRequester method and records stats.
+func (io *Orchestrator[F]) IsRequester() bool {
+	result := io.orchestrator.IsRequester()
+	io.stats.Logger().Debugw("exit", "method", "IsRequester", "result", result)
+	return result
+}
+
 // Notify calls the underlying orchestrator's Notify method and records stats.
 func (io *Orchestrator[F]) Notify(event core.SessionEvent) error {
 	io.stats.Logger().Debugw("enter", "method", "Notify", "event", event, "state", io.orchestrator.State())
@@ -48,9 +55,15 @@ func (io *Orchestrator[F]) IsClosed() bool {
 	return result
 }
 
-func (io *Orchestrator[F]) ShouldClose() bool {
-	result := io.orchestrator.ShouldClose()
-	io.stats.Logger().Debugw("exit", "method", "ShouldClose", "state", io.orchestrator.State(), "result", result)
+func (io *Orchestrator[F]) IsSafeStateToClose() bool {
+	result := io.orchestrator.IsSafeStateToClose()
+	io.stats.Logger().Debugw("exit", "method", "IsSafeStateToClose", "state", io.orchestrator.State(), "result", result)
+	return result
+}
+
+func (io *Orchestrator[F]) ShouldFlush() bool {
+	result := io.orchestrator.ShouldFlush()
+	io.stats.Logger().Debugw("exit", "method", "ShouldFlush", "state", io.orchestrator.State(), "result", result)
 	return result
 }
 
@@ -269,7 +282,7 @@ const (
 	INSTRUMENT_SENDER
 )
 
-func NewSourceSession[I core.BlockId, F core.Flags](store core.BlockStore[I], filter filter.Filter[I], orchestrator core.Orchestrator[F], stats stats.Stats, options InstrumentationOptions) *core.SourceSession[I, F] {
+func NewSourceSession[I core.BlockId, F core.Flags](store core.BlockStore[I], filter filter.Filter[I], orchestrator core.Orchestrator[F], stats stats.Stats, options InstrumentationOptions, requester bool) *core.SourceSession[I, F] {
 
 	if options&INSTRUMENT_STORE != 0 {
 		store = NewBlockStore(store, stats.WithContext("SourceStore"))
@@ -279,7 +292,7 @@ func NewSourceSession[I core.BlockId, F core.Flags](store core.BlockStore[I], fi
 		filter = inf.New(filter, stats.WithContext("SourceFilter"))
 	}
 
-	return core.NewSourceSession(store, filter, orchestrator, stats)
+	return core.NewSourceSession(store, filter, orchestrator, stats, requester)
 }
 
 func NewSinkSession[I core.BlockId, F core.Flags](
@@ -288,11 +301,12 @@ func NewSinkSession[I core.BlockId, F core.Flags](
 	orchestrator core.Orchestrator[F],
 	stats stats.Stats,
 	options InstrumentationOptions,
+	requester bool,
 ) *core.SinkSession[I, F] {
 
 	if options&INSTRUMENT_STORE > 0 {
 		store = NewBlockStore(store, stats.WithContext("SinkStore"))
 	}
 
-	return core.NewSinkSession(store, statusAccumulator, orchestrator, stats)
+	return core.NewSinkSession(store, statusAccumulator, orchestrator, stats, requester)
 }
