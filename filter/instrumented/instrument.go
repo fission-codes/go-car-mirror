@@ -59,15 +59,16 @@ func (rf *Filter[K]) Clear() filter.Filter[K] {
 }
 
 // UnsynchronizedCopy returns an unsynchronized copy of the filter.
-func (rf *Filter[K]) UnsynchronizedCopy() filter.Filter[K] {
-	rf.stats.Log("UnsynchronizedCopy")
-	return &Filter[K]{rf.UnsynchronizedCopy(), rf.stats}
-}
+// func (rf *Filter[K]) UnsynchronizedCopy() filter.Filter[K] {
+// 	rf.stats.Log("UnsynchronizedCopy")
+//  TODO: This is a recursive loop.  Also, can't use rf.filter.UnsynchronizedCopy() because it is not part of the interface.
+// 	return &Filter[K]{rf.UnsynchronizedCopy(), rf.stats}
+// }
 
 // Copy returns a copy of the filter.
 func (rf *Filter[K]) Copy() filter.Filter[K] {
 	rf.stats.Log("Copy")
-	return &Filter[K]{rf.Copy(), rf.stats}
+	return &Filter[K]{rf.filter.Copy(), rf.stats}
 }
 
 // Capacity returns the capacity of the filter.
