@@ -29,4 +29,4 @@ watch:
 .PHONY: lint
 lint: ## Run style checks and verify syntax
 	go vet -asmdecl -assign -atomic -bools -buildtag -cgocall -copylocks -httpresponse -loopclosure -lostcancel -nilfunc -printf -shift -stdmethods -structtag -tests -unmarshal -unreachable -unsafeptr -unusedresult ./...
-	test -z $(gofmt -l ./...)
+	test -z $(gofmt -l .)
