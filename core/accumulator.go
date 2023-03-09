@@ -34,6 +34,7 @@ func (ssa *SimpleStatusAccumulator[I]) Have(id I) error {
 	return nil
 }
 
+// HaveCount returns the number of blocks that have been received.
 func (ssa *SimpleStatusAccumulator[I]) HaveCount() uint {
 	ssa.mutex.Lock()
 	defer ssa.mutex.Unlock()
@@ -50,6 +51,7 @@ func (ssa *SimpleStatusAccumulator[I]) Want(id I) error {
 	return nil
 }
 
+// WantCount returns the number of blocks that are currently wanted.
 func (ssa *SimpleStatusAccumulator[I]) WantCount() uint {
 	ssa.mutex.Lock()
 	defer ssa.mutex.Unlock()
