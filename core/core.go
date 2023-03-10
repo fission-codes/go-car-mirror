@@ -163,9 +163,9 @@ type BlockSender[I BlockId] interface {
 	SendBlock(block RawBlock[I]) error
 	// Ensure any blocks queued for sending are actually sent; should block until all blocks are sent.
 	Flush() error
-	// Close the sender gracefully, ensuring any pending blocks are flushed
+	// Close the sender gracefully, ensuring any pending blocks are flushed.
 	Close() error
-
+	// Len returns the number of blocks queued for sending.
 	Len() int
 }
 
@@ -330,6 +330,7 @@ type SinkSession[
 	stats             stats.Stats
 	startedCh         chan bool
 	doneCh            chan error
+	maxBlocksPerRound uint32
 	requester         bool // requester or responder
 }
 
@@ -353,6 +354,7 @@ func NewSinkSession[I BlockId, F Flags](
 	statusAccumulator StatusAccumulator[I], // Accumulator for status information
 	orchestrator Orchestrator[F], // Orchestrator used to synchronize this session with its communication channel
 	stats stats.Stats, // Collector for session-related statistics
+	maxBlocksPerRound uint32, // Maximum number of blocks to process per round
 	requester bool,
 ) *SinkSession[I, F] {
 	return &SinkSession[I, F]{
@@ -363,6 +365,7 @@ func NewSinkSession[I BlockId, F Flags](
 		stats,
 		make(chan bool, 1),
 		make(chan error, 1),
+		maxBlocksPerRound,
 		requester,
 	}
 }
@@ -572,15 +575,16 @@ type SourceSession[
 	I BlockId,
 	F Flags,
 ] struct {
-	store         BlockStore[I]
-	orchestrator  Orchestrator[F]
-	filter        filter.Filter[I]
-	sent          sync.Map
-	pendingBlocks *util.SynchronizedDeque[I]
-	stats         stats.Stats
-	startedCh     chan bool
-	doneCh        chan error
-	requester     bool
+	store             BlockStore[I]
+	orchestrator      Orchestrator[F]
+	filter            filter.Filter[I]
+	sent              sync.Map
+	pendingBlocks     *util.SynchronizedDeque[I]
+	stats             stats.Stats
+	startedCh         chan bool
+	doneCh            chan error
+	maxBlocksPerRound uint32
+	requester         bool
 }
 
 // NewSourceSession creates a new SourceSession.
@@ -589,6 +593,7 @@ func NewSourceSession[I BlockId, F Flags](
 	filter filter.Filter[I], // Filter to which 'Haves' from the sink will be added
 	orchestrator Orchestrator[F], // Orchestrator used to synchronize this session with its communication channel
 	stats stats.Stats, // Collector for session-related statistics
+	maxBlocksPerRound uint32, // Maximum number of blocks to send in a single round
 	requester bool, // Requester or responder
 ) *SourceSession[I, F] {
 	return &SourceSession[I, F]{
@@ -600,6 +605,7 @@ func NewSourceSession[I BlockId, F Flags](
 		stats,
 		make(chan bool, 1),
 		make(chan error, 1),
+		maxBlocksPerRound,
 		requester,
 	}
 }
@@ -673,7 +679,7 @@ func (ss *SourceSession[I, F]) Run(
 			return
 		}
 
-		if ss.pendingBlocks.Len() > 0 {
+		if ss.pendingBlocks.Len() > 0 && blockSender.Len() < int(ss.maxBlocksPerRound) {
 			id := ss.pendingBlocks.PollFront()
 			if _, ok := ss.sent.Load(id); !ok {
 				// TODO: Is this safe?  If we don't find it in the store, we already marked it as sent.

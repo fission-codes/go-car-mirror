@@ -242,18 +242,18 @@ func (sn *MockStatusSender) Close() error {
 
 // http tests did this, but it is right?
 
-func MockBatchTransferSend(senderStore *mock.Store, receiverStore *mock.Store, root mock.BlockId, maxBatchSize uint32, bytesPerMs int64, latencyMs int64) error {
+func MockBatchTransferSend(senderStore *mock.Store, receiverStore *mock.Store, root mock.BlockId, maxBlocksPerRound uint32, bytesPerMs int64, latencyMs int64) error {
 
 	snapshotBefore := stats.GLOBAL_REPORTING.Snapshot()
 
 	config := batch.Config{
-		MaxBatchSize:  maxBatchSize,
-		BloomCapacity: 1024,
-		BloomFunction: MOCK_ID_HASH,
-		Instrument:    instrumented.INSTRUMENT_STORE | instrumented.INSTRUMENT_ORCHESTRATOR,
+		MaxBlocksPerRound: maxBlocksPerRound,
+		BloomCapacity:     1024,
+		BloomFunction:     MOCK_ID_HASH,
+		Instrument:        instrumented.INSTRUMENT_STORE | instrumented.INSTRUMENT_ORCHESTRATOR,
 	}
 
-	sourceConnection := batch.NewGenericBatchSourceConnection[mock.BlockId](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE, true) // Requester
+	sourceConnection := batch.NewGenericBatchSourceConnection[mock.BlockId](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE, maxBlocksPerRound, true) // Requester
 
 	senderSession := sourceConnection.Session(
 		senderStore,
@@ -288,7 +288,7 @@ func MockBatchTransferSend(senderStore *mock.Store, receiverStore *mock.Store, r
 		return sourceConnection.Receiver(senderSession)
 	})
 
-	blockSender := sourceConnection.Sender(&blockChannel, uint32(maxBatchSize))
+	blockSender := sourceConnection.Sender(&blockChannel, uint32(maxBlocksPerRound))
 
 	sinkResponder.SetStatusSender(&statusChannel)
 
@@ -372,21 +372,21 @@ func MockBatchTransferSend(senderStore *mock.Store, receiverStore *mock.Store, r
 	return nil
 }
 
-func MockBatchTransferReceive(sinkStore *mock.Store, sourceStore *mock.Store, root mock.BlockId, maxBatchSize uint32, bytesPerMs int64, latencyMs int64) error {
+func MockBatchTransferReceive(sinkStore *mock.Store, sourceStore *mock.Store, root mock.BlockId, maxBlocksPerRound uint32, bytesPerMs int64, latencyMs int64) error {
 
 	snapshotBefore := stats.GLOBAL_REPORTING.Snapshot()
 
 	config := batch.Config{
-		MaxBatchSize:  maxBatchSize,
-		BloomCapacity: 1024, // matches value used below before my changes
-		BloomFunction: MOCK_ID_HASH,
-		Instrument:    instrumented.INSTRUMENT_STORE | instrumented.INSTRUMENT_ORCHESTRATOR,
+		MaxBlocksPerRound: maxBlocksPerRound,
+		BloomCapacity:     1024, // matches value used below before my changes
+		BloomFunction:     MOCK_ID_HASH,
+		Instrument:        instrumented.INSTRUMENT_STORE | instrumented.INSTRUMENT_ORCHESTRATOR,
 	}
 
-	sourceResponder := batch.NewSourceResponder[mock.BlockId](sourceStore, config, nil, maxBatchSize)
+	sourceResponder := batch.NewSourceResponder[mock.BlockId](sourceStore, config, nil, maxBlocksPerRound)
 
 	// The sink is driving for pull
-	sinkConnection := batch.NewGenericBatchSinkConnection[mock.BlockId](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE, true) // Requester
+	sinkConnection := batch.NewGenericBatchSinkConnection[mock.BlockId](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE, maxBlocksPerRound, true) // Requester
 
 	statusChannel := StatusChannel{
 		make(chan *messages.StatusMessage[mock.BlockId, *mock.BlockId]),
@@ -499,7 +499,7 @@ func TestMockTransferToEmptyStoreSingleBatchNoDelaySend(t *testing.T) {
 	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
 	receiverStore := mock.NewStore(mock.DefaultConfig())
 
-	MockBatchTransferSend(senderStore, receiverStore, root, 5000, 0, 0)
+	MockBatchTransferSend(senderStore, receiverStore, root, 100, 0, 0)
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
 	}
@@ -631,5 +631,22 @@ func TestMockTransferSingleMissingTreeDelayedSend(t *testing.T) {
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
 		receiverStore.Dump(root, &log.SugaredLogger, "")
+	}
+}
+
+func TestMockTransferSomethingElseSend(t *testing.T) {
+	t.Skip("This test is not yet implemented")
+	senderStore := mock.NewStore(mock.DefaultConfig())
+	root := mock.AddRandomTree(context.Background(), senderStore, 16, 5, 0.0)
+	receiverStore := mock.NewStore(mock.DefaultConfig())
+	receiverStore.AddAll(context.Background(), senderStore)
+	block, err := receiverStore.RandomBlock()
+	if err != nil {
+		t.Errorf("Could not find random block %v", err)
+	}
+	receiverStore.Remove(block.Id())
+	MockBatchTransferSend(senderStore, receiverStore, root, 3000, 0, 0)
+	if !receiverStore.HasAll(root) {
+		t.Errorf("Expected receiver store to have all nodes")
 	}
 }

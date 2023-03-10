@@ -161,20 +161,20 @@ func (sbbr *SimpleBatchBlockReceiver[I]) Orchestrator() core.Orchestrator[BatchS
 
 // SimpleBatchBlockSender is a simple implementation of BlockSender which wraps a BatchBlockSender
 type SimpleBatchBlockSender[I core.BlockId] struct {
-	orchestrator     core.Orchestrator[BatchState]
-	list             []core.RawBlock[I]
-	listMutex        sync.Mutex
-	batchBlockSender BatchBlockSender[I]
-	maxBatchSize     uint32
+	orchestrator      core.Orchestrator[BatchState]
+	list              []core.RawBlock[I]
+	listMutex         sync.Mutex
+	batchBlockSender  BatchBlockSender[I]
+	maxBlocksPerRound uint32
 }
 
 // NewSimpleBatchBlockSender creates a new SimpleBatchBlockSender.
-func NewSimpleBatchBlockSender[I core.BlockId](batchBlockSender BatchBlockSender[I], orchestrator core.Orchestrator[BatchState], maxBatchSize uint32) *SimpleBatchBlockSender[I] {
+func NewSimpleBatchBlockSender[I core.BlockId](batchBlockSender BatchBlockSender[I], orchestrator core.Orchestrator[BatchState], maxBlocksPerRound uint32) *SimpleBatchBlockSender[I] {
 	return &SimpleBatchBlockSender[I]{
-		orchestrator:     orchestrator,
-		list:             make([]core.RawBlock[I], 0, maxBatchSize),
-		batchBlockSender: batchBlockSender,
-		maxBatchSize:     maxBatchSize,
+		orchestrator:      orchestrator,
+		list:              make([]core.RawBlock[I], 0, maxBlocksPerRound),
+		batchBlockSender:  batchBlockSender,
+		maxBlocksPerRound: maxBlocksPerRound,
 	}
 }
 
@@ -187,7 +187,7 @@ func (sbbs *SimpleBatchBlockSender[I]) SendBlock(block core.RawBlock[I]) error {
 
 	// TODO: Add logic around maxBatchSizeColdCall if needed.
 	// Should this logic be pulled into the main loop?  To ensure we know when we're flushing?
-	// if listLen >= int(sbbs.maxBatchSize) {
+	// if listLen >= int(sbbs.maxBlocksPerRound) {
 	// 	return sbbs.Flush()
 	// }
 
