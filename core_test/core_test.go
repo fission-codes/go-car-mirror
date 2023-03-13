@@ -510,7 +510,7 @@ func TestMockTransferToEmptyStoreSingleBatchNoDelayReceive(t *testing.T) {
 	root := mock.AddRandomTree(context.Background(), sourceStore, 10, 5, 0.0)
 	sinkStore := mock.NewStore(mock.DefaultConfig())
 
-	MockBatchTransferReceive(sinkStore, sourceStore, root, 5000, 0, 0)
+	MockBatchTransferReceive(sinkStore, sourceStore, root, 100, 0, 0)
 	if !sinkStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
 	}
@@ -552,7 +552,7 @@ func TestMockTransferToEmptyStoreMultiBatchNoDelaySend(t *testing.T) {
 
 func TestMockTransferToEmptyStoreMultiBatchNoDelayReceive(t *testing.T) {
 	senderStore := mock.NewStore(mock.DefaultConfig())
-	root := mock.AddRandomTree(context.Background(), senderStore, 4, 5, 0.0)
+	root := mock.AddRandomTree(context.Background(), senderStore, 10, 5, 0.0)
 	receiverStore := mock.NewStore(mock.DefaultConfig())
 	MockBatchTransferReceive(receiverStore, senderStore, root, 50, 0, 0)
 	if !receiverStore.HasAll(root) {
@@ -631,22 +631,5 @@ func TestMockTransferSingleMissingTreeDelayedSend(t *testing.T) {
 	if !receiverStore.HasAll(root) {
 		t.Errorf("Expected receiver store to have all nodes")
 		receiverStore.Dump(root, &log.SugaredLogger, "")
-	}
-}
-
-func TestMockTransferSomethingElseSend(t *testing.T) {
-	t.Skip("This test is not yet implemented")
-	senderStore := mock.NewStore(mock.DefaultConfig())
-	root := mock.AddRandomTree(context.Background(), senderStore, 16, 5, 0.0)
-	receiverStore := mock.NewStore(mock.DefaultConfig())
-	receiverStore.AddAll(context.Background(), senderStore)
-	block, err := receiverStore.RandomBlock()
-	if err != nil {
-		t.Errorf("Could not find random block %v", err)
-	}
-	receiverStore.Remove(block.Id())
-	MockBatchTransferSend(senderStore, receiverStore, root, 3000, 0, 0)
-	if !receiverStore.HasAll(root) {
-		t.Errorf("Expected receiver store to have all nodes")
 	}
 }
