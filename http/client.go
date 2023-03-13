@@ -17,12 +17,12 @@ func init() {
 }
 
 type Client[I core.BlockId, R core.BlockIdRef[I]] struct {
-	store          core.BlockStore[I]
-	sourceSessions *util.SynchronizedMap[string, *core.SourceSession[I, batch.BatchState]]
-	sinkSessions   *util.SynchronizedMap[string, *core.SinkSession[I, batch.BatchState]]
-	maxBatchSize   uint32
-	allocator      func() filter.Filter[I]
-	instrumented   instrumented.InstrumentationOptions
+	store             core.BlockStore[I]
+	sourceSessions    *util.SynchronizedMap[string, *core.SourceSession[I, batch.BatchState]]
+	sinkSessions      *util.SynchronizedMap[string, *core.SinkSession[I, batch.BatchState]]
+	maxBlocksPerRound uint32
+	allocator         func() filter.Filter[I]
+	instrumented      instrumented.InstrumentationOptions
 }
 
 func NewClient[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], config batch.Config) *Client[I, R] {
@@ -30,7 +30,7 @@ func NewClient[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], c
 		store,
 		util.NewSynchronizedMap[string, *core.SourceSession[I, batch.BatchState]](),
 		util.NewSynchronizedMap[string, *core.SinkSession[I, batch.BatchState]](),
-		config.MaxBatchSize,
+		config.MaxBlocksPerRound,
 		batch.NewBloomAllocator[I](&config),
 		config.Instrument,
 	}
@@ -48,6 +48,7 @@ func (c *Client[I, R]) startSourceSession(url string) *core.SourceSession[I, bat
 		url+"/dag/cm/blocks",
 		stats.GLOBAL_STATS.WithContext(url),
 		c.instrumented,
+		c.maxBlocksPerRound,
 	)
 
 	newSession := sourceConnection.Session(
@@ -56,7 +57,7 @@ func (c *Client[I, R]) startSourceSession(url string) *core.SourceSession[I, bat
 		true, // Requester
 	)
 
-	newSender := sourceConnection.ImmediateSender(newSession, c.maxBatchSize)
+	newSender := sourceConnection.ImmediateSender(newSession, c.maxBlocksPerRound)
 
 	go func() {
 		log.Debugw("starting source session", "object", "Client", "method", "startSourceSession", "url", url)
@@ -101,6 +102,7 @@ func (c *Client[I, R]) startSinkSession(url string) *core.SinkSession[I, batch.B
 		url+"/dag/cm/status",
 		stats.GLOBAL_STATS.WithContext(url),
 		c.instrumented,
+		c.maxBlocksPerRound,
 	)
 
 	newSession := sinkConnection.Session(

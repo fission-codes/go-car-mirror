@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 
 	"github.com/fission-codes/go-car-mirror/errors"
 	"github.com/fission-codes/go-car-mirror/stats"
@@ -163,9 +164,9 @@ type BlockSender[I BlockId] interface {
 	SendBlock(block RawBlock[I]) error
 	// Ensure any blocks queued for sending are actually sent; should block until all blocks are sent.
 	Flush() error
-	// Close the sender gracefully, ensuring any pending blocks are flushed
+	// Close the sender gracefully, ensuring any pending blocks are flushed.
 	Close() error
-
+	// Len returns the number of blocks queued for sending.
 	Len() int
 }
 
@@ -311,7 +312,6 @@ type Orchestrator[F Flags] interface {
 	// IsSafeStateToClose returns true if the state of the Orchestrator indicates that the session should close.
 	// Other factors may need to be taken into account as well to determine if close should happen, but this
 	// tells us if the states indicate a close is safe.
-	// TODO: Maybe rename to IsSafeToClose or IsSafeCloseState?
 	IsSafeStateToClose() bool
 
 	// ShouldFlush returns true if the state of the Orchestrator indicates that the session should flush.
@@ -331,6 +331,7 @@ type SinkSession[
 	stats             stats.Stats
 	startedCh         chan bool
 	doneCh            chan error
+	maxBlocksPerRound uint32
 	requester         bool // requester or responder
 }
 
@@ -354,6 +355,7 @@ func NewSinkSession[I BlockId, F Flags](
 	statusAccumulator StatusAccumulator[I], // Accumulator for status information
 	orchestrator Orchestrator[F], // Orchestrator used to synchronize this session with its communication channel
 	stats stats.Stats, // Collector for session-related statistics
+	maxBlocksPerRound uint32, // Maximum number of blocks to process per round
 	requester bool,
 ) *SinkSession[I, F] {
 	return &SinkSession[I, F]{
@@ -364,6 +366,7 @@ func NewSinkSession[I BlockId, F Flags](
 		stats,
 		make(chan bool, 1),
 		make(chan error, 1),
+		maxBlocksPerRound,
 		requester,
 	}
 }
@@ -421,16 +424,13 @@ func (ss *SinkSession[I, F]) AccumulateStatus(id I) error {
 
 // Enqueue a block for transfer (will retrieve block and children from the related source session)
 func (ss *SinkSession[I, F]) Enqueue(id I) error {
-	// When is it safe to do this?
-	// if we are currently checking (e.g. the polling loop is running)
-	// if we are not currently checking *and* we are not currently sending?
-	if err := ss.orchestrator.Notify(BEGIN_ENQUEUE); err != nil { // This should block if state is RECEIVER_SENDING
+	if err := ss.orchestrator.Notify(BEGIN_ENQUEUE); err != nil {
 		return err
 	}
 
-	defer ss.orchestrator.Notify(END_ENQUEUE) // This should set RECEIVER_CHECKING
+	defer ss.orchestrator.Notify(END_ENQUEUE)
 
-	return ss.AccumulateStatus(id) // This is recursive so it may take some time
+	return ss.AccumulateStatus(id)
 }
 
 // HandleBlock handles a block that is being received. Adds the block to the session's store, and
@@ -576,15 +576,18 @@ type SourceSession[
 	I BlockId,
 	F Flags,
 ] struct {
-	store         BlockStore[I]
-	orchestrator  Orchestrator[F]
-	filter        filter.Filter[I]
-	sent          sync.Map
-	pendingBlocks *util.SynchronizedDeque[I]
-	stats         stats.Stats
-	startedCh     chan bool
-	doneCh        chan error
-	requester     bool
+	store             BlockStore[I]
+	orchestrator      Orchestrator[F]
+	filter            filter.Filter[I]
+	sent              sync.Map
+	pendingBlocks     *util.SynchronizedDeque[I]
+	requestedRoots    *util.SynchronizedDeque[I]
+	numRequestedRoots atomic.Uint32
+	stats             stats.Stats
+	startedCh         chan bool
+	doneCh            chan error
+	maxBlocksPerRound uint32
+	requester         bool
 }
 
 // NewSourceSession creates a new SourceSession.
@@ -593,6 +596,7 @@ func NewSourceSession[I BlockId, F Flags](
 	filter filter.Filter[I], // Filter to which 'Haves' from the sink will be added
 	orchestrator Orchestrator[F], // Orchestrator used to synchronize this session with its communication channel
 	stats stats.Stats, // Collector for session-related statistics
+	maxBlocksPerRound uint32, // Maximum number of blocks to send in a single round
 	requester bool, // Requester or responder
 ) *SourceSession[I, F] {
 	return &SourceSession[I, F]{
@@ -601,9 +605,12 @@ func NewSourceSession[I BlockId, F Flags](
 		filter,
 		sync.Map{},
 		util.NewSynchronizedDeque[I](util.NewBlocksDeque[I](1024)),
+		util.NewSynchronizedDeque[I](util.NewBlocksDeque[I](100)),
+		atomic.Uint32{},
 		stats,
 		make(chan bool, 1),
 		make(chan error, 1),
+		maxBlocksPerRound,
 		requester,
 	}
 }
@@ -661,7 +668,7 @@ func (ss *SourceSession[I, F]) Run(
 		// Note that this check means you must enqueue before running a session.
 		// TODO: Is there any need to mutex this so we get it for both variables simultaneously?
 		log.Debugw("SourceSession.Run() checking for pending blocks", "pendingBlocks", ss.pendingBlocks.Len(), "blockSender", blockSender.Len())
-		if ss.pendingBlocks.Len() == 0 && blockSender.Len() == 0 && ss.orchestrator.IsSafeStateToClose() {
+		if ss.requestedRoots.Len() == 0 && ss.pendingBlocks.Len() == 0 && blockSender.Len() == 0 && ss.orchestrator.IsSafeStateToClose() {
 			if err := ss.orchestrator.Notify(BEGIN_CLOSE); err != nil {
 				ss.doneCh <- err
 				return
@@ -677,7 +684,48 @@ func (ss *SourceSession[I, F]) Run(
 			return
 		}
 
-		if ss.pendingBlocks.Len() > 0 {
+		for ss.requestedRoots.Len() > 0 {
+			id := ss.requestedRoots.PollFront()
+			if _, ok := ss.sent.Load(id); !ok {
+				ss.sent.Store(id, true)
+
+				block, err := ss.store.Get(context.Background(), id)
+				if err != nil {
+					if err != errors.ErrBlockNotFound {
+						ss.doneCh <- err
+						return
+					}
+				} else {
+					if err := blockSender.SendBlock(block); err != nil {
+						ss.doneCh <- err
+						return
+					}
+					// Responder always responds to a request, even if 0 blocks are available to send,
+					// so we must signal that we have some knowledge to send.
+					// Requester on the other hand only flushes if we need to send something.
+					if blockSender.Len() > 0 || !ss.requester {
+						if err := ss.orchestrator.Notify(BEGIN_SEND); err != nil {
+							ss.doneCh <- err
+							return
+						}
+						if err := ss.orchestrator.Notify(END_SEND); err != nil {
+							ss.doneCh <- err
+							return
+						}
+					}
+					for _, child := range block.Children() {
+						if ss.filter.DoesNotContain(child) {
+							if err := ss.pendingBlocks.PushBack(child); err != nil {
+								ss.doneCh <- err
+								return
+							}
+						}
+					}
+				}
+			}
+		}
+
+		if ss.pendingBlocks.Len() > 0 && blockSender.Len() < ss.NumBlocksToSend() {
 			id := ss.pendingBlocks.PollFront()
 			if _, ok := ss.sent.Load(id); !ok {
 				// TODO: Is this safe?  If we don't find it in the store, we already marked it as sent.
@@ -692,6 +740,8 @@ func (ss *SourceSession[I, F]) Run(
 					// TODO: How do we notify that the request block was not found?
 				} else {
 					// Sending a block might lead to flushing.
+					// Why always send the block but then add its children?  Since we loop we eventually end up sending all without respect to the filter, right?
+					//
 					if err := blockSender.SendBlock(block); err != nil {
 						// TODO: If error here, maybe we should remove it from ss.sent.
 						ss.doneCh <- err
@@ -757,6 +807,14 @@ func (ss *SourceSession[I, F]) Run(
 	}
 }
 
+func (ss *SourceSession[I, F]) NumBlocksToSend() int {
+	numRequestedRoots := ss.numRequestedRoots.Load()
+	if numRequestedRoots > ss.maxBlocksPerRound {
+		return int(numRequestedRoots)
+	}
+	return int(ss.maxBlocksPerRound)
+}
+
 // HandleStatus handles incoming status, updating the filter and pending blocks list.
 func (ss *SourceSession[I, F]) HandleStatus(
 	have filter.Filter[I], // A collection of blocks known to already exist on the sink
@@ -766,17 +824,14 @@ func (ss *SourceSession[I, F]) HandleStatus(
 		ss.stats.Logger().Errorw("error notifying BEGIN_RECEIVE", "object", "SourceSession", "method", "HandleStatus", "error", err)
 	}
 	defer ss.orchestrator.Notify(END_RECEIVE)
-	ss.stats.Logger().Debugw("begin processing", "object", "SourceSession", "method", "HandleStatus", "pendingBlocks", ss.pendingBlocks.Len(), "filter", ss.filter.Count())
-	// TODO: Had a race condition.  Write on line below, but read on 704.
-	// ss.filter = ss.filter.AddAll(have)
-	// This looks like what we want though.
+	ss.stats.Logger().Debugw("begin processing", "object", "SourceSession", "method", "HandleStatus", "requestedRoots", ss.requestedRoots.Len(), "filter", ss.filter.Count())
 	ss.filter.AddAll(have)
 	ss.stats.Logger().Debugw("incoming have filter merged", "object", "SourceSession", "method", "HandleStatus", "filter", ss.filter.Count())
-	//ss.filter.Dump(ss.log, "SourceSession filter - ")
 	for _, id := range want {
-		ss.pendingBlocks.PushFront(id) // send wants to the front of the queue
+		ss.requestedRoots.PushFront(id)
+		ss.numRequestedRoots.Add(1)
 	}
-	ss.stats.Logger().Debugw("incoming want list merged", "obect", "SourceSession", "method", "HandleStatus", "pendingBlocks", ss.pendingBlocks.Len())
+	ss.stats.Logger().Debugw("incoming want list merged", "obect", "SourceSession", "method", "HandleStatus", "requestedRoots", ss.requestedRoots.Len())
 }
 
 // Closes the source session. Note that the session does not close immediately; this method will return before
@@ -803,7 +858,8 @@ func (ss *SourceSession[I, F]) Cancel() error {
 func (ss *SourceSession[I, F]) Enqueue(id I) error {
 	ss.orchestrator.Notify(BEGIN_ENQUEUE)
 	defer ss.orchestrator.Notify(END_ENQUEUE)
-	return ss.pendingBlocks.PushBack(id)
+	ss.numRequestedRoots.Add(1)
+	return ss.requestedRoots.PushBack(id)
 }
 
 // IsClosed returns true if the session is closed.

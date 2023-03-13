@@ -10,12 +10,13 @@ import (
 
 type GenericBatchSourceConnection[I core.BlockId, R core.BlockIdRef[I]] struct {
 	core.Orchestrator[BatchState]
-	instrument instrumented.InstrumentationOptions
-	stats      stats.Stats
-	messages   chan *messages.BlocksMessage[I, R]
+	instrument        instrumented.InstrumentationOptions
+	stats             stats.Stats
+	messages          chan *messages.BlocksMessage[I, R]
+	maxBlocksPerRound uint32
 }
 
-func NewGenericBatchSourceConnection[I core.BlockId, R core.BlockIdRef[I]](stats stats.Stats, instrument instrumented.InstrumentationOptions, requester bool) *GenericBatchSourceConnection[I, R] {
+func NewGenericBatchSourceConnection[I core.BlockId, R core.BlockIdRef[I]](stats stats.Stats, instrument instrumented.InstrumentationOptions, maxBlocksPerRound uint32, requester bool) *GenericBatchSourceConnection[I, R] {
 	var orchestrator core.Orchestrator[BatchState] = NewBatchSourceOrchestrator(requester)
 
 	if instrument&instrumented.INSTRUMENT_ORCHESTRATOR != 0 {
@@ -27,6 +28,7 @@ func NewGenericBatchSourceConnection[I core.BlockId, R core.BlockIdRef[I]](stats
 		instrument,
 		stats,
 		make(chan *messages.BlocksMessage[I, R]),
+		maxBlocksPerRound,
 	}
 }
 
@@ -48,7 +50,7 @@ func (conn *GenericBatchSourceConnection[I, R]) Sender(batchSender BatchBlockSen
 }
 
 func (conn *GenericBatchSourceConnection[I, R]) Session(store core.BlockStore[I], filter filter.Filter[I], requester bool) *core.SourceSession[I, BatchState] {
-	return instrumented.NewSourceSession[I, BatchState](store, filter, conn, conn.stats, conn.instrument, requester)
+	return instrumented.NewSourceSession[I, BatchState](store, filter, conn, conn.stats, conn.instrument, conn.maxBlocksPerRound, requester)
 }
 
 func (conn *GenericBatchSourceConnection[I, R]) DeferredSender(batchSize uint32) core.BlockSender[I] {
@@ -65,12 +67,13 @@ func (conn *GenericBatchSourceConnection[I, R]) PendingResponse() *messages.Bloc
 
 type GenericBatchSinkConnection[I core.BlockId, R core.BlockIdRef[I]] struct {
 	core.Orchestrator[BatchState]
-	instrument instrumented.InstrumentationOptions
-	stats      stats.Stats
-	messages   chan *messages.StatusMessage[I, R]
+	instrument        instrumented.InstrumentationOptions
+	stats             stats.Stats
+	messages          chan *messages.StatusMessage[I, R]
+	maxBlocksPerRound uint32
 }
 
-func NewGenericBatchSinkConnection[I core.BlockId, R core.BlockIdRef[I]](stats stats.Stats, instrument instrumented.InstrumentationOptions, requester bool) *GenericBatchSinkConnection[I, R] {
+func NewGenericBatchSinkConnection[I core.BlockId, R core.BlockIdRef[I]](stats stats.Stats, instrument instrumented.InstrumentationOptions, maxBlocksPerRound uint32, requester bool) *GenericBatchSinkConnection[I, R] {
 
 	var orchestrator core.Orchestrator[BatchState] = NewBatchSinkOrchestrator(requester)
 
@@ -83,6 +86,7 @@ func NewGenericBatchSinkConnection[I core.BlockId, R core.BlockIdRef[I]](stats s
 		instrument,
 		stats,
 		make(chan *messages.StatusMessage[I, R]),
+		maxBlocksPerRound,
 	}
 }
 
@@ -99,7 +103,7 @@ func (conn *GenericBatchSinkConnection[I, R]) Sender(statusSender core.StatusSen
 }
 
 func (conn *GenericBatchSinkConnection[I, R]) Session(store core.BlockStore[I], accumulator core.StatusAccumulator[I], requester bool) *core.SinkSession[I, BatchState] {
-	return instrumented.NewSinkSession[I, BatchState](store, accumulator, conn, conn.stats, conn.instrument, requester)
+	return instrumented.NewSinkSession[I, BatchState](store, accumulator, conn, conn.stats, conn.instrument, conn.maxBlocksPerRound, requester)
 }
 
 func (conn *GenericBatchSinkConnection[I, R]) DeferredBatchSender() core.StatusSender[I] {

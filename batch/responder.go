@@ -25,8 +25,9 @@ type SinkResponder[I core.BlockId, R core.BlockIdRef[I]] struct {
 	store        core.BlockStore[I]
 	sinkSessions *util.SynchronizedMap[SessionId, *SinkSessionData[I, R]]
 	// TODO: This gets invoked and passed to SimpleStatusAccumulator, which has mutex, so this allocator should just return a non-sync filter
-	filterAllocator func() filter.Filter[I]
-	statusSender    core.StatusSender[I]
+	filterAllocator   func() filter.Filter[I]
+	statusSender      core.StatusSender[I]
+	maxBlocksPerRound uint32
 }
 
 func NewSinkResponder[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], config Config, statusSender core.StatusSender[I]) *SinkResponder[I, R] {
@@ -36,6 +37,7 @@ func NewSinkResponder[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStor
 		// NewBloomAllocator isn't returning a synchronized filter
 		NewBloomAllocator[I](&config),
 		statusSender,
+		config.MaxBlocksPerRound,
 	}
 }
 
@@ -68,7 +70,7 @@ func (sr *SinkResponder[I, R]) AllDone() {
 }
 
 func (sr *SinkResponder[I, R]) newSinkConnection() *GenericBatchSinkConnection[I, R] {
-	return NewGenericBatchSinkConnection[I, R](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE, false) // Responders aren't requesters
+	return NewGenericBatchSinkConnection[I, R](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE, sr.maxBlocksPerRound, false) // Responders aren't requesters
 }
 
 func (sr *SinkResponder[I, R]) SinkSessionData(sessionId SessionId) *SinkSessionData[I, R] {
@@ -153,18 +155,18 @@ func (sr *SinkResponder[I, R]) SetStatusSender(statusSender core.StatusSender[I]
 // Need to get sink session, start it, allow dynamic looking up of its receiver
 
 type Config struct {
-	MaxBatchSize  uint32
-	BloomCapacity uint
-	BloomFunction uint64
-	Instrument    instrumented.InstrumentationOptions
+	MaxBlocksPerRound uint32
+	BloomCapacity     uint
+	BloomFunction     uint64
+	Instrument        instrumented.InstrumentationOptions
 }
 
 func DefaultConfig() Config {
 	return Config{
-		MaxBatchSize:  32,
-		BloomCapacity: 1024,
-		BloomFunction: 2,
-		Instrument:    0,
+		MaxBlocksPerRound: 32,
+		BloomCapacity:     1024,
+		BloomFunction:     2,
+		Instrument:        0,
 	}
 }
 
@@ -190,9 +192,10 @@ type SourceResponder[I core.BlockId, R core.BlockIdRef[I]] struct {
 	store          core.BlockStore[I]
 	sourceSessions *util.SynchronizedMap[SessionId, *SourceSessionData[I, R]]
 	// TODO: SourceSession does not sync wrapping of the filter, ...
-	filterAllocator  func() filter.Filter[I]
-	batchBlockSender BatchBlockSender[I]
-	batchSize        uint32
+	filterAllocator   func() filter.Filter[I]
+	batchBlockSender  BatchBlockSender[I]
+	batchSize         uint32
+	maxBlocksPerRound uint32
 }
 
 func NewSourceResponder[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], config Config, batchBlockSender BatchBlockSender[I], batchSize uint32) *SourceResponder[I, R] {
@@ -202,6 +205,7 @@ func NewSourceResponder[I core.BlockId, R core.BlockIdRef[I]](store core.BlockSt
 		NewBloomAllocator[I](&config),
 		batchBlockSender,
 		batchSize,
+		config.MaxBlocksPerRound,
 	}
 }
 
@@ -234,7 +238,7 @@ func (sr *SourceResponder[I, R]) AllDone() {
 }
 
 func (sr *SourceResponder[I, R]) newSourceConnection() *GenericBatchSourceConnection[I, R] {
-	return NewGenericBatchSourceConnection[I, R](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE, false) // Responders aren't requesters
+	return NewGenericBatchSourceConnection[I, R](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE, sr.maxBlocksPerRound, false) // Responders aren't requesters
 }
 
 func (sr *SourceResponder[I, R]) SourceSessionData(sessionId SessionId) *SourceSessionData[I, R] {

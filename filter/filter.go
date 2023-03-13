@@ -773,7 +773,7 @@ func (pf *PerfectFilter[K]) Equal(other Filter[K]) bool {
 	if len(pf.filter) != len(opf.filter) {
 		return false
 	}
-	for key, _ := range pf.filter {
+	for key := range pf.filter {
 		if _, ok := opf.filter[key]; !ok {
 			return false
 		}

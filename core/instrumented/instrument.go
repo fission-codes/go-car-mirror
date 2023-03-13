@@ -282,7 +282,7 @@ const (
 	INSTRUMENT_SENDER
 )
 
-func NewSourceSession[I core.BlockId, F core.Flags](store core.BlockStore[I], filter filter.Filter[I], orchestrator core.Orchestrator[F], stats stats.Stats, options InstrumentationOptions, requester bool) *core.SourceSession[I, F] {
+func NewSourceSession[I core.BlockId, F core.Flags](store core.BlockStore[I], filter filter.Filter[I], orchestrator core.Orchestrator[F], stats stats.Stats, options InstrumentationOptions, maxBlocksPerRound uint32, requester bool) *core.SourceSession[I, F] {
 
 	if options&INSTRUMENT_STORE != 0 {
 		store = NewBlockStore(store, stats.WithContext("SourceStore"))
@@ -292,7 +292,7 @@ func NewSourceSession[I core.BlockId, F core.Flags](store core.BlockStore[I], fi
 		filter = inf.New(filter, stats.WithContext("SourceFilter"))
 	}
 
-	return core.NewSourceSession(store, filter, orchestrator, stats, requester)
+	return core.NewSourceSession(store, filter, orchestrator, stats, maxBlocksPerRound, requester)
 }
 
 func NewSinkSession[I core.BlockId, F core.Flags](
@@ -301,6 +301,7 @@ func NewSinkSession[I core.BlockId, F core.Flags](
 	orchestrator core.Orchestrator[F],
 	stats stats.Stats,
 	options InstrumentationOptions,
+	maxBlocksPerRound uint32,
 	requester bool,
 ) *core.SinkSession[I, F] {
 
@@ -308,5 +309,5 @@ func NewSinkSession[I core.BlockId, F core.Flags](
 		store = NewBlockStore(store, stats.WithContext("SinkStore"))
 	}
 
-	return core.NewSinkSession(store, statusAccumulator, orchestrator, stats, requester)
+	return core.NewSinkSession(store, statusAccumulator, orchestrator, stats, maxBlocksPerRound, requester)
 }
