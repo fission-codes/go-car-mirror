@@ -97,8 +97,11 @@ type ReadableBlockStore[I BlockId] interface {
 type BlockStore[I BlockId] interface {
 	ReadableBlockStore[I]
 
-	// Add puts a given block to the blockstore.
+	// Add adds a given block into the blockstore.
 	Add(context.Context, RawBlock[I]) (Block[I], error)
+
+	// AddMany adds a given set of blocks into the blockstore.
+	AddMany(context.Context, []RawBlock[I]) ([]Block[I], error)
 }
 
 // SynchronizedBlockStore is a BlockStore that is also thread-safe.
@@ -151,6 +154,13 @@ func (bs *SynchronizedBlockStore[I]) Add(ctx context.Context, block RawBlock[I])
 	return bs.store.Add(ctx, block)
 }
 
+// AddMany adds a given set of RawBlocks to the synchronized blockstore, returning the Blocks.
+func (bs *SynchronizedBlockStore[I]) AddMany(ctx context.Context, blocks []RawBlock[I]) ([]Block[I], error) {
+	bs.mutex.Lock()
+	defer bs.mutex.Unlock()
+	return bs.store.AddMany(ctx, blocks)
+}
+
 // MutablePointerResolver is responsible for resolving a pointer into a BlockId.
 type MutablePointerResolver[I BlockId] interface {
 	// Resolve attempts to resolve ptr into a block ID.
@@ -174,6 +184,9 @@ type BlockSender[I BlockId] interface {
 type BlockReceiver[I BlockId] interface {
 	// HandleBlock is called on receipt of a new block.
 	HandleBlock(block RawBlock[I])
+
+	// HandleBlocks is called on receipt of a new batch of blocks.
+	HandleBlocks(block []RawBlock[I])
 }
 
 // StatusSender is responsible for sending status from the Sink.
@@ -446,6 +459,24 @@ func (ss *SinkSession[I, F]) HandleBlock(rawBlock RawBlock[I]) {
 	}
 
 	ss.pendingBlocks.PushBack(block)
+}
+
+// HandleBlocks handles a slice of blocks that are being received. Adds the blocks to the session's store, and
+// then queues the blocks for further processing.
+func (ss *SinkSession[I, F]) HandleBlocks(rawBlocks []RawBlock[I]) {
+	blocks, err := ss.store.AddMany(context.TODO(), rawBlocks)
+	if err != nil {
+		ss.stats.Logger().Errorf("Failed to add block to store. err = %v", err)
+		return
+	}
+
+	for _, block := range blocks {
+		if err := ss.statusAccumulator.Receive(block.Id()); err != nil {
+			ss.stats.Logger().Errorf("Failed to receive block. err = %v", err)
+		}
+
+		ss.pendingBlocks.PushBack(block)
+	}
 }
 
 // Runs the receiver session. Pulls blocks from the queue of received blocks, then checks the block descendents
