@@ -54,8 +54,8 @@ func NewServer[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], s
 	server.http = &http.Server{
 		Addr:           serverConfig.Address,
 		Handler:        mux,
-		ReadTimeout:    10 * time.Second,
-		WriteTimeout:   10 * time.Second,
+		ReadTimeout:    100 * time.Second,
+		WriteTimeout:   100 * time.Second,
 		MaxHeaderBytes: 1 << 20,
 	}
 
