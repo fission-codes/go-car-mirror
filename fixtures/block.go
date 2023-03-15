@@ -351,6 +351,24 @@ func (bs *Store) Add(_ context.Context, rawBlock core.RawBlock[BlockId]) (core.B
 	return block, nil
 }
 
+func (bs *Store) AddMany(_ context.Context, rawBlocks []core.RawBlock[BlockId]) ([]core.Block[BlockId], error) {
+	var blocks []core.Block[BlockId]
+	for _, rawBlock := range rawBlocks {
+		time.Sleep(bs.config.WriteStorageLatency + time.Duration(rawBlock.Size())*bs.config.WriteStorageBandwith)
+		block, ok := rawBlock.(*Block)
+		if !ok {
+			block = NewBlock(rawBlock.Id(), rawBlock.Size())
+			block.setBytes(rawBlock.RawData())
+		}
+		id := block.Id()
+		bs.mutex.Lock()
+		bs.blocks[id] = block
+		blocks = append(blocks, block)
+		bs.mutex.Unlock()
+	}
+	return blocks, nil
+}
+
 func (bs *Store) AddAll(ctx context.Context, store core.BlockStore[BlockId]) error {
 	if blocks, err := store.All(ctx); err == nil {
 		for id := range blocks {

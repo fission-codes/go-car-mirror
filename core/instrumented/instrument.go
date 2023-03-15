@@ -147,6 +147,20 @@ func (ibs *BlockStore[I]) Add(ctx context.Context, rawBlock core.RawBlock[I]) (c
 	return block, err
 }
 
+func (ibs *BlockStore[I]) AddMany(ctx context.Context, rawBlocks []core.RawBlock[I]) ([]core.Block[I], error) {
+	ibs.stats.Logger().Debugw("enter", "method", "AddMany", "numRawBlocks", len(rawBlocks))
+	begin := time.Now()
+	blocks, err := ibs.store.AddMany(ctx, rawBlocks)
+	if err == nil {
+		ibs.stats.Log("AddMany.Ok")
+	} else {
+		ibs.stats.Log("AddMany." + err.Error())
+		ibs.stats.Logger().Debugw("exit", "method", "AddMany", "error", err)
+	}
+	ibs.stats.LogInterval("AddMany", time.Since(begin))
+	return blocks, err
+}
+
 // BlockSender is a BlockSender that records stats for events.
 type BlockSender[I core.BlockId] struct {
 	blockSender core.BlockSender[I]

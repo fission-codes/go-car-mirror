@@ -147,9 +147,7 @@ func (sbbr *SimpleBatchBlockReceiver[I]) HandleList(list []core.RawBlock[I]) err
 	// Possibly notify BEGIN_RECEIVE and END_RECEIVE here.  Check HandleBlock.
 	sbbr.orchestrator.Notify(core.BEGIN_RECEIVE)
 	defer sbbr.orchestrator.Notify(core.END_RECEIVE)
-	for _, block := range list {
-		sbbr.session.HandleBlock(block)
-	}
+	sbbr.session.HandleBlocks(list)
 
 	return nil
 }
