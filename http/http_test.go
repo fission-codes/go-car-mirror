@@ -25,10 +25,11 @@ func TestClientSend(t *testing.T) {
 		Address: ":8021",
 	}
 	responderConfig := batch.Config{
-		MaxBlocksPerRound: 1024,
-		BloomCapacity:     1024,
-		BloomFunction:     MOCK_ID_HASH,
-		Instrument:        instrumented.INSTRUMENT_STORE | instrumented.INSTRUMENT_ORCHESTRATOR,
+		MaxBlocksPerRound:    1024,
+		MaxBlocksPerColdCall: 10,
+		BloomCapacity:        1024,
+		BloomFunction:        MOCK_ID_HASH,
+		Instrument:           instrumented.INSTRUMENT_STORE | instrumented.INSTRUMENT_ORCHESTRATOR,
 	}
 
 	serverStore := mock.NewStore(mock.Config{})
@@ -100,10 +101,11 @@ func TestClientReceive(t *testing.T) {
 		Address: ":8021",
 	}
 	responderConfig := batch.Config{
-		MaxBlocksPerRound: 1024,
-		BloomCapacity:     1024,
-		BloomFunction:     MOCK_ID_HASH,
-		Instrument:        instrumented.INSTRUMENT_STORE | instrumented.INSTRUMENT_ORCHESTRATOR,
+		MaxBlocksPerRound:    1024,
+		MaxBlocksPerColdCall: 10,
+		BloomCapacity:        1024,
+		BloomFunction:        MOCK_ID_HASH,
+		Instrument:           instrumented.INSTRUMENT_STORE | instrumented.INSTRUMENT_ORCHESTRATOR,
 	}
 
 	serverStore := mock.NewStore(mock.Config{})
