@@ -16,12 +16,13 @@ import (
 )
 
 type Server[I core.BlockId, R core.BlockIdRef[I]] struct {
-	store             core.BlockStore[I]
-	maxBlocksPerRound uint32
-	http              *http.Server
-	instrumented      instrumented.InstrumentationOptions
-	sinkResponder     *batch.SinkResponder[I, R]
-	sourceResponder   *batch.SourceResponder[I, R]
+	store                core.BlockStore[I]
+	maxBlocksPerRound    uint32
+	maxBlocksPerColdCall uint32
+	http                 *http.Server
+	instrumented         instrumented.InstrumentationOptions
+	sinkResponder        *batch.SinkResponder[I, R]
+	sourceResponder      *batch.SourceResponder[I, R]
 }
 
 // TODO: change config to something more flexible, so it can work for responder and this server.
@@ -31,12 +32,13 @@ func NewServer[I core.BlockId, R core.BlockIdRef[I]](store core.BlockStore[I], s
 	server := &Server[I, R]{
 		store,
 		responderConfig.MaxBlocksPerRound,
+		responderConfig.MaxBlocksPerColdCall,
 		nil,
 		responderConfig.Instrument,
 		// TODO: Set the batchStatusSender
 		batch.NewSinkResponder[I, R](store, responderConfig, nil),
 		// TODO: Set the batchBlockSender
-		batch.NewSourceResponder[I, R](store, responderConfig, nil, responderConfig.MaxBlocksPerRound),
+		batch.NewSourceResponder[I, R](store, responderConfig, nil),
 	}
 
 	mux := http.NewServeMux()

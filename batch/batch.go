@@ -180,14 +180,7 @@ func NewSimpleBatchBlockSender[I core.BlockId](batchBlockSender BatchBlockSender
 func (sbbs *SimpleBatchBlockSender[I]) SendBlock(block core.RawBlock[I]) error {
 	sbbs.listMutex.Lock()
 	sbbs.list = append(sbbs.list, block)
-	// listLen := len(sbbs.list)
 	sbbs.listMutex.Unlock()
-
-	// TODO: Add logic around maxBatchSizeColdCall if needed.
-	// Should this logic be pulled into the main loop?  To ensure we know when we're flushing?
-	// if listLen >= int(sbbs.maxBlocksPerRound) {
-	// 	return sbbs.Flush()
-	// }
 
 	return nil
 }

@@ -296,7 +296,7 @@ const (
 	INSTRUMENT_SENDER
 )
 
-func NewSourceSession[I core.BlockId, F core.Flags](store core.BlockStore[I], filter filter.Filter[I], orchestrator core.Orchestrator[F], stats stats.Stats, options InstrumentationOptions, maxBlocksPerRound uint32, requester bool) *core.SourceSession[I, F] {
+func NewSourceSession[I core.BlockId, F core.Flags](store core.BlockStore[I], filter filter.Filter[I], orchestrator core.Orchestrator[F], stats stats.Stats, options InstrumentationOptions, maxBlocksPerRound uint32, maxBlocksPerColdCall uint32, requester bool) *core.SourceSession[I, F] {
 
 	if options&INSTRUMENT_STORE != 0 {
 		store = NewBlockStore(store, stats.WithContext("SourceStore"))
@@ -306,7 +306,7 @@ func NewSourceSession[I core.BlockId, F core.Flags](store core.BlockStore[I], fi
 		filter = inf.New(filter, stats.WithContext("SourceFilter"))
 	}
 
-	return core.NewSourceSession(store, filter, orchestrator, stats, maxBlocksPerRound, requester)
+	return core.NewSourceSession(store, filter, orchestrator, stats, maxBlocksPerRound, maxBlocksPerColdCall, requester)
 }
 
 func NewSinkSession[I core.BlockId, F core.Flags](
