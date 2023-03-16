@@ -242,7 +242,7 @@ func (sr *SourceResponder[I, R]) AllDone() {
 }
 
 func (sr *SourceResponder[I, R]) newSourceConnection() *GenericBatchSourceConnection[I, R] {
-	return NewGenericBatchSourceConnection[I, R](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE, sr.maxBlocksPerRound, false) // Responders aren't requesters
+	return NewGenericBatchSourceConnection[I, R](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE, sr.maxBlocksPerRound, sr.maxBlocksPerColdCall, false) // Responders aren't requesters
 }
 
 func (sr *SourceResponder[I, R]) SourceSessionData(sessionId SessionId) *SourceSessionData[I, R] {

@@ -217,9 +217,9 @@ type HttpClientSourceConnection[I core.BlockId, R core.BlockIdRef[I]] struct {
 	url    string
 }
 
-func NewHttpClientSourceConnection[I core.BlockId, R core.BlockIdRef[I]](client *http.Client, url string, stats stats.Stats, instrument instrumented.InstrumentationOptions, maxBlocksPerRound uint32) *HttpClientSourceConnection[I, R] {
+func NewHttpClientSourceConnection[I core.BlockId, R core.BlockIdRef[I]](client *http.Client, url string, stats stats.Stats, instrument instrumented.InstrumentationOptions, maxBlocksPerRound uint32, maxBlocksPerColdCall uint32) *HttpClientSourceConnection[I, R] {
 	return &HttpClientSourceConnection[I, R]{
-		batch.NewGenericBatchSourceConnection[I, R](stats, instrument, maxBlocksPerRound, true), // Client is requester
+		batch.NewGenericBatchSourceConnection[I, R](stats, instrument, maxBlocksPerRound, maxBlocksPerColdCall, true), // Client is requester
 		client,
 		url,
 	}

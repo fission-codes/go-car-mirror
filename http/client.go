@@ -51,6 +51,7 @@ func (c *Client[I, R]) startSourceSession(url string) *core.SourceSession[I, bat
 		stats.GLOBAL_STATS.WithContext(url),
 		c.instrumented,
 		c.maxBlocksPerRound,
+		c.maxBlocksPerColdCall,
 	)
 
 	newSession := sourceConnection.Session(

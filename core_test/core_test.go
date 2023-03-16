@@ -254,7 +254,7 @@ func MockBatchTransferSend(senderStore *mock.Store, receiverStore *mock.Store, r
 		Instrument:           instrumented.INSTRUMENT_STORE | instrumented.INSTRUMENT_ORCHESTRATOR,
 	}
 
-	sourceConnection := batch.NewGenericBatchSourceConnection[mock.BlockId](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE, maxBlocksPerRound, true) // Requester
+	sourceConnection := batch.NewGenericBatchSourceConnection[mock.BlockId](stats.GLOBAL_STATS, instrumented.INSTRUMENT_ORCHESTRATOR|instrumented.INSTRUMENT_STORE, maxBlocksPerRound, maxBlocksPerColdCall, true) // Requester
 
 	senderSession := sourceConnection.Session(
 		senderStore,

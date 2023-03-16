@@ -607,18 +607,20 @@ type SourceSession[
 	I BlockId,
 	F Flags,
 ] struct {
-	store             BlockStore[I]
-	orchestrator      Orchestrator[F]
-	filter            filter.Filter[I]
-	sent              sync.Map
-	pendingBlocks     *util.SynchronizedDeque[I]
-	requestedRoots    *util.SynchronizedDeque[I]
-	numRequestedRoots atomic.Uint32
-	stats             stats.Stats
-	startedCh         chan bool
-	doneCh            chan error
-	maxBlocksPerRound uint32
-	requester         bool
+	store                BlockStore[I]
+	orchestrator         Orchestrator[F]
+	filter               filter.Filter[I]
+	sent                 sync.Map
+	pendingBlocks        *util.SynchronizedDeque[I]
+	requestedRoots       *util.SynchronizedDeque[I]
+	numRequestedRoots    atomic.Uint32
+	stats                stats.Stats
+	startedCh            chan bool
+	doneCh               chan error
+	maxBlocksPerRound    uint32
+	maxBlocksPerColdCall uint32
+	requester            bool
+	roundOneDone         bool
 }
 
 // NewSourceSession creates a new SourceSession.
@@ -628,6 +630,7 @@ func NewSourceSession[I BlockId, F Flags](
 	orchestrator Orchestrator[F], // Orchestrator used to synchronize this session with its communication channel
 	stats stats.Stats, // Collector for session-related statistics
 	maxBlocksPerRound uint32, // Maximum number of blocks to send in a single round
+	maxBlocksPerColdCall uint32, // Maximum number of blocks to send in a cold call
 	requester bool, // Requester or responder
 ) *SourceSession[I, F] {
 	return &SourceSession[I, F]{
@@ -642,7 +645,9 @@ func NewSourceSession[I BlockId, F Flags](
 		make(chan bool, 1),
 		make(chan error, 1),
 		maxBlocksPerRound,
+		maxBlocksPerColdCall,
 		requester,
+		false,
 	}
 }
 
@@ -826,6 +831,7 @@ func (ss *SourceSession[I, F]) Run(
 				ss.doneCh <- err
 				return
 			}
+			ss.roundOneDone = true
 		}
 		if err := ss.orchestrator.Notify(END_PROCESSING); err != nil {
 			ss.doneCh <- err
@@ -839,11 +845,17 @@ func (ss *SourceSession[I, F]) Run(
 }
 
 func (ss *SourceSession[I, F]) NumBlocksToSend() int {
+	var maxBlocks uint32
+	if ss.requester && !ss.roundOneDone {
+		maxBlocks = ss.maxBlocksPerColdCall
+	} else {
+		maxBlocks = ss.maxBlocksPerRound
+	}
 	numRequestedRoots := ss.numRequestedRoots.Load()
-	if numRequestedRoots > ss.maxBlocksPerRound {
+	if numRequestedRoots > maxBlocks {
 		return int(numRequestedRoots)
 	}
-	return int(ss.maxBlocksPerRound)
+	return int(maxBlocks)
 }
 
 // HandleStatus handles incoming status, updating the filter and pending blocks list.
